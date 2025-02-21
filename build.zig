@@ -1,0 +1,105 @@
+const std = @import("std");
+
+const Builder = struct {
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    opt: std.builtin.OptimizeMode,
+    check_step: *std.Build.Step,
+    getty_json: *std.Build.Module,
+    zamqp: *std.Build.Module,
+    kwatcher: *std.Build.Module,
+    kwatcher_example: *std.Build.Module,
+
+    fn init(b: *std.Build) Builder {
+        const target = b.standardTargetOptions(.{});
+        const opt = b.standardOptimizeOption(.{});
+
+        const check_step = b.step("check", "");
+
+        const zamqp = b.dependency("zamqp", .{}).module("zamqp");
+        const getty_json = b.dependency("json", .{}).module("json");
+        const kwatcher = b.addModule("kwatcher", .{
+            .root_source_file = b.path("src/watcher.zig"),
+        });
+        kwatcher.addImport("zamqp", zamqp);
+        kwatcher.addImport("json", getty_json);
+        kwatcher.link_libc = true;
+
+        const kwatcher_example = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+        });
+        kwatcher_example.link_libc = true;
+
+        return .{ .b = b, .check_step = check_step, .target = target, .opt = opt, .zamqp = zamqp, .kwatcher = kwatcher, .kwatcher_example = kwatcher_example, .getty_json = getty_json };
+    }
+
+    fn addDependencies(
+        self: *Builder,
+        step: *std.Build.Step.Compile,
+    ) void {
+        step.linkLibC();
+        step.addLibraryPath(.{ .cwd_relative = "." });
+        step.addLibraryPath(.{ .cwd_relative = "." });
+        step.linkSystemLibrary("rabbitmq.4");
+        step.root_module.addImport("zamqp", self.zamqp);
+        step.root_module.addImport("json", self.getty_json);
+    }
+
+    fn addExecutable(self: *Builder, name: []const u8, root_source_file: []const u8) *std.Build.Step.Compile {
+        return self.b.addExecutable(.{
+            .name = name,
+            .root_source_file = self.b.path(root_source_file),
+            .target = self.target,
+            .optimize = self.opt,
+        });
+    }
+
+    fn addStaticLibrary(self: *Builder, name: []const u8, root_source_file: []const u8) *std.Build.Step.Compile {
+        return self.b.addStaticLibrary(.{
+            .name = name,
+            .root_source_file = self.b.path(root_source_file),
+            .target = self.target,
+            .optimize = self.opt,
+        });
+    }
+
+    fn addTest(self: *Builder, name: []const u8, root_source_file: []const u8) *std.Build.Step.Compile {
+        return self.b.addTest(.{
+            .name = name,
+            .root_source_file = self.b.path(root_source_file),
+            .target = self.target,
+            .optimize = self.opt,
+        });
+    }
+
+    fn installAndCheck(self: *Builder, exe: *std.Build.Step.Compile) !void {
+        const check_exe = try self.b.allocator.create(std.Build.Step.Compile);
+        check_exe.* = exe.*;
+        self.check_step.dependOn(&check_exe.step);
+        self.b.installArtifact(exe);
+    }
+};
+
+pub fn build(b: *std.Build) !void {
+    var builder = Builder.init(b);
+
+    const lib = builder.addStaticLibrary("kwatcher", "src/watcher.zig");
+    builder.addDependencies(lib);
+    try builder.installAndCheck(lib);
+
+    const exe = builder.addExecutable("kwatcher-examples", "src/main.zig");
+    builder.addDependencies(exe);
+    exe.root_module.addImport("kwatcher", builder.kwatcher);
+    try builder.installAndCheck(exe);
+
+    const run_cmd = b.addRunArtifact(exe);
+
+    run_cmd.step.dependOn(b.getInstallStep());
+
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+
+    const run_step = b.step("run", "Run the app");
+    run_step.dependOn(&run_cmd.step);
+}

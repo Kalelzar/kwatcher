@@ -1,0 +1,5 @@
+*.json
+*.dll
+zig-out/
+.zig-cache/
+*.~undo-tree~
