@@ -25,6 +25,7 @@ pub const BaseConfig = struct {
     } = .{},
     config: struct {
         debug: bool = false,
+        heartbeat_interval: u64 = 5,
         timeout: struct {
             const Self = @This();
             seconds: i32 = 60,
@@ -40,7 +41,12 @@ pub const BaseConfig = struct {
     } = .{},
 };
 
-pub const _BaseNullable = struct {
+fn validate(comptime Extension: type) type {
+    meta.ensureStructure(BaseConfig, Extension);
+    return Extension;
+}
+
+pub const _BaseNullable = validate(struct {
     server: struct {
         host: ?[]const u8 = null,
         port: ?i32 = null,
@@ -54,13 +60,14 @@ pub const _BaseNullable = struct {
     } = .{},
     config: struct {
         debug: ?bool = null,
+        heartbeat_interval: ?u64 = null,
         timeout: struct {
             const Self = @This();
             seconds: ?i32 = null,
             microseconds: ?i32 = null,
         } = .{},
     } = .{},
-};
+});
 
 const ConfigLocations = struct {
     // Add XDG Base Directory support
@@ -87,7 +94,7 @@ const ConfigLocations = struct {
     }
 };
 
-fn openConfigFile(comptime ConfigType: type, allocator: std.mem.Allocator, path: []const u8) !json.Parsed(ConfigType) {
+fn openConfigFile(comptime ConfigType: type, allocator: std.mem.Allocator, path: []const u8) !ConfigType {
     log.info("Attempting to load config file of type '{}' from '{s}'.", .{ ConfigType, path });
     const file = try std.fs.openFileAbsolute(
         path,
@@ -100,7 +107,7 @@ fn openConfigFile(comptime ConfigType: type, allocator: std.mem.Allocator, path:
     const contents = try file.readToEndAlloc(allocator, max_size);
     defer allocator.free(contents);
 
-    const parsed = try json.parseFromSlice(
+    const parsed = try json.parseFromSliceLeaky(
         ConfigType,
         allocator,
         contents,
@@ -134,7 +141,10 @@ const LoadPaths = struct {
 
 fn buildConfigPaths(allocator: std.mem.Allocator, comptime basename: []const u8) !LoadPaths {
     var paths = std.ArrayList([]u8).init(allocator);
-    errdefer paths.deinit();
+    errdefer {
+        const load_paths = LoadPaths.init(allocator, paths);
+        load_paths.deinit();
+    }
 
     const ext = ".json";
     const configPath = basename ++ ext;
@@ -181,10 +191,10 @@ fn validateConfig(config: anytype) !void {
     }
 }
 
-pub fn findConfigFile(comptime ConfigType: type, allocator: std.mem.Allocator, comptime configName: []const u8) !json.Parsed(ConfigType) {
+pub fn findConfigFile(comptime ConfigType: type, allocator: std.mem.Allocator, comptime configName: []const u8) !?ConfigType {
     const loadPath = try buildConfigPaths(allocator, configName);
     defer loadPath.deinit();
-    var result: ?json.Parsed(ConfigType) = null;
+    var result: ?ConfigType = null;
 
     for (loadPath.paths.items) |path| {
         result = openConfigFile(ConfigType, allocator, path) catch |err| switch (err) {
@@ -195,49 +205,48 @@ pub fn findConfigFile(comptime ConfigType: type, allocator: std.mem.Allocator, c
         break;
     }
 
-    if (result) |config| {
-        return config;
-    } else {
-        return error.FileNotFound;
-    }
+    return result;
 }
 
-pub fn ConfigMerge(comptime Extension: type) type {
-    const Base = BaseConfig;
-    const Child = meta.MergeStructs(_BaseNullable, Extension);
-    const Result = meta.MergeStructs(Base, Extension);
+pub fn Config(comptime Extension: type) type {
+    const Result = meta.MergeStructs(BaseConfig, Extension);
 
     return struct {
-        _base: json.Parsed(Base),
-        _child: json.Parsed(Child),
         value: Result,
+        arena: std.heap.ArenaAllocator,
 
-        pub fn init(base: json.Parsed(Base), child: json.Parsed(Child), result: Result) ConfigMerge(Extension) {
+        pub fn init(arena: std.heap.ArenaAllocator, result: Result) Config(Extension) {
             return .{
-                ._base = base,
-                ._child = child,
+                .arena = arena,
                 .value = result,
             };
         }
 
-        pub fn deinit(self: *const ConfigMerge(Extension)) void {
-            self._base.deinit();
-            self._child.deinit();
+        pub fn deinit(self: *const Config(Extension)) void {
+            self.arena.deinit();
         }
     };
 }
 
-pub fn findConfigFileWithDefaults(comptime ConfigType: type, allocator: std.mem.Allocator, comptime configName: []const u8) !ConfigMerge(ConfigType) {
+fn findConfigFileOrDefault(comptime ConfigType: type, allocator: std.mem.Allocator, comptime configName: []const u8) !ConfigType {
+    return (try findConfigFile(ConfigType, allocator, configName)) orelse std.mem.zeroInit(ConfigType, .{});
+}
+
+pub fn findConfigFileWithDefaults(comptime ConfigType: type, comptime configName: []const u8) !Config(ConfigType) {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    errdefer arena.deinit();
+    const allocator = arena.allocator();
+
     const Extension = meta.MergeStructs(_BaseNullable, ConfigType);
-    const ext = try findConfigFile(Extension, allocator, configName);
-    errdefer ext.deinit();
-    const base = try findConfigFile(BaseConfig, allocator, "kwatcher");
-    errdefer base.deinit();
+    const ext = try findConfigFileOrDefault(Extension, allocator, configName);
+
+    const base = try findConfigFileOrDefault(BaseConfig, allocator, "kwatcher");
     const Final = meta.MergeStructs(BaseConfig, ConfigType);
 
-    const final = meta.merge(BaseConfig, Extension, Final, base.value, ext.value);
+    const final = meta.merge(BaseConfig, Extension, Final, base, ext);
 
+    try meta.assertNotEmpty(Final, final);
     try validateConfig(final);
 
-    return ConfigMerge(ConfigType).init(base, ext, final);
+    return Config(ConfigType).init(arena, final);
 }

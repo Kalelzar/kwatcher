@@ -40,7 +40,7 @@ const Builder = struct {
         step.linkLibC();
         step.addLibraryPath(.{ .cwd_relative = "." });
         step.addLibraryPath(.{ .cwd_relative = "." });
-        step.linkSystemLibrary("rabbitmq.4");
+        step.linkSystemLibrary("rabbitmq");
         step.root_module.addImport("zamqp", self.zamqp);
         step.root_module.addImport("json", self.getty_json);
     }
