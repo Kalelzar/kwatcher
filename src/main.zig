@@ -13,29 +13,36 @@ const TestProperties = struct {
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    {
+        const allocator = gpa.allocator();
 
-    const config = try kwatcher.config.findConfigFileWithDefaults(ExtraConfig, allocator, "test");
-    defer config.deinit();
+        const config = try kwatcher.config.findConfigFileWithDefaults(ExtraConfig, "test");
+        defer config.deinit();
 
-    const clientInfo = kwatcher.schema.ClientInfo{
-        .name = "test-watcher",
-        .version = "0.0.1",
-    };
+        const client_info = kwatcher.schema.ClientInfo{
+            .name = "test-watcher",
+            .version = "0.0.1",
+        };
 
-    var watcher = try kwatcher.WatcherClient(FullConfig).init(allocator, config.value, clientInfo);
-    defer watcher.deinit();
-    try watcher.registerQueue("heartbeat", "amq.direct", "heartbeat.consumer");
+        var watcher = try kwatcher.WatcherClient(FullConfig).init(allocator, config.value, client_info);
+        defer watcher.deinit();
+        try watcher.registerQueue("heartbeat", "amq.direct", "heartbeat.consumer");
 
-    var factory = try watcher.factory("test");
-    defer factory.deinit();
+        var factory = try watcher.factory("test");
+        defer factory.deinit();
 
-    for (0..5) |i| {
-        const message = try factory.nextHeartbeat(TestProperties, .{
-            .index = i,
-        });
-        try watcher.heartbeat(message);
-        factory.reset();
-        std.time.sleep(1 * std.time.ns_per_s);
+        for (0..5) |i| {
+            const message = try factory.nextHeartbeat(TestProperties, .{
+                .index = i,
+            });
+            try watcher.heartbeat(message);
+            factory.reset();
+            std.time.sleep(1 * std.time.ns_per_s);
+        }
+    }
+
+    if (gpa.detectLeaks()) {
+        std.log.err("Memory LEAK!", .{});
+        std.process.exit(127);
     }
 }

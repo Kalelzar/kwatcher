@@ -13,26 +13,26 @@ pub const MessageFactory = struct {
     persist: std.mem.Allocator,
 
     name: []const u8,
-    clientInfo: schema.ClientInfo,
-    userInfo: schema.UserInfo,
+    client_info: schema.ClientInfo,
+    user_info: schema.UserInfo,
     index: u32 = 0,
 
-    pub fn init(alloc: std.mem.Allocator, clientInfo: schema.ClientInfo, userInfo: schema.UserInfo, name: []const u8) !MessageFactory {
+    pub fn init(alloc: std.mem.Allocator, client_info: schema.ClientInfo, user_info: schema.UserInfo, name: []const u8) !MessageFactory {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         errdefer arena.deinit();
 
-        const ownedUserInfo = schema.UserInfo{
-            .username = try alloc.dupe(u8, userInfo.username),
-            .hostname = try alloc.dupe(u8, userInfo.hostname),
-            .id = try alloc.dupe(u8, userInfo.id),
+        const owned_user_info = schema.UserInfo{
+            .username = try alloc.dupe(u8, user_info.username),
+            .hostname = try alloc.dupe(u8, user_info.hostname),
+            .id = try alloc.dupe(u8, user_info.id),
             .allocator = alloc,
         };
 
         return .{
             .arena = arena,
             .name = name,
-            .clientInfo = clientInfo,
-            .userInfo = ownedUserInfo,
+            .client_info = client_info,
+            .user_info = owned_user_info,
             .persist = alloc,
         };
     }
@@ -45,7 +45,7 @@ pub const MessageFactory = struct {
         const Schema = schema.Heartbeat.V1(Props);
         const SchemaMessage = schema.Message(Schema);
         const alloc = self.allocator();
-        const correlationId = try self.nextCorrelationId("schema.heartbeat.v1");
+        const correlation_id = try self.nextCorrelationId("schema.heartbeat.v1");
         const timestamp = std.time.timestamp();
 
         const suffix = "/heartbeat";
@@ -57,14 +57,14 @@ pub const MessageFactory = struct {
             .options = .{
                 .queue = "heartbeat",
                 .exchange = "amq.direct",
-                .routingKey = "heartbeat.consumer",
-                .correlationId = correlationId,
+                .routing_key = "heartbeat.consumer",
+                .correlation_id = correlation_id,
             },
             .schema = .{
                 .timestamp = timestamp,
                 .event = event,
-                .user = self.userInfo.v1(),
-                .client = self.clientInfo.v1(),
+                .user = self.user_info.v1(),
+                .client = self.client_info.v1(),
                 .properties = props,
             },
         };
@@ -75,20 +75,20 @@ pub const MessageFactory = struct {
     fn nextCorrelationId(self: *MessageFactory, schemaName: []const u8) ![]const u8 {
         const alloc = self.allocator();
         const id = self.index;
-        const correlationId = try std.fmt.allocPrint(
+        const correlation_id = try std.fmt.allocPrint(
             alloc,
             "{s}-{d:0>5}",
             .{ schemaName, id },
         );
         self.index += 1;
-        return correlationId;
+        return correlation_id;
     }
 
     pub fn deinit(self: *MessageFactory) void {
         self.arena.deinit();
-        self.persist.free(self.userInfo.hostname);
-        self.persist.free(self.userInfo.username);
-        self.persist.free(self.userInfo.id);
+        self.persist.free(self.user_info.hostname);
+        self.persist.free(self.user_info.username);
+        self.persist.free(self.user_info.id);
     }
 
     pub fn reset(self: *MessageFactory) void {
@@ -101,28 +101,28 @@ pub fn WatcherClient(comptime Config: type) type {
         connection: amqp.Connection,
         socket: amqp.TcpSocket,
         channel: amqp.Channel,
-        defaultTimeout: c.timeval,
+        default_timeout: c.timeval,
 
-        configFile: Config,
-        clientInfo: schema.ClientInfo,
+        config_file: Config,
+        client_info: schema.ClientInfo,
         allocator: std.mem.Allocator,
 
-        pub fn init(allocator: std.mem.Allocator, configFile: Config, clientInfo: schema.ClientInfo) !WatcherClient(Config) {
+        pub fn init(allocator: std.mem.Allocator, config_file: Config, client_info: schema.ClientInfo) !WatcherClient(Config) {
             errdefer log.err("Failed to initialize", .{});
             var connection = try amqp.Connection.new();
             errdefer disposeConnection(&connection);
 
-            var timeout = configFile.config.timeout.toTimeval();
+            var timeout = config_file.config.timeout.toTimeval();
             var socket = try amqp.TcpSocket.new(&connection);
 
-            const host = try allocator.dupeZ(u8, configFile.server.host);
+            const host = try allocator.dupeZ(u8, config_file.server.host);
             defer allocator.free(host);
-            const password = try allocator.dupeZ(u8, configFile.credentials.password);
+            const password = try allocator.dupeZ(u8, config_file.credentials.password);
             defer allocator.free(password);
-            const username = try allocator.dupeZ(u8, configFile.credentials.username);
+            const username = try allocator.dupeZ(u8, config_file.credentials.username);
             defer allocator.free(username);
 
-            try socket.open(host, configFile.server.port, &timeout);
+            try socket.open(host, config_file.server.port, &timeout);
 
             connection.login(
                 "/",
@@ -147,22 +147,22 @@ pub fn WatcherClient(comptime Config: type) type {
                 .connection = connection,
                 .number = 1,
             };
-            const channelResponse = try channel.open();
-            log.debug("Opened channel '{?s}'", .{channelResponse.*.channel_id.slice()});
+            const channel_response = try channel.open();
+            log.debug("Opened channel '{?s}'", .{channel_response.*.channel_id.slice()});
 
             return .{
                 .allocator = allocator,
                 .connection = connection,
                 .socket = socket,
-                .defaultTimeout = timeout,
+                .default_timeout = timeout,
                 .channel = channel,
-                .configFile = configFile,
-                .clientInfo = clientInfo,
+                .config_file = config_file,
+                .client_info = client_info,
             };
         }
 
         pub fn registerQueue(self: *WatcherClient(Config), queue: []const u8, exchange: []const u8, route: []const u8) !void {
-            const queueResponse = try self.channel.queue_declare(asBytes(queue), .{
+            const queue_response = try self.channel.queue_declare(asBytes(queue), .{
                 .passive = false,
                 .durable = true,
                 .exclusive = false,
@@ -170,12 +170,12 @@ pub fn WatcherClient(comptime Config: type) type {
                 .arguments = amqp.table_t.empty(),
             });
 
-            const routeB = asBytes(route);
-            const exchangeB = asBytes(exchange);
+            const route_bytes = asBytes(route);
+            const exchange_bytes = asBytes(exchange);
             try self.channel.queue_bind(
-                queueResponse.queue,
-                exchangeB,
-                routeB,
+                queue_response.queue,
+                exchange_bytes,
+                route_bytes,
                 amqp.table_t.empty(),
             );
         }
@@ -186,27 +186,27 @@ pub fn WatcherClient(comptime Config: type) type {
         }
 
         pub fn factory(self: *WatcherClient(Config), name: []const u8) !MessageFactory {
-            const userInfo = schema.UserInfo.init(self.allocator, self.configFile.user.id);
-            defer userInfo.deinit();
+            const user_info = schema.UserInfo.init(self.allocator, self.config_file.user.id);
+            defer user_info.deinit();
 
-            const messageFactory = MessageFactory.init(self.allocator, self.clientInfo, userInfo, name);
-            return messageFactory;
+            const massage_factory = MessageFactory.init(self.allocator, self.client_info, user_info, name);
+            return massage_factory;
         }
 
         fn send(self: *WatcherClient(Config), message: schema.SendMessage) !void {
             const props = amqp.BasicProperties.init(.{
-                .correlation_id = asBytes(message.options.correlationId),
+                .correlation_id = asBytes(message.options.correlation_id),
                 .content_type = asBytes("application/json"),
                 .delivery_mode = 2,
                 .reply_to = asBytes(message.options.queue),
             });
-            const route = amqp.bytes_t.init(message.options.routingKey);
+            const route = amqp.bytes_t.init(message.options.routing_key);
             const exchange = amqp.bytes_t.init(message.options.exchange);
 
             self.info(
                 "[{s}] Publishing message to '{?s}':\n\t{s}",
                 .{
-                    message.options.correlationId,
+                    message.options.correlation_id,
                     message.options.queue,
                     message.body,
                 },
@@ -239,7 +239,7 @@ pub fn WatcherClient(comptime Config: type) type {
         }
 
         fn info(self: *const WatcherClient(Config), comptime format: []const u8, args: anytype) void {
-            if (self.configFile.config.debug) {
+            if (self.config_file.config.debug) {
                 log.info(format, args);
             }
         }

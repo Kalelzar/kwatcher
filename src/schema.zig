@@ -4,8 +4,8 @@ const meta = @import("meta.zig");
 pub const MessageOptions = struct {
     queue: []const u8,
     exchange: []const u8,
-    routingKey: []const u8,
-    correlationId: []const u8,
+    routing_key: []const u8,
+    correlation_id: []const u8,
 };
 
 pub fn Message(comptime SchemaT: type) type {
@@ -28,16 +28,9 @@ pub const SendMessage = struct {
     options: MessageOptions,
 };
 
-fn ensureStruct(comptime MaybeStruct: type) void {
-    switch (@typeInfo(MaybeStruct)) {
-        .Struct => return,
-        else => @compileError("Only structs are supported"),
-    }
-}
-
 fn SchemaUtils(comptime version: u32) type {
     return struct {
-        schemaVersion: u32 = version,
+        schema_version: u32 = version,
     };
 }
 
@@ -107,13 +100,9 @@ pub const UserInfo = struct {
     }
 };
 
-pub fn schemaName(comptime SchemaT: type) []const u8 {
-    return @typeName(SchemaT);
-}
-
 pub const Heartbeat = struct {
     pub fn V1(Props: type) type {
-        ensureStruct(Props);
+        meta.ensureStruct(Props);
         return Schema(
             1,
             struct {
