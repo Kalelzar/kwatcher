@@ -189,8 +189,8 @@ pub fn WatcherClient(comptime Config: type) type {
             const user_info = schema.UserInfo.init(self.allocator, self.config_file.user.id);
             defer user_info.deinit();
 
-            const massage_factory = MessageFactory.init(self.allocator, self.client_info, user_info, name);
-            return massage_factory;
+            const message_factory = MessageFactory.init(self.allocator, self.client_info, user_info, name);
+            return message_factory;
         }
 
         fn send(self: *WatcherClient(Config), message: schema.SendMessage) !void {

@@ -178,16 +178,20 @@ fn buildConfigPaths(allocator: std.mem.Allocator, comptime basename: []const u8)
 fn validateConfig(config: anytype) !void {
     // Basic validation
     if (config.server.port < 0 or config.server.port > 65535) {
-        return error.InvalidConfig;
+        return error.InvalidPort;
+    }
+
+    if (config.config.heartbeat_interval == 0) {
+        return error.InvalidHeartbeat;
     }
 
     if (config.credentials.username.len == 0 or config.credentials.password.len == 0) {
-        return error.InvalidConfig;
+        return error.InvalidCredentials;
     }
 
     // Timeout validation
     if (config.config.timeout.seconds < 0 or config.config.timeout.microseconds < 0) {
-        return error.InvalidConfig;
+        return error.InvalidTimeout;
     }
 }
 
