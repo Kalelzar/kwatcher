@@ -2,7 +2,6 @@ const std = @import("std");
 const log = std.log.scoped(.kwatcher_config);
 const json = std.json;
 const c = std.c;
-
 const meta = @import("meta.zig");
 
 pub const BaseConfig = struct {
@@ -33,8 +32,8 @@ pub const BaseConfig = struct {
 
             pub fn toTimeval(self: Self) c.timeval {
                 return c.timeval{
-                    .tv_sec = self.seconds,
-                    .tv_usec = self.microseconds,
+                    .sec = self.seconds,
+                    .usec = self.microseconds,
                 };
             }
         } = .{},

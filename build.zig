@@ -5,7 +5,6 @@ const Builder = struct {
     target: std.Build.ResolvedTarget,
     opt: std.builtin.OptimizeMode,
     check_step: *std.Build.Step,
-    getty_json: *std.Build.Module,
     zamqp: *std.Build.Module,
     kwatcher: *std.Build.Module,
     kwatcher_example: *std.Build.Module,
@@ -17,12 +16,10 @@ const Builder = struct {
         const check_step = b.step("check", "");
 
         const zamqp = b.dependency("zamqp", .{}).module("zamqp");
-        const getty_json = b.dependency("json", .{}).module("json");
         const kwatcher = b.addModule("kwatcher", .{
             .root_source_file = b.path("src/watcher.zig"),
         });
         kwatcher.addImport("zamqp", zamqp);
-        kwatcher.addImport("json", getty_json);
         kwatcher.link_libc = true;
 
         const kwatcher_example = b.createModule(.{
@@ -30,7 +27,15 @@ const Builder = struct {
         });
         kwatcher_example.link_libc = true;
 
-        return .{ .b = b, .check_step = check_step, .target = target, .opt = opt, .zamqp = zamqp, .kwatcher = kwatcher, .kwatcher_example = kwatcher_example, .getty_json = getty_json };
+        return .{
+            .b = b,
+            .check_step = check_step,
+            .target = target,
+            .opt = opt,
+            .zamqp = zamqp,
+            .kwatcher = kwatcher,
+            .kwatcher_example = kwatcher_example,
+        };
     }
 
     fn addDependencies(
@@ -42,7 +47,6 @@ const Builder = struct {
         step.addLibraryPath(.{ .cwd_relative = "." });
         step.linkSystemLibrary("rabbitmq");
         step.root_module.addImport("zamqp", self.zamqp);
-        step.root_module.addImport("json", self.getty_json);
     }
 
     fn addExecutable(self: *Builder, name: []const u8, root_source_file: []const u8) *std.Build.Step.Compile {

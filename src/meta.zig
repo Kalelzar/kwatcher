@@ -3,7 +3,7 @@ const std = @import("std");
 // Check if a given type is a struct.
 pub fn isStruct(comptime Type: type) bool {
     return switch (@typeInfo(Type)) {
-        .Struct => true,
+        .@"struct" => true,
         else => false,
     };
 }
@@ -23,12 +23,12 @@ pub fn MergeStructs(comptime Base: type, comptime Child: type) type {
     ensureStruct(Base);
     ensureStruct(Child);
 
-    var fields: []const std.builtin.Type.StructField = base_info.Struct.fields;
+    var fields: []const std.builtin.Type.StructField = base_info.@"struct".fields;
 
-    fields = fields ++ child_info.Struct.fields;
+    fields = fields ++ child_info.@"struct".fields;
 
     return @Type(.{
-        .Struct = .{
+        .@"struct" = .{
             .layout = .auto,
             .fields = fields,
             .decls = &.{},
@@ -43,8 +43,8 @@ pub fn overlaps(comptime Left: type, comptime Right: type) bool {
     ensureStruct(Right);
     const left_info = @typeInfo(Left);
     const right_info = @typeInfo(Right);
-    const left_fields: []const std.builtin.Type.StructField = left_info.Struct.fields;
-    const right_fields: []const std.builtin.Type.StructField = right_info.Struct.fields;
+    const left_fields: []const std.builtin.Type.StructField = left_info.@"struct".fields;
+    const right_fields: []const std.builtin.Type.StructField = right_info.@"struct".fields;
 
     inline for (left_fields) |left_field| {
         var found = false;
@@ -54,18 +54,18 @@ pub fn overlaps(comptime Left: type, comptime Right: type) bool {
             found = true;
             const right_type = @typeInfo(right_field.type);
             switch (left_type) {
-                .Struct => {
+                .@"struct" => {
                     // We need to verify that the inner structs also overlap.
                     // We do not compare types since we only care about structure.
                     if (!overlaps(left_field.type, right_field.type)) {
                         return false;
                     }
                 },
-                .Optional => {
-                    const InnerLeftType = left_type.Optional.child;
+                .optional => {
+                    const InnerLeftType = left_type.optional.child;
                     switch (right_type) {
-                        .Optional => {
-                            const InnerRightType = right_type.Optional.child;
+                        .optional => {
+                            const InnerRightType = right_type.optional.child;
                             if (isStruct(InnerLeftType) and isStruct(InnerRightType)) {
                                 if (!overlaps(InnerLeftType, InnerRightType)) {
                                     @compileError("Non-overlapping child for struct? and struct?");
@@ -94,9 +94,9 @@ pub fn overlaps(comptime Left: type, comptime Right: type) bool {
                 },
                 else => {
                     switch (right_type) {
-                        .Optional => {
-                            if (left_field.type != right_type.Optional.child) {
-                                @compileLog(left_field.type, right_type.Optional.child);
+                        .optional => {
+                            if (left_field.type != right_type.optional.child) {
+                                @compileLog(left_field.type, right_type.optional.child);
                                 @compileError("Differing types for type and type?");
                                 //return false;
                             }
@@ -134,7 +134,7 @@ pub const ValidationError = error{
 
 fn assertNotEmptyInternal(comptime field: std.builtin.Type.StructField, comptime Type: type, field_value: Type) ValidationError!void {
     switch (@typeInfo(Type)) {
-        .Optional => {
+        .optional => {
             if (field_value) |value| {
                 const ValueType = @TypeOf(value);
                 try assertNotEmptyInternal(field, ValueType, value);
@@ -142,10 +142,10 @@ fn assertNotEmptyInternal(comptime field: std.builtin.Type.StructField, comptime
                 return ValidationError.Null;
             }
         },
-        .Struct => {
+        .@"struct" => {
             try assertNotEmpty(Type, field_value);
         },
-        .Array => {
+        .array => {
             if (field_value.len == 0) {
                 return ValidationError.EmptyArray;
             }
@@ -154,7 +154,7 @@ fn assertNotEmptyInternal(comptime field: std.builtin.Type.StructField, comptime
                 try assertNotEmptyInternal(field, ValueType, value);
             }
         },
-        .Pointer => {
+        .pointer => {
             if (field_value.len == 0) {
                 return ValidationError.EmptyPointer;
             }
@@ -168,7 +168,7 @@ fn assertNotEmptyInternal(comptime field: std.builtin.Type.StructField, comptime
 }
 
 pub fn assertNotEmpty(comptime StructType: type, struct_value: StructType) ValidationError!void {
-    const fields = @typeInfo(StructType).Struct.fields;
+    const fields = @typeInfo(StructType).@"struct".fields;
     inline for (fields) |field| {
         const value = @field(struct_value, field.name);
         try assertNotEmptyInternal(field, field.type, value);
@@ -184,12 +184,12 @@ fn assign(
 ) void {
     const FieldType = @typeInfo(ValueType);
     switch (FieldType) {
-        .Optional => {
+        .optional => {
             if (value_maybe_optional) |value| {
-                assign(Target, FieldType.Optional.child, field, value, target);
+                assign(Target, FieldType.optional.child, field, value, target);
             }
         },
-        .Struct => {
+        .@"struct" => {
             var child_target = @field(target, field.name);
             const ChildTarget = @TypeOf(child_target);
             @field(target, field.name) = copyTo(field.type, ChildTarget, value_maybe_optional, &child_target).*;
@@ -201,7 +201,7 @@ fn assign(
 }
 
 pub fn copyTo(comptime Source: type, comptime Target: type, source: Source, target: *Target) *Target {
-    const fields = @typeInfo(Source).Struct.fields;
+    const fields = @typeInfo(Source).@"struct".fields;
 
     inline for (fields) |field| {
         const value_maybe_optional = @field(source, field.name);
