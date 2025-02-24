@@ -28,19 +28,21 @@ pub const SendMessage = struct {
     options: MessageOptions,
 };
 
-fn SchemaUtils(comptime version: u32) type {
+fn SchemaUtils(comptime version: u32, comptime name: []const u8) type {
     return struct {
         schema_version: u32 = version,
+        schema_name: []const u8 = name,
     };
 }
 
-pub fn Schema(comptime version: u32, comptime T: type) type {
-    return meta.MergeStructs(SchemaUtils(version), T);
+pub fn Schema(comptime version: u32, comptime name: []const u8, comptime T: type) type {
+    return meta.MergeStructs(SchemaUtils(version, name), T);
 }
 
 pub const User = struct {
     pub const V1 = Schema(
         1,
+        "user",
         struct {
             hostname: []const u8,
             username: []const u8,
@@ -52,6 +54,7 @@ pub const User = struct {
 pub const Client = struct {
     pub const V1 = Schema(
         1,
+        "client",
         struct {
             version: []const u8,
             name: []const u8,
@@ -105,6 +108,7 @@ pub const Heartbeat = struct {
         meta.ensureStruct(Props);
         return Schema(
             1,
+            "heartbeat",
             struct {
                 timestamp: i64,
                 event: []const u8,
