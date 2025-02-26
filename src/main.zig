@@ -19,7 +19,7 @@ const TestRoutes = struct {
 };
 
 const EventHandler = struct {
-    pub fn heartbeat(timer: *kwatcher.server.Timer) !bool {
+    pub fn heartbeat(timer: kwatcher.server.Timer) !bool {
         return try timer.ready("heartbeat");
     }
 

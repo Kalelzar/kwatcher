@@ -60,8 +60,9 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
     return struct {
         const Self = @This();
         allocator: std.mem.Allocator,
+
         client_cache: ?client.AmqpClient = null,
-        timer: Timer,
+        timer: ?Timer = null,
         user_info: ?schema.UserInfo = null,
         user_config: ?UserConfig = null,
         base_config: ?config.BaseConfig = null,
@@ -71,6 +72,17 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
             .version = client_version,
             .name = client_name,
         },
+
+        pub fn timerFactory(self: *Self, allocator: std.mem.Allocator, base_config: config.BaseConfig) !Timer {
+            if (self.timer) |res| {
+                return res;
+            } else {
+                var timer = Timer.init(allocator);
+                try timer.register("heartbeat", base_config.config.heartbeat_interval);
+                self.timer = timer;
+                return self.timer.?;
+            }
+        }
 
         pub fn userInfo(self: *Self, allocator: std.mem.Allocator) schema.UserInfo {
             if (self.user_info) |res| {
@@ -130,17 +142,17 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
         }
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            var timer = Timer.init(allocator);
-            try timer.register("heartbeat", 5);
             return .{
-                .timer = timer,
                 .allocator = allocator,
             };
         }
 
         pub fn deinit(self: *Self) __ignore {
             std.log.debug("DESTROY", .{});
-            self.timer.deinit();
+
+            if (self.timer) |_|
+                self.timer.?.deinit();
+
             if (self.user_info) |u|
                 u.deinit();
 
@@ -201,7 +213,7 @@ pub fn Server(
                 try cl.openChannel(route.metadata.exchange, route.metadata.queue);
             }
             while (true) {
-                var timer = try base_injector.require(*Timer);
+                var timer = try base_injector.require(Timer);
                 for (0..self.routes.len) |i| {
                     const route = self.routes[i];
                     if (route.event_handler) |e| {
