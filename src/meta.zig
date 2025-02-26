@@ -204,14 +204,16 @@ pub fn copyTo(comptime Source: type, comptime Target: type, source: Source, targ
     const fields = @typeInfo(Source).@"struct".fields;
 
     inline for (fields) |field| {
-        const value_maybe_optional = @field(source, field.name);
-        assign(
-            Target,
-            field.type,
-            field,
-            value_maybe_optional,
-            target,
-        );
+        if (comptime @hasField(Target, field.name)) {
+            const value_maybe_optional = @field(source, field.name);
+            assign(
+                Target,
+                field.type,
+                field,
+                value_maybe_optional,
+                target,
+            );
+        }
     }
 
     return target;
@@ -223,9 +225,57 @@ pub fn copy(comptime Source: type, comptime Target: type, source: Source) Target
     return copyTo(Source, Target, source, &target).*;
 }
 
-pub fn merge(comptime Base: type, comptime Child: type, comptime Result: type, base: Base, child: Child) Result {
-    var result = std.mem.zeroInit(Result, .{});
-    const result1 = copyTo(Base, Result, base, &result);
-    const result2 = copyTo(Child, Result, child, result1);
+pub fn merge(comptime Base: type, comptime Child: type, comptime ResultT: type, base: Base, child: Child) ResultT {
+    var result = std.mem.zeroInit(ResultT, .{});
+    const result1 = copyTo(Base, ResultT, base, &result);
+    const result2 = copyTo(Child, ResultT, child, result1);
     return result2.*;
+}
+
+// As per: https://github.com/ziglang/zig/issues/19858#issuecomment-2369861301
+pub const TypeId = *const struct {
+    _: u8 = undefined,
+};
+
+pub inline fn typeId(comptime T: type) TypeId {
+    const TCache = &struct {
+        comptime {
+            _ = T;
+        }
+        var id: std.meta.Child(TypeId) = .{};
+    };
+    return &TCache.id;
+}
+
+pub fn isValuePointer(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .pointer => |p| p.size == .one,
+        else => false,
+    };
+}
+
+pub fn Return(comptime fun: anytype) type {
+    return switch (@typeInfo(@TypeOf(fun))) {
+        .@"fn" => |f| f.return_type.?,
+        else => @compileError("Expected a function, got " ++ @typeName(@TypeOf(fun))),
+    };
+}
+
+pub fn Result(comptime fun: anytype) type {
+    const R = Return(fun);
+
+    return switch (@typeInfo(R)) {
+        .error_union => |r| r.payload,
+        else => R,
+    };
+}
+
+pub fn HoldType(comptime Type: type) *const fn () type {
+    const Internal = struct {
+        fn resolve() type {
+            return Type;
+        }
+    };
+
+    return &Internal.resolve;
 }

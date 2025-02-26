@@ -1,11 +1,11 @@
 const std = @import("std");
+
 const meta = @import("meta.zig");
 
 pub const MessageOptions = struct {
     queue: []const u8,
     exchange: []const u8,
     routing_key: []const u8,
-    correlation_id: []const u8,
 };
 
 pub fn Message(comptime SchemaT: type) type {

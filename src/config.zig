@@ -2,6 +2,7 @@ const std = @import("std");
 const log = std.log.scoped(.kwatcher_config);
 const json = std.json;
 const c = std.c;
+
 const meta = @import("meta.zig");
 
 pub const BaseConfig = struct {
