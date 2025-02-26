@@ -1,48 +1,57 @@
 const std = @import("std");
 const kwatcher = @import("kwatcher");
 
+const P = struct {};
+
+const TestRoutes = struct {
+    pub fn @"PUBLISH:heartbeat amq.direct/heartbeat"(
+        user_info: kwatcher.schema.UserInfo,
+        client_info: kwatcher.schema.ClientInfo,
+    ) kwatcher.schema.Heartbeat.V1(P) {
+        return .{
+            .event = "TEST",
+            .user = user_info.v1(),
+            .client = client_info.v1(),
+            .properties = .{},
+            .timestamp = std.time.timestamp(),
+        };
+    }
+};
+
+const EventHandler = struct {
+    pub fn heartbeat(timer: *kwatcher.server.Timer) !bool {
+        return try timer.ready("heartbeat");
+    }
+
+    pub fn disabled() bool {
+        return false;
+    }
+};
+
 const ExtraConfig = struct {
     soup: bool,
 };
 
-const FullConfig = kwatcher.meta.MergeStructs(kwatcher.config.BaseConfig, ExtraConfig);
-
-const TestProperties = struct {
-    index: usize,
+const Deps = struct {
+    clientInfo: kwatcher.schema.ClientInfo = .{
+        .version = "0.1.0",
+        .name = "test",
+    },
 };
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    {
-        const allocator = gpa.allocator();
-
-        const config = try kwatcher.config.findConfigFileWithDefaults(ExtraConfig, "test");
-        defer config.deinit();
-
-        const client_info = kwatcher.schema.ClientInfo{
-            .name = "test-watcher",
-            .version = "0.0.1",
-        };
-
-        var watcher = try kwatcher.WatcherClient(FullConfig).init(allocator, config.value, client_info);
-        defer watcher.deinit();
-        try watcher.registerQueue("heartbeat", "amq.direct", "heartbeat.consumer");
-
-        var factory = try watcher.factory("test");
-        defer factory.deinit();
-
-        for (0..5) |i| {
-            const message = try factory.nextHeartbeat(TestProperties, .{
-                .index = i,
-            });
-            try watcher.heartbeat(message);
-            factory.reset();
-            std.time.sleep(1 * std.time.ns_per_s);
-        }
-    }
-
-    if (gpa.detectLeaks()) {
-        std.log.err("Memory LEAK!", .{});
-        std.process.exit(127);
-    }
+    const allocator = gpa.allocator();
+    const deps = Deps{};
+    var server = try kwatcher.server.Server(
+        Deps,
+        ExtraConfig,
+        TestRoutes,
+        EventHandler,
+    ).init(
+        allocator,
+        deps,
+    );
+    try server.run();
+    server.deinit();
 }
