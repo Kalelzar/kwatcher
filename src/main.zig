@@ -32,18 +32,15 @@ const ExtraConfig = struct {
     soup: bool,
 };
 
-const Deps = struct {
-    clientInfo: kwatcher.schema.ClientInfo = .{
-        .version = "0.1.0",
-        .name = "test",
-    },
-};
+const Deps = struct {};
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     const deps = Deps{};
     var server = try kwatcher.server.Server(
+        "test",
+        "0.1.0",
         Deps,
         ExtraConfig,
         TestRoutes,

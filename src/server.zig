@@ -54,7 +54,7 @@ pub const Timer = struct {
     }
 };
 
-fn Dependencies(comptime UserConfig: type) type {
+fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, comptime client_version: []const u8) type {
     const __ignore = struct {};
 
     return struct {
@@ -66,6 +66,11 @@ fn Dependencies(comptime UserConfig: type) type {
         user_config: ?UserConfig = null,
         base_config: ?config.BaseConfig = null,
         merged_config: ?config.Config(UserConfig) = null,
+
+        clientInfo: schema.ClientInfo = .{
+            .version = client_version,
+            .name = client_name,
+        },
 
         pub fn userInfo(self: *Self, allocator: std.mem.Allocator) schema.UserInfo {
             if (self.user_info) |res| {
@@ -82,7 +87,7 @@ fn Dependencies(comptime UserConfig: type) type {
             } else {
                 const merged_config = try config.findConfigFileWithDefaults(
                     UserConfig,
-                    "test",
+                    client_name,
                 );
                 self.merged_config = merged_config;
 
@@ -150,6 +155,8 @@ fn Dependencies(comptime UserConfig: type) type {
     };
 }
 pub fn Server(
+    comptime client_name: []const u8,
+    comptime client_version: []const u8,
     comptime UserDependencies: type,
     comptime UserConfig: type,
     comptime Routes: type,
@@ -157,12 +164,16 @@ pub fn Server(
 ) type {
     return struct {
         const Self = @This();
-        deps: Dependencies(UserConfig),
+        deps: Dependencies(UserConfig, client_name, client_version),
         user_deps: UserDependencies,
         routes: []const Route,
 
         pub fn init(allocator: std.mem.Allocator, deps: UserDependencies) !Self {
-            const default_deps = try Dependencies(UserConfig).init(allocator);
+            const default_deps = try Dependencies(
+                UserConfig,
+                client_name,
+                client_version,
+            ).init(allocator);
             const routes = comptime Route.from(Routes, EventHandler);
 
             return .{
@@ -197,9 +208,9 @@ pub fn Server(
                         const ready = try @call(.auto, e, args);
                         if (ready) {
                             const msg = try @call(.auto, route.handler, args);
+                            defer alloc.free(msg.body);
                             var current_channel = try cl.getChannel(route.metadata.queue);
                             try current_channel.publish(msg);
-                            alloc.free(msg.body);
                         }
                     }
                 }
