@@ -2,7 +2,11 @@ const std = @import("std");
 const kwatcher = @import("kwatcher");
 
 const P = struct {
-    e: E,
+    e: A,
+};
+
+const A = struct {
+    i: i32,
 };
 
 const E = enum {
@@ -14,20 +18,21 @@ const TestRoutes = struct {
     pub fn @"PUBLISH:heartbeat amq.direct/heartbeat"(
         user_info: kwatcher.schema.UserInfo,
         client_info: kwatcher.schema.ClientInfo,
-        e: E,
+        a: A,
     ) kwatcher.schema.Heartbeat.V1(P) {
         return .{
             .event = "TEST",
             .user = user_info.v1(),
             .client = client_info.v1(),
-            .properties = .{ .e = e },
+            .properties = .{ .e = a },
             .timestamp = std.time.timestamp(),
         };
     }
 };
 
 const EventHandler = struct {
-    pub fn heartbeat(timer: kwatcher.server.Timer) !bool {
+    pub fn heartbeat(timer: kwatcher.server.Timer, a: A) !bool {
+        std.log.info("We got {}", .{a.i});
         return try timer.ready("heartbeat");
     }
 
@@ -40,7 +45,7 @@ const ExtraConfig = struct {
     soup: bool,
 };
 
-const Deps = struct {
+const SingletonDeps = struct {
     pub fn e() !E {
         if (std.time.timestamp() == 0) {
             return error.DUM;
@@ -49,14 +54,22 @@ const Deps = struct {
     }
 };
 
+const ScopedDeps = struct {
+    a: A,
+    pub fn construct(self: *ScopedDeps) void {
+        self.a = .{ .i = std.crypto.random.int(i32) };
+    }
+};
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
-    const deps = Deps{};
+    const deps = SingletonDeps{};
     var server = try kwatcher.server.Server(
         "test",
         "0.1.0",
-        Deps,
+        SingletonDeps,
+        ScopedDeps,
         ExtraConfig,
         TestRoutes,
         EventHandler,

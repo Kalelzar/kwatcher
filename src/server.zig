@@ -169,7 +169,8 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
 pub fn Server(
     comptime client_name: []const u8,
     comptime client_version: []const u8,
-    comptime UserDependencies: type,
+    comptime UserSingletonDependencies: type,
+    comptime UserScopedDependencies: type,
     comptime UserConfig: type,
     comptime Routes: type,
     comptime EventHandler: type,
@@ -177,10 +178,10 @@ pub fn Server(
     return struct {
         const Self = @This();
         deps: Dependencies(UserConfig, client_name, client_version),
-        user_deps: UserDependencies,
+        user_deps: UserSingletonDependencies,
         routes: []const Route,
 
-        pub fn init(allocator: std.mem.Allocator, deps: UserDependencies) !Self {
+        pub fn init(allocator: std.mem.Allocator, deps: UserSingletonDependencies) !Self {
             const default_deps = try Dependencies(
                 UserConfig,
                 client_name,
@@ -201,10 +202,9 @@ pub fn Server(
         }
 
         pub fn run(self: *Self) !void {
-            var base_injector = Injector.init(&self.deps, null);
-            var user_injector = Injector.init(&self.user_deps, &base_injector);
+            var base_injector = try Injector.init(&self.deps, null);
+            var user_injector = try Injector.init(&self.user_deps, &base_injector);
             const IT = std.meta.Tuple(&.{*Injector});
-            const args = IT{&user_injector};
 
             var cl = try user_injector.require(client.AmqpClient);
             var alloc = try user_injector.require(std.mem.Allocator);
@@ -217,6 +217,9 @@ pub fn Server(
                 for (0..self.routes.len) |i| {
                     const route = self.routes[i];
                     if (route.event_handler) |e| {
+                        var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
+                        var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
+                        const args = IT{&scoped_injector};
                         const ready = try @call(.auto, e, args);
                         if (ready) {
                             const msg = try @call(.auto, route.handler, args);
