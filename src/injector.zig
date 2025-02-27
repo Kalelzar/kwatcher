@@ -16,11 +16,44 @@ pub const Injector = struct {
     resolver_factory: FactoryResolver,
     parent: ?*Injector = null,
 
-    pub const empty: Injector = .{ .c_ontext = undefined, .resolver = resolveNull };
+    pub const empty: Injector = .{ .context = undefined, .resolver = resolveNull };
 
-    pub fn init(context: anytype, parent: ?*Injector) Injector {
+    pub fn init(context: anytype, parent: ?*Injector) !Injector {
         if (comptime !meta.isValuePointer(@TypeOf(context))) {
             @compileError("Expected pointer to a context, got " ++ @typeName(@TypeOf(context)));
+        }
+
+        if (parent) |p| blk: {
+            // If we have a parent and a construct function on the context we might as well try to call it by injecting it's dependencies via
+            // our parent.
+            // This still lets us init contexts manually as users but we open the door to allow the framework to handle some of it for us
+            // instead.
+            const _ContextType = @TypeOf(context);
+            const ti = @typeInfo(_ContextType);
+            const ContextType = switch (ti) {
+                .pointer => |ptr| ptr.child,
+                else => _ContextType,
+            };
+
+            if (comptime @hasDecl(ContextType, "construct")) {
+                const fun = @field(ContextType, "construct");
+                if (@typeInfo(@TypeOf(fun)) != .@"fn") break :blk;
+                var args: std.meta.ArgsTuple(@TypeOf(fun)) = undefined;
+                const fields = std.meta.fields(std.meta.ArgsTuple(@TypeOf(fun)));
+                const n_deps = comptime fields.len;
+                if (n_deps < 1) {
+                    @compileError("Construct must accept self. Why else would you need it?");
+                }
+                args[0] = context;
+                inline for (1..n_deps) |i| {
+                    args[i] = try p.require(@TypeOf(args[i]));
+                }
+
+                switch (comptime @typeInfo(meta.Return(fun))) {
+                    .error_union => try @call(.auto, fun, args),
+                    else => @call(.auto, fun, args),
+                }
+            }
         }
 
         const InternalResolver = struct {
