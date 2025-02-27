@@ -77,7 +77,8 @@ pub const Injector = struct {
                                 const result = @call(.auto, fun, args);
                                 switch (comptime @typeInfo(meta.Return(fun))) {
                                     .error_union => {
-                                        _ = try result;
+                                        const nonerror = try result;
+                                        return @ptrCast(@constCast(&nonerror));
                                     },
                                     .pointer => {
                                         return @ptrCast(@constCast(result));
