@@ -1,18 +1,26 @@
 const std = @import("std");
 const kwatcher = @import("kwatcher");
 
-const P = struct {};
+const P = struct {
+    e: E,
+};
+
+const E = enum {
+    A,
+    B,
+};
 
 const TestRoutes = struct {
     pub fn @"PUBLISH:heartbeat amq.direct/heartbeat"(
         user_info: kwatcher.schema.UserInfo,
         client_info: kwatcher.schema.ClientInfo,
+        e: E,
     ) kwatcher.schema.Heartbeat.V1(P) {
         return .{
             .event = "TEST",
             .user = user_info.v1(),
             .client = client_info.v1(),
-            .properties = .{},
+            .properties = .{ .e = e },
             .timestamp = std.time.timestamp(),
         };
     }
@@ -32,7 +40,14 @@ const ExtraConfig = struct {
     soup: bool,
 };
 
-const Deps = struct {};
+const Deps = struct {
+    pub fn e() !E {
+        if (std.time.timestamp() == 0) {
+            return error.DUM;
+        }
+        return .B;
+    }
+};
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
