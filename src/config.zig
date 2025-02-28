@@ -95,7 +95,6 @@ const ConfigLocations = struct {
 };
 
 fn openConfigFile(comptime ConfigType: type, allocator: std.mem.Allocator, path: []const u8) !ConfigType {
-    log.info("Attempting to load config file of type '{}' from '{s}'.", .{ ConfigType, path });
     const file = try std.fs.openFileAbsolute(
         path,
         std.fs.File.OpenFlags{ .mode = .read_only },
@@ -217,17 +216,11 @@ pub fn Config(comptime Extension: type) type {
 
     return struct {
         value: Result,
-        arena: std.heap.ArenaAllocator,
 
-        pub fn init(arena: std.heap.ArenaAllocator, result: Result) Config(Extension) {
+        pub fn init(result: Result) Config(Extension) {
             return .{
-                .arena = arena,
                 .value = result,
             };
-        }
-
-        pub fn deinit(self: *const Config(Extension)) void {
-            self.arena.deinit();
         }
     };
 }
@@ -236,9 +229,7 @@ fn findConfigFileOrDefault(comptime ConfigType: type, allocator: std.mem.Allocat
     return (try findConfigFile(ConfigType, allocator, configName)) orelse std.mem.zeroInit(ConfigType, .{});
 }
 
-pub fn findConfigFileWithDefaults(comptime ConfigType: type, comptime configName: []const u8) !Config(ConfigType) {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    errdefer arena.deinit();
+pub fn findConfigFileWithDefaults(comptime ConfigType: type, comptime configName: []const u8, arena: *std.heap.ArenaAllocator) !Config(ConfigType) {
     const allocator = arena.allocator();
 
     const Extension = meta.MergeStructs(_BaseNullable, ConfigType);
@@ -252,5 +243,5 @@ pub fn findConfigFileWithDefaults(comptime ConfigType: type, comptime configName
     try meta.assertNotEmpty(Final, final);
     try validateConfig(final);
 
-    return Config(ConfigType).init(arena, final);
+    return Config(ConfigType).init(final);
 }

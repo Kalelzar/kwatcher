@@ -4,12 +4,17 @@
 const std = @import("std");
 
 const meta = @import("meta.zig");
+const mem = @import("mem.zig");
 const schema = @import("schema.zig");
 
 const Context = *anyopaque;
 const Resolver = *const fn (Context, meta.TypeId) ?*anyopaque;
 const FactoryResolver = *const fn (meta.TypeId) ?*const fn (*Injector) anyerror!*anyopaque;
 
+/// A dependency injector with support for parent injectors.
+/// It can dynamically provide the contents of a struct (`Context')
+/// to any function called with it, supporting both plain properties
+/// and factory functions.
 pub const Injector = struct {
     context: Context,
     resolver: Resolver,
@@ -91,7 +96,6 @@ pub const Injector = struct {
             fn resolveFactory(type_id: meta.TypeId) ?*const fn (*Injector) anyerror!*anyopaque {
                 inline for (comptime std.meta.declarations(ContextType)) |d| {
                     const fun = @field(ContextType, d.name);
-                    // std.log.debug("Tried factory for {}", .{meta.Result(fun)});
                     if (@typeInfo(@TypeOf(fun)) != .@"fn") continue;
 
                     const FieldType = if (comptime meta.isValuePointer(meta.Result(fun))) meta.Result(fun) else *const meta.Result(fun);
@@ -102,23 +106,31 @@ pub const Injector = struct {
                                 var args: std.meta.ArgsTuple(@TypeOf(fun)) = undefined;
                                 const fields = std.meta.fields(std.meta.ArgsTuple(@TypeOf(fun)));
                                 const n_deps = comptime fields.len;
-
+                                var arena = try inj.require(mem.InternalArena);
+                                const alloc = arena.allocator();
                                 inline for (0..n_deps) |i| {
                                     args[i] = try inj.require(@TypeOf(args[i]));
                                 }
-
-                                const result = @call(.auto, fun, args);
-                                switch (comptime @typeInfo(meta.Return(fun))) {
-                                    .error_union => {
-                                        const nonerror = try result;
-                                        return @ptrCast(@constCast(&nonerror));
-                                    },
+                                switch (comptime @typeInfo(meta.Result(fun))) {
                                     .pointer => {
+                                        if (comptime meta.canBeError(fun)) {
+                                            const result = try @call(.auto, fun, args);
+                                            return @ptrCast(@constCast(result));
+                                        } else {
+                                            const result = @call(.auto, fun, args);
+                                            return @ptrCast(@constCast(result));
+                                        }
+                                    },
+                                    else => {
+                                        const result = try alloc.create(meta.Result(fun));
+                                        if (comptime meta.canBeError(fun)) {
+                                            result.* = try @call(.auto, fun, args);
+                                        } else {
+                                            result.* = @call(.auto, fun, args);
+                                        }
                                         return @ptrCast(@constCast(result));
                                     },
-                                    else => {},
                                 }
-                                return @ptrCast(@constCast(&result));
                             }
                         };
                         return &Internal.handle;

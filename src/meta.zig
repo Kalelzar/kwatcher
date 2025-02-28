@@ -270,6 +270,13 @@ pub fn Result(comptime fun: anytype) type {
     };
 }
 
+pub fn canBeError(comptime fun: anytype) bool {
+    return switch (@typeInfo(Return(fun))) {
+        .error_union => true,
+        else => false,
+    };
+}
+
 pub fn HoldType(comptime Type: type) *const fn () type {
     const Internal = struct {
         fn resolve() type {
