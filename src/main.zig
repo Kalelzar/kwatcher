@@ -31,8 +31,7 @@ const TestRoutes = struct {
 };
 
 const EventHandler = struct {
-    pub fn heartbeat(timer: kwatcher.server.Timer, a: A) !bool {
-        std.log.info("We got {}", .{a.i});
+    pub fn heartbeat(timer: kwatcher.server.Timer) !bool {
         return try timer.ready("heartbeat");
     }
 

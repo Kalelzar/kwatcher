@@ -3,6 +3,7 @@ const std = @import("std");
 const schema = @import("schema.zig");
 const config = @import("config.zig");
 const meta = @import("meta.zig");
+const mem = @import("mem.zig");
 const client = @import("client.zig");
 
 const Injector = @import("injector.zig").Injector;
@@ -60,6 +61,8 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
     return struct {
         const Self = @This();
         allocator: std.mem.Allocator,
+        arena: *std.heap.ArenaAllocator,
+        internal_arena: mem.InternalArena,
 
         client_cache: ?client.AmqpClient = null,
         timer: ?Timer = null,
@@ -93,16 +96,24 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
             }
         }
 
-        pub fn userConfig(self: *Self) !UserConfig {
-            if (self.user_config) |res| {
-                return res;
+        pub fn mergedConfig(self: *Self, arena: *std.heap.ArenaAllocator) !config.Config(UserConfig) {
+            if (self.merged_config) |m| {
+                return m;
             } else {
                 const merged_config = try config.findConfigFileWithDefaults(
                     UserConfig,
                     client_name,
+                    arena,
                 );
                 self.merged_config = merged_config;
+                return self.merged_config.?;
+            }
+        }
 
+        pub fn userConfig(self: *Self, merged_config: config.Config(UserConfig)) UserConfig {
+            if (self.user_config) |res| {
+                return res;
+            } else {
                 const user_config = meta.copy(
                     @TypeOf(merged_config.value),
                     UserConfig,
@@ -114,20 +125,17 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
             }
         }
 
-        pub fn baseConfig(self: *Self, _: UserConfig) !config.BaseConfig {
+        pub fn baseConfig(self: *Self, merged_config: config.Config(UserConfig)) !config.BaseConfig {
             if (self.base_config) |res| {
                 return res;
             } else {
-                if (self.merged_config) |m| {
-                    const base_config = meta.copy(
-                        @TypeOf(m.value),
-                        config.BaseConfig,
-                        m.value,
-                    );
-                    self.base_config = base_config;
-                    return self.base_config.?;
-                }
-                return error.InvalidInjectorState;
+                const base_config = meta.copy(
+                    @TypeOf(merged_config.value),
+                    config.BaseConfig,
+                    merged_config.value,
+                );
+                self.base_config = base_config;
+                return self.base_config.?;
             }
         }
 
@@ -142,25 +150,29 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
         }
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            return .{
+            const arr_ptr = try allocator.create(std.heap.ArenaAllocator);
+            errdefer allocator.destroy(arr_ptr);
+            const result = Self{
                 .allocator = allocator,
+                .arena = arr_ptr,
+                .internal_arena = try mem.InternalArena.init(allocator),
             };
+            result.arena.* = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            return result;
         }
 
         pub fn deinit(self: *Self) __ignore {
-            std.log.debug("DESTROY", .{});
-
             if (self.timer) |_|
                 self.timer.?.deinit();
 
             if (self.user_info) |u|
                 u.deinit();
 
-            if (self.merged_config) |m|
-                m.deinit();
-
             if (self.client_cache) |c|
                 c.deinit();
+
+            self.arena.deinit();
+            self.allocator.destroy(self.arena);
 
             return .{};
         }
@@ -208,6 +220,7 @@ pub fn Server(
 
             var cl = try user_injector.require(client.AmqpClient);
             var alloc = try user_injector.require(std.mem.Allocator);
+            var internal_arena = try user_injector.require(mem.InternalArena);
 
             for (self.routes) |route| {
                 try cl.openChannel(route.metadata.exchange, route.metadata.queue);
@@ -230,6 +243,7 @@ pub fn Server(
                     }
                 }
                 timer.step();
+                internal_arena.reset();
                 std.time.sleep(500000000);
             }
         }
