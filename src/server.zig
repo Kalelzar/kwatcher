@@ -10,6 +10,8 @@ const Injector = @import("injector.zig").Injector;
 const Route = @import("route.zig").Route;
 
 pub const Timer = struct {
+    //NOTE: The resolution here is down to the second which isn't very accurate.
+    //This should use at least milliseconds.
     const TimerEntry = struct { interval: i64, last_activation: i64 };
     store: std.StringHashMap(TimerEntry),
     allocator: std.mem.Allocator,
@@ -257,7 +259,7 @@ pub fn Server(
 
                 var interval: i64 = std.time.us_per_s / 2;
                 main: while (interval > 0) {
-                    const start = std.time.microTimestamp();
+                    const start = try std.time.Instant.now();
                     const e = try cl.consume(interval);
                     if (e) |response| {
                         for (self.routes) |route| {
@@ -270,16 +272,22 @@ pub fn Server(
                             try @call(.auto, route.handlers.consume.?, args);
                             var current_channel = try cl.getChannel(route.metadata.queue);
                             try current_channel.ack(response.delivery_tag);
-                            const end = std.time.microTimestamp();
-                            const diff = end - start;
+                            const end = try std.time.Instant.now();
+                            const diff: i64 = @intCast(end.since(start));
                             interval -= diff;
+                            internal_arena.reset();
+                            // Release the memory used up by the message processing.
+                            // In high volume scenarios it might be worth letting memory accumulate
+                            // and then releasing it at the end though since we hold on to the memory
+                            // this probably doesn't cost us very much.
+
                             continue :main; // We can just let the loop fall through but this way we
                             // are already prepped in case we need to add more substantial
                             // logic after i.e rejection and whatnot
                         }
                     }
-                    const end = std.time.microTimestamp();
-                    const diff = end - start;
+                    const end = try std.time.Instant.now();
+                    const diff: i64 = @intCast(end.since(start));
                     interval -= diff;
                 }
             }
