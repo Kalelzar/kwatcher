@@ -178,7 +178,23 @@ pub const Route = struct {
                 var arena = try inj.require(mem.InternalArena);
                 const allocator = arena.allocator();
 
-                args[0] = try std.json.parseFromSliceLeaky(@TypeOf(args[0]), allocator, body, .{});
+                args[0] = std.json.parseFromSliceLeaky(
+                    @TypeOf(args[0]),
+                    allocator,
+                    body,
+                    .{},
+                ) catch |e| blk: {
+                    std.log.warn("Error encountered while parsing schema: {}", .{e});
+                    break :blk try std.json.parseFromSliceLeaky(
+                        @TypeOf(args[0]),
+                        allocator,
+                        body,
+                        .{
+                            .duplicate_field_behavior = .use_last,
+                            .ignore_unknown_fields = true,
+                        },
+                    );
+                };
 
                 inline for (1..n_deps) |i| {
                     args[i] = try inj.require(@TypeOf(args[i]));
