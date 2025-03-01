@@ -168,6 +168,13 @@ pub const Route = struct {
                 if (comptime std.meta.fields(@TypeOf(args)).len == 0) {
                     @compileError("Consumer routes need at least one parameter for the incoming message");
                 }
+
+                if (comptime !@hasField(@TypeOf(args[0]), "schema_name") or
+                    !@hasField(@TypeOf(args[0]), "schema_version"))
+                {
+                    @compileError("The first parameter of a consumer route has to be a schema.");
+                }
+
                 var arena = try inj.require(mem.InternalArena);
                 const allocator = arena.allocator();
 

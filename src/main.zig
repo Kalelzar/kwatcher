@@ -50,16 +50,18 @@ const TestRoutes = struct {
         };
     }
 
-    pub fn @"CONSUME amq.direct/afk-status"(change: AfkStatusChange) void {
+    pub fn @"CONSUME amq.direct/afk-status"(change: AfkStatusChange, deps: *SingletonDeps) void {
         std.log.debug(
             "[{}]: Status changed {} -> {}",
             .{ change.timestamp, change.properties.diff.prev, change.properties.diff.current },
         );
+        deps.status = change.properties.diff.current;
     }
 };
 
 const EventHandler = struct {
-    pub fn heartbeat(timer: kwatcher.server.Timer) !bool {
+    pub fn heartbeat(timer: kwatcher.server.Timer, status: AfkStatus) !bool {
+        if (status == .Inactive) return false;
         return try timer.ready("heartbeat");
     }
 
@@ -73,6 +75,8 @@ const ExtraConfig = struct {
 };
 
 const SingletonDeps = struct {
+    status: AfkStatus = AfkStatus.Active,
+
     pub fn e() !E {
         if (std.time.timestamp() == 0) {
             return error.DUM;
