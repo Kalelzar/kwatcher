@@ -65,6 +65,41 @@ pub const Channel = struct {
             },
         );
     }
+
+    pub fn configureConsume(self: *Channel) !void {
+        _ = try self.channel.basic_consume(
+            amqp.bytes_t.init(self.queue),
+            .{
+                .no_local = false,
+                .no_ack = false,
+                .exclusive = false,
+                .consumer_tag = amqp.bytes_t.init(self.queue),
+            },
+        );
+    }
+
+    pub fn ack(self: *Channel, delivery_tag: u64) !void {
+        return self.channel.basic_ack(delivery_tag, false);
+    }
+
+    pub fn reject(self: *Channel, delivery_tag: u64, requeue: bool) !void {
+        return self.channel.basic_reject(delivery_tag, requeue);
+    }
+};
+
+pub const Response = struct {
+    routing_key: []const u8,
+    exchange: []const u8,
+    queue: []const u8,
+
+    consumer_tag: []const u8,
+    delivery_tag: u64,
+    channel: u16,
+    redelivered: bool,
+    message: struct {
+        basic_properties: amqp.BasicProperties,
+        body: []const u8,
+    },
 };
 
 pub const AmqpClient = struct {
@@ -118,25 +153,53 @@ pub const AmqpClient = struct {
         };
     }
 
-    pub fn openChannel(self: *AmqpClient, exchange: []const u8, queue: []const u8) !void {
+    pub fn openChannel(self: *AmqpClient, exchange: []const u8, queue: []const u8, route: []const u8) !void {
         var amqp_channel = amqp.Channel{
             .connection = self.connection,
             .number = self.next,
         };
         self.next += 1;
         _ = try amqp_channel.open();
-        log.debug("Opened channel '[{}] {s}/{s}'", .{ self.next - 1, exchange, queue });
+        log.info("Opened channel '[{}] {s}/{s}'", .{ self.next - 1, exchange, queue });
 
         var channel = Channel{
             .channel = amqp_channel,
             .exchange = exchange,
             .queue = queue,
-            .route = "default",
+            .route = route,
         };
 
         try channel.bind();
 
         try self.channels.put(queue, channel);
+    }
+
+    pub fn consume(self: *AmqpClient, timeout: i64) !?Response {
+        var timeval = std.c.timeval{
+            .sec = 0,
+            .usec = @truncate(timeout),
+        };
+        const envelope = self.connection.consume_message(&timeval, 0) catch |e| switch (e) {
+            error.Timeout => return null,
+            else => |le| return le,
+        };
+        return .{
+            .channel = envelope.channel,
+            .consumer_tag = envelope.consumer_tag.slice() orelse "missing",
+            .queue = envelope.message.properties.get(.reply_to).?.slice() orelse "missing",
+            .delivery_tag = envelope.delivery_tag,
+            .exchange = envelope.exchange.slice() orelse "missing",
+            .routing_key = envelope.routing_key.slice() orelse "missing",
+            .redelivered = envelope.redelivered != 0,
+            .message = .{
+                .basic_properties = envelope.message.properties,
+                .body = envelope.message.body.slice() orelse "missing",
+            },
+        };
+    }
+
+    pub fn reset(self: *AmqpClient) void {
+        self.connection.maybe_release_buffers();
     }
 
     pub fn getChannel(self: *const AmqpClient, queue: []const u8) !*Channel {
@@ -145,6 +208,8 @@ pub const AmqpClient = struct {
 
     pub fn deinit(self: *const AmqpClient) void {
         log.info("Closing connection", .{});
+        // This should probably not accept const but oh well.
+        // We can close our eyes for now. @constCast my beloved.
         disposeConnection(@constCast(&self.connection));
     }
 
