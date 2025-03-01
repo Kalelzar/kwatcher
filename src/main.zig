@@ -14,6 +14,27 @@ const E = enum {
     B,
 };
 
+pub const AfkStatus = enum {
+    Active,
+    Inactive,
+};
+
+pub const StatusDiff = struct {
+    prev: AfkStatus,
+    current: AfkStatus,
+    timestamp: i64,
+};
+
+pub const AfkStatusChangeProperties = kwatcher.schema.Schema(
+    1,
+    "afk.status-change",
+    struct {
+        diff: StatusDiff,
+    },
+);
+
+pub const AfkStatusChange = kwatcher.schema.Heartbeat.V1(AfkStatusChangeProperties);
+
 const TestRoutes = struct {
     pub fn @"PUBLISH:heartbeat amq.direct/heartbeat"(
         user_info: kwatcher.schema.UserInfo,
@@ -27,6 +48,13 @@ const TestRoutes = struct {
             .properties = .{ .e = a },
             .timestamp = std.time.timestamp(),
         };
+    }
+
+    pub fn @"CONSUME amq.direct/afk-status"(change: AfkStatusChange) void {
+        std.log.debug(
+            "[{}]: Status changed {} -> {}",
+            .{ change.timestamp, change.properties.diff.prev, change.properties.diff.current },
+        );
     }
 };
 

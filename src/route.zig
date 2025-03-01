@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const meta = @import("meta.zig");
+const mem = @import("mem.zig");
 const schema = @import("schema.zig");
 const injector = @import("injector.zig");
 
@@ -9,10 +10,23 @@ pub const Method = enum {
     consume,
 };
 
+fn HandlerFn(comptime T: type) type {
+    return *const fn (*injector.Injector) T;
+}
+
+const PublishHandlerFn = HandlerFn(anyerror!schema.SendMessage);
+const EventHandlerFn = HandlerFn(anyerror!bool);
+const ConsumeHandlerFn = *const fn (*injector.Injector, []const u8) anyerror!void;
+
+pub const Handlers = struct {
+    event: ?EventHandlerFn = null,
+    publish: ?PublishHandlerFn = null,
+    consume: ?ConsumeHandlerFn = null,
+};
+
 pub const Route = struct {
     method: Method,
-    handler: *const fn (*injector.Injector) anyerror!schema.SendMessage,
-    event_handler: ?*const fn (*injector.Injector) anyerror!bool,
+    handlers: Handlers,
     metadata: *const Metadata,
 
     const Metadata = struct {
@@ -22,7 +36,7 @@ pub const Route = struct {
         exchange: []const u8,
     };
 
-    pub fn from(comptime ContainerType: type, comptime EventHandler: type) []const Route {
+    pub fn from(comptime ContainerType: type, comptime EventProvider: type) []const Route {
         meta.ensureStruct(ContainerType);
 
         const routes = comptime blk: {
@@ -46,7 +60,7 @@ pub const Route = struct {
 
                 const event: ?[]const u8 = if (end_of_method_and_event == end_of_method) null else d.name[end_of_method + 1 .. end_of_method_and_event];
 
-                const event_handler = if (event) |event_v| @field(EventHandler, event_v) else null;
+                const event_handler = if (event) |event_v| @field(EventProvider, event_v) else null;
 
                 var method_buf: [end_of_method]u8 = undefined;
                 const method = std.ascii.lowerString(&method_buf, d.name[0..end_of_method]);
@@ -102,10 +116,10 @@ pub const Route = struct {
         };
     }
 
-    fn routeHandler(
+    fn publishHandler(
         comptime metadata: Route.Metadata,
         comptime handler: anytype,
-    ) *const fn (*injector.Injector) anyerror!schema.SendMessage {
+    ) PublishHandlerFn {
         const n_deps = metadata.deps.len;
 
         const Internal = struct {
@@ -124,18 +138,50 @@ pub const Route = struct {
                         else => maybe_result,
                     };
 
-                const alloc = try inj.require(std.mem.Allocator);
+                var arena = try inj.require(mem.InternalArena);
+                const alloc = arena.allocator();
                 const body = try std.json.stringifyAlloc(alloc, result, .{});
-                errdefer alloc.free(body);
 
                 return .{
                     .body = body,
                     .options = .{
                         .exchange = metadata.exchange,
                         .queue = metadata.queue,
-                        .routing_key = "default",
+                        .routing_key = metadata.queue,
                     },
                 };
+            }
+        };
+
+        return &Internal.handle;
+    }
+
+    fn consumeHandler(
+        comptime metadata: Route.Metadata,
+        comptime handler: anytype,
+    ) ConsumeHandlerFn {
+        const n_deps = metadata.deps.len;
+
+        const Internal = struct {
+            fn handle(inj: *injector.Injector, body: []const u8) !void {
+                var args: std.meta.ArgsTuple(@TypeOf(handler)) = undefined;
+                if (comptime std.meta.fields(@TypeOf(args)).len == 0) {
+                    @compileError("Consumer routes need at least one parameter for the incoming message");
+                }
+                var arena = try inj.require(mem.InternalArena);
+                const allocator = arena.allocator();
+
+                args[0] = try std.json.parseFromSliceLeaky(@TypeOf(args[0]), allocator, body, .{});
+
+                inline for (1..n_deps) |i| {
+                    args[i] = try inj.require(@TypeOf(args[i]));
+                }
+
+                if (comptime meta.canBeError(handler)) {
+                    try @call(.auto, handler, args);
+                } else {
+                    @call(.auto, handler, args);
+                }
             }
         };
 
@@ -145,7 +191,7 @@ pub const Route = struct {
     fn eventHandler(
         comptime metadata: Route.Metadata,
         comptime handler: anytype,
-    ) *const fn (*injector.Injector) anyerror!bool {
+    ) EventHandlerFn {
         const n_deps = metadata.deps.len;
 
         const Internal = struct {
@@ -168,9 +214,11 @@ pub const Route = struct {
         const e_metadata = comptime routeMetadata(event_handler, exchange, queue);
         return .{
             .method = .publish,
-            .handler = routeHandler(metadata, handler),
+            .handlers = .{
+                .publish = publishHandler(metadata, handler),
+                .event = eventHandler(e_metadata, event_handler),
+            },
             .metadata = &metadata,
-            .event_handler = eventHandler(e_metadata, event_handler),
         };
     }
 
@@ -179,9 +227,8 @@ pub const Route = struct {
         const metadata = comptime routeMetadata(handler, exchange, queue);
         return .{
             .method = .consume,
-            .handler = routeHandler(metadata, handler),
+            .handlers = .{ .consume = consumeHandler(metadata, handler) },
             .metadata = &metadata,
-            .event_handler = null,
         };
     }
 };

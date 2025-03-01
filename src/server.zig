@@ -178,6 +178,7 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
         }
     };
 }
+
 pub fn Server(
     comptime client_name: []const u8,
     comptime client_version: []const u8,
@@ -217,34 +218,70 @@ pub fn Server(
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(&self.user_deps, &base_injector);
             const IT = std.meta.Tuple(&.{*Injector});
+            const ConsumeArgs = std.meta.Tuple(&.{ *Injector, []const u8 });
 
             var cl = try user_injector.require(client.AmqpClient);
-            var alloc = try user_injector.require(std.mem.Allocator);
             var internal_arena = try user_injector.require(mem.InternalArena);
 
             for (self.routes) |route| {
-                try cl.openChannel(route.metadata.exchange, route.metadata.queue);
+                try cl.openChannel(
+                    route.metadata.exchange,
+                    route.metadata.queue,
+                    route.metadata.queue,
+                );
+                if (route.method == .consume) {
+                    var channel = try cl.getChannel(route.metadata.queue);
+                    try channel.configureConsume();
+                }
             }
             while (true) {
                 var timer = try base_injector.require(Timer);
                 for (0..self.routes.len) |i| {
                     const route = self.routes[i];
-                    if (route.event_handler) |e| {
+                    if (route.method != .publish) continue;
+                    if (route.handlers.event) |e| {
                         var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
                         var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
                         const args = IT{&scoped_injector};
                         const ready = try @call(.auto, e, args);
                         if (ready) {
-                            const msg = try @call(.auto, route.handler, args);
-                            defer alloc.free(msg.body);
+                            const msg = try @call(.auto, route.handlers.publish.?, args);
                             var current_channel = try cl.getChannel(route.metadata.queue);
                             try current_channel.publish(msg);
                         }
                     }
+                    internal_arena.reset();
                 }
                 timer.step();
-                internal_arena.reset();
-                std.time.sleep(500000000);
+                cl.reset();
+
+                var interval: i64 = std.time.us_per_s / 2;
+                main: while (interval > 0) {
+                    const start = std.time.microTimestamp();
+                    const e = try cl.consume(interval);
+                    if (e) |response| {
+                        for (self.routes) |route| {
+                            if (route.method != .consume) continue;
+                            if (!std.mem.eql(u8, route.metadata.queue, response.queue) or
+                                !std.mem.eql(u8, route.metadata.exchange, response.exchange)) continue;
+                            var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
+                            var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
+                            const args = ConsumeArgs{ &scoped_injector, response.message.body };
+                            try @call(.auto, route.handlers.consume.?, args);
+                            var current_channel = try cl.getChannel(route.metadata.queue);
+                            try current_channel.ack(response.delivery_tag);
+                            const end = std.time.microTimestamp();
+                            const diff = end - start;
+                            interval -= diff;
+                            continue :main; // We can just let the loop fall through but this way we
+                            // are already prepped in case we need to add more substantial
+                            // logic after i.e rejection and whatnot
+                        }
+                    }
+                    const end = std.time.microTimestamp();
+                    const diff = end - start;
+                    interval -= diff;
+                }
             }
         }
     };
