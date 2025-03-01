@@ -105,7 +105,6 @@ pub const UserInfo = struct {
 
 pub const Heartbeat = struct {
     pub fn V1(Props: type) type {
-        meta.ensureStruct(Props);
         return Schema(
             1,
             "heartbeat",
