@@ -56,8 +56,9 @@
             .hash = "12207920ff3fce69398afc959b252b8cd72ab55a6dbb251d71fa046a43d9a85bffe6",
         },
         .zamqp = .{
-            .url = "git+https://github.com/Kalelzar/zamqp.git#cda8d36474274efc08e9514d19f81205b278310e",
-            .hash = "1220f1d9fdfc91ac85fac7fdcfaff7f24cd0772d5706e348373d2c3ea66f94e88e3a",
+            //.path = "../zamqp",
+            .url = "git+https://github.com/Kalelzar/zamqp.git#a7675764394d847895e7ec9627082586881fe849",
+            .hash = "1220c387e96da7fb49566b4d3c2a4a24062d42849ebf33f3c845ab75ba74cf6a6a54",
         },
     },
 
