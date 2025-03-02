@@ -145,7 +145,7 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
             if (self.client_cache) |res| {
                 return res;
             } else {
-                const amqp_client = try client.AmqpClient.init(allocator, config_file);
+                const amqp_client = try client.AmqpClient.init(allocator, config_file, client_name);
                 self.client_cache = amqp_client;
                 return self.client_cache.?;
             }
@@ -258,14 +258,18 @@ pub fn Server(
                 cl.reset();
 
                 var interval: i64 = std.time.us_per_s / 2;
+                var total: i32 = 0;
+                var handled: i32 = 0;
                 main: while (interval > 0) {
                     const start = try std.time.Instant.now();
                     const e = try cl.consume(interval);
                     if (e) |response| {
+                        total += 1;
                         for (self.routes) |route| {
                             if (route.method != .consume) continue;
                             if (!std.mem.eql(u8, route.metadata.queue, response.queue) or
                                 !std.mem.eql(u8, route.metadata.exchange, response.exchange)) continue;
+                            handled += 1;
                             var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
                             var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
                             const args = ConsumeArgs{ &scoped_injector, response.message.body };
@@ -290,6 +294,7 @@ pub fn Server(
                     const diff: i64 = @intCast(end.since(start));
                     interval -= diff;
                 }
+                //std.log.info("Cycle: {}/{}.", .{ handled, total });
             }
         }
     };

@@ -108,7 +108,7 @@ pub const AmqpClient = struct {
     channels: std.StringHashMap(Channel),
     next: u16 = 1,
 
-    pub fn init(allocator: std.mem.Allocator, config_file: config.BaseConfig) !AmqpClient {
+    pub fn init(allocator: std.mem.Allocator, config_file: config.BaseConfig, name: []const u8) !AmqpClient {
         errdefer log.err("Failed to initialize", .{});
         const channel_map = std.StringHashMap(Channel).init(allocator);
 
@@ -126,8 +126,18 @@ pub const AmqpClient = struct {
         defer allocator.free(username);
 
         try socket.open(host, config_file.server.port, &timeout);
+        var buf = try allocator.alloc(amqp.table_entry_t, 1);
+        defer allocator.free(buf);
+        buf[0] = .{
+            .key = amqp.bytes_t.init("connection_name"),
+            .value = .{ .kind = amqp.AMQP_FIELD_KIND_BYTES, .value = .{ .bytes = amqp.bytes_t.init(name) } },
+        };
+        const table = amqp.table_t{
+            .entries = buf.ptr,
+            .num_entries = 1,
+        };
 
-        connection.login(
+        connection.login_with_properties(
             "/",
             amqp.Connection.SaslAuth{
                 .plain = .{
@@ -137,6 +147,7 @@ pub const AmqpClient = struct {
             },
             .{
                 .heartbeat = 5,
+                .properties = &table,
             },
         ) catch |err| switch (err) {
             error.ConnectionClosed => {
@@ -185,15 +196,15 @@ pub const AmqpClient = struct {
         };
         return .{
             .channel = envelope.channel,
-            .consumer_tag = envelope.consumer_tag.slice() orelse "missing",
-            .queue = envelope.message.properties.get(.reply_to).?.slice() orelse "missing",
+            .consumer_tag = envelope.consumer_tag.slice() orelse unreachable,
+            .queue = envelope.message.properties.get(.reply_to).?.slice() orelse unreachable,
             .delivery_tag = envelope.delivery_tag,
-            .exchange = envelope.exchange.slice() orelse "missing",
-            .routing_key = envelope.routing_key.slice() orelse "missing",
+            .exchange = envelope.exchange.slice() orelse unreachable,
+            .routing_key = envelope.routing_key.slice() orelse unreachable,
             .redelivered = envelope.redelivered != 0,
             .message = .{
                 .basic_properties = envelope.message.properties,
-                .body = envelope.message.body.slice() orelse "missing",
+                .body = envelope.message.body.slice() orelse unreachable,
             },
         };
     }
