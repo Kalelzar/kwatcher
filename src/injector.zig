@@ -10,6 +10,7 @@ const schema = @import("schema.zig");
 const Context = *anyopaque;
 const Resolver = *const fn (Context, meta.TypeId) ?*anyopaque;
 const FactoryResolver = *const fn (meta.TypeId) ?*const fn (*Injector) anyerror!*anyopaque;
+const DisposeFn = *const fn (Context) void;
 
 /// A dependency injector with support for parent injectors.
 /// It can dynamically provide the contents of a struct (`Context')
@@ -20,6 +21,7 @@ pub const Injector = struct {
     resolver: Resolver,
     resolver_factory: FactoryResolver,
     parent: ?*Injector = null,
+    dispose: ?DisposeFn,
 
     pub const empty: Injector = .{ .context = undefined, .resolver = resolveNull };
 
@@ -28,18 +30,42 @@ pub const Injector = struct {
             @compileError("Expected pointer to a context, got " ++ @typeName(@TypeOf(context)));
         }
 
+        var dispose: ?DisposeFn = null;
+        const ContextPtrType = @TypeOf(context);
+        const ContextType = std.meta.Child(ContextPtrType);
+
+        if (comptime @hasDecl(ContextType, "deconstruct")) blk: {
+            const fun = @field(ContextType, "deconstruct");
+            if (@typeInfo(@TypeOf(fun)) != .@"fn") break :blk;
+
+            const fields = std.meta.fields(std.meta.ArgsTuple(@TypeOf(fun)));
+            const n_deps = comptime fields.len;
+            if (n_deps < 1) {
+                @compileError("Deconstruct must accept self. Why else would you need it?");
+            }
+
+            if (n_deps > 1) {
+                @compileError("Deconstruct does not support injection.");
+            }
+
+            const F = struct {
+                fn dispose_handler(ptr: *anyopaque) void {
+                    const ctx: *ContextType = @constCast(@ptrCast(@alignCast(ptr)));
+                    @field(ContextType, "deconstruct")(ctx);
+                }
+            };
+
+            switch (comptime @typeInfo(meta.Return(fun))) {
+                .error_union => @compileError("Doconstruct must not return an error."),
+                else => dispose = F.dispose_handler,
+            }
+        }
+
         if (parent) |p| blk: {
             // If we have a parent and a construct function on the context we might as well try to call it by injecting it's dependencies via
             // our parent.
             // This still lets us init contexts manually as users but we open the door to allow the framework to handle some of it for us
             // instead.
-            const _ContextType = @TypeOf(context);
-            const ti = @typeInfo(_ContextType);
-            const ContextType = switch (ti) {
-                .pointer => |ptr| ptr.child,
-                else => _ContextType,
-            };
-
             if (comptime @hasDecl(ContextType, "construct")) {
                 const fun = @field(ContextType, "construct");
                 if (@typeInfo(@TypeOf(fun)) != .@"fn") break :blk;
@@ -62,9 +88,6 @@ pub const Injector = struct {
         }
 
         const InternalResolver = struct {
-            const ContextPtrType = @TypeOf(context);
-            const ContextType = std.meta.Child(ContextPtrType);
-
             fn resolve(type_erased_context: Context, type_id: meta.TypeId) ?*anyopaque {
                 var typed_context: ContextPtrType = @constCast(@ptrCast(@alignCast(type_erased_context)));
 
@@ -145,6 +168,7 @@ pub const Injector = struct {
             .context = @constCast(@ptrCast(context)),
             .resolver = &InternalResolver.resolve,
             .resolver_factory = &InternalResolver.resolveFactory,
+            .dispose = dispose,
             .parent = parent,
         };
     }
@@ -200,6 +224,19 @@ pub const Injector = struct {
         inline for (0..args.len) |i| args[i] = if (i < extra_start) try self.get(@TypeOf(args[i])) else extra_args[i - extra_start];
 
         return @call(.auto, fun, args);
+    }
+
+    /// Attempt to destroy the enclosed dependency context.
+    /// You should consider the injector effectively invalidated after this is called
+    /// unless you are 110% sure the dependency context doesn't support destruction.
+    /// And even then - please don't... unless you really have to.
+    /// This will check for the existance of a `deconstruct' method on the context instance.
+    pub fn maybeDeconstruct(self: *Injector) void {
+        if (self.dispose) |destructor| {
+            const Args = std.meta.Tuple(&.{*anyopaque});
+            const args = Args{self.context};
+            @call(.auto, destructor, args);
+        }
     }
 };
 
