@@ -72,6 +72,13 @@ pub const ClientInfo = struct {
             .name = self.name,
         };
     }
+
+    pub fn fromV1(sch: *const Client.V1) ClientInfo {
+        return .{
+            .version = sch.version,
+            .name = sch.name,
+        };
+    }
 };
 
 pub const UserInfo = struct {
@@ -99,6 +106,15 @@ pub const UserInfo = struct {
             .username = self.username,
             .hostname = self.hostname,
             .id = self.id,
+        };
+    }
+
+    pub fn fromV1(allocator: std.mem.Allocator, sch: *const User.V1) UserInfo {
+        return .{
+            .username = sch.username,
+            .hostname = sch.hostname,
+            .id = sch.id,
+            .allocator = allocator,
         };
     }
 };

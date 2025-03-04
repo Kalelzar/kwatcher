@@ -5,3 +5,4 @@ pub const server = @import("server.zig");
 pub const meta = @import("meta.zig");
 pub const schema = @import("schema.zig");
 pub const route = @import("route.zig");
+pub const mem = @import("mem.zig");

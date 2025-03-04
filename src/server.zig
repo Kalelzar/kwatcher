@@ -244,6 +244,7 @@ pub fn Server(
                     if (route.handlers.event) |e| {
                         var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
                         var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
+                        defer scoped_injector.maybeDeconstruct();
                         const args = IT{&scoped_injector};
                         const ready = try @call(.auto, e, args);
                         if (ready) {
@@ -270,15 +271,18 @@ pub fn Server(
                             if (!std.mem.eql(u8, route.metadata.queue, response.queue) or
                                 !std.mem.eql(u8, route.metadata.exchange, response.exchange)) continue;
                             handled += 1;
-                            var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
-                            var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
-                            const args = ConsumeArgs{ &scoped_injector, response.message.body };
-                            try @call(.auto, route.handlers.consume.?, args);
-                            var current_channel = try cl.getChannel(route.metadata.queue);
-                            try current_channel.ack(response.delivery_tag);
-                            const end = try std.time.Instant.now();
-                            const diff: i64 = @intCast(end.since(start));
-                            interval -= diff;
+                            {
+                                var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
+                                var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
+                                defer scoped_injector.maybeDeconstruct();
+                                const args = ConsumeArgs{ &scoped_injector, response.message.body };
+                                try @call(.auto, route.handlers.consume.?, args);
+                                var current_channel = try cl.getChannel(route.metadata.queue);
+                                try current_channel.ack(response.delivery_tag);
+                                const end = try std.time.Instant.now();
+                                const diff: i64 = @intCast(end.since(start));
+                                interval -= diff;
+                            }
                             internal_arena.reset();
                             // Release the memory used up by the message processing.
                             // In high volume scenarios it might be worth letting memory accumulate

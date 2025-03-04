@@ -16,8 +16,8 @@ const Builder = struct {
 
         const check_step = b.step("check", "");
 
-        const zamqp = b.dependency("zamqp", .{}).module("zamqp");
-        const uuid = b.dependency("uuid", .{}).module("uuid");
+        const zamqp = b.dependency("zamqp", .{ .target = target, .optimize = opt }).module("zamqp");
+        const uuid = b.dependency("uuid", .{ .target = target, .optimize = opt }).module("uuid");
         const kwatcher = b.addModule("kwatcher", .{
             .root_source_file = b.path("src/watcher.zig"),
         });
