@@ -26,6 +26,7 @@ pub const BaseConfig = struct {
     config: struct {
         debug: bool = false,
         heartbeat_interval: i64 = 5,
+        polling_interval: i64 = std.time.us_per_s / 2, //microseconds
         timeout: struct {
             const Self = @This();
             seconds: i32 = 60,
@@ -61,6 +62,7 @@ pub const _BaseNullable = validate(struct {
     config: struct {
         debug: ?bool = null,
         heartbeat_interval: ?i64 = null,
+        polling_interval: ?i64 = null, //microseconds
         timeout: struct {
             const Self = @This();
             seconds: ?i32 = null,

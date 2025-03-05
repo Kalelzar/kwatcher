@@ -224,6 +224,7 @@ pub fn Server(
 
             var cl = try user_injector.require(client.AmqpClient);
             var internal_arena = try user_injector.require(mem.InternalArena);
+            const base_conf = try user_injector.require(config.BaseConfig);
 
             for (self.routes) |route| {
                 try cl.openChannel(
@@ -258,7 +259,7 @@ pub fn Server(
                 timer.step();
                 cl.reset();
 
-                var interval: i64 = std.time.us_per_s / 2;
+                var interval: i64 = base_conf.config.polling_interval;
                 var total: i32 = 0;
                 var handled: i32 = 0;
                 main: while (interval > 0) {
