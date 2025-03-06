@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.kwatcher);
 
 const schema = @import("schema.zig");
 const config = @import("config.zig");
@@ -212,7 +213,7 @@ pub fn Server(
         }
 
         pub fn deinit(self: *Self) void {
-            std.log.info("Shutting server down...", .{});
+            log.info("Shutting server down...", .{});
             _ = self.deps.deinit();
         }
 
@@ -242,14 +243,26 @@ pub fn Server(
                 for (0..self.routes.len) |i| {
                     const route = self.routes[i];
                     if (route.method != .publish) continue;
-                    if (route.handlers.event) |e| {
+                    if (route.handlers.event) |event_handler| {
                         var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
                         var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
                         defer scoped_injector.maybeDeconstruct();
                         const args = IT{&scoped_injector};
-                        const ready = try @call(.auto, e, args);
+                        const ready = @call(.auto, event_handler, args) catch |e| {
+                            log.err(
+                                "Encountered an error while querying the event provider for '{s}/{s}': {}",
+                                .{ route.metadata.exchange, route.metadata.queue, e },
+                            );
+                            continue;
+                        };
                         if (ready) {
-                            const msg = try @call(.auto, route.handlers.publish.?, args);
+                            const msg = @call(.auto, route.handlers.publish.?, args) catch |e| {
+                                log.err(
+                                    "Encountered an error while publishing an event on '{s}/{s}': {}",
+                                    .{ route.metadata.exchange, route.metadata.queue, e },
+                                );
+                                continue;
+                            };
                             var current_channel = try cl.getChannel(route.metadata.queue);
                             try current_channel.publish(msg);
                         }
@@ -264,8 +277,8 @@ pub fn Server(
                 var handled: i32 = 0;
                 main: while (interval > 0) {
                     const start = try std.time.Instant.now();
-                    const e = try cl.consume(interval);
-                    if (e) |response| {
+                    const envelope = try cl.consume(interval);
+                    if (envelope) |response| {
                         total += 1;
                         for (self.routes) |route| {
                             if (route.method != .consume) continue;
@@ -277,7 +290,14 @@ pub fn Server(
                                 var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
                                 defer scoped_injector.maybeDeconstruct();
                                 const args = ConsumeArgs{ &scoped_injector, response.message.body };
-                                try @call(.auto, route.handlers.consume.?, args);
+                                @call(.auto, route.handlers.consume.?, args) catch |e| {
+                                    log.err(
+                                        "Encountered an error while consuming a message on '{s}/{s}': {}\n\t{s}\n",
+                                        .{ route.metadata.exchange, route.metadata.queue, e, response.message.body },
+                                    );
+                                    var current_channel = try cl.getChannel(route.metadata.queue);
+                                    try current_channel.reject(response.delivery_tag, false);
+                                };
                                 var current_channel = try cl.getChannel(route.metadata.queue);
                                 try current_channel.ack(response.delivery_tag);
                                 const end = try std.time.Instant.now();
