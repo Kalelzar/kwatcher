@@ -1,18 +1,7 @@
 const std = @import("std");
 const kwatcher = @import("kwatcher");
 
-const P = struct {
-    e: A,
-};
-
-const A = struct {
-    i: i32,
-};
-
-const E = enum {
-    A,
-    B,
-};
+const P = struct {};
 
 pub const AfkStatus = enum {
     Active,
@@ -39,14 +28,13 @@ const TestRoutes = struct {
     pub fn @"PUBLISH:heartbeat amq.direct/heartbeat"(
         user_info: kwatcher.schema.UserInfo,
         client_info: kwatcher.schema.ClientInfo,
-        a: A,
     ) kwatcher.schema.Heartbeat.V1(P) {
         return .{
             .event = "TEST",
             .user = user_info.v1(),
             .client = client_info.v1(),
-            .properties = .{ .e = a },
-            .timestamp = std.time.timestamp(),
+            .properties = .{},
+            .timestamp = std.time.microTimestamp(),
         };
     }
 
@@ -76,21 +64,9 @@ const ExtraConfig = struct {
 
 const SingletonDeps = struct {
     status: AfkStatus = AfkStatus.Active,
-
-    pub fn e() !E {
-        if (std.time.timestamp() == 0) {
-            return error.DUM;
-        }
-        return .B;
-    }
 };
 
-const ScopedDeps = struct {
-    a: A,
-    pub fn construct(self: *ScopedDeps) void {
-        self.a = .{ .i = std.crypto.random.int(i32) };
-    }
-};
+const ScopedDeps = struct {};
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
