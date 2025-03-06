@@ -11,9 +11,7 @@ const Injector = @import("injector.zig").Injector;
 const Route = @import("route.zig").Route;
 
 pub const Timer = struct {
-    //NOTE: The resolution here is down to the second which isn't very accurate.
-    //This should use at least milliseconds.
-    const TimerEntry = struct { interval: i64, last_activation: i64 };
+    const TimerEntry = struct { interval: u64, last_activation: std.time.Instant };
     store: std.StringHashMap(TimerEntry),
     allocator: std.mem.Allocator,
 
@@ -25,30 +23,31 @@ pub const Timer = struct {
         };
     }
 
-    pub fn register(self: *Timer, name: []const u8, interval: i64) !void {
-        const current_time = std.time.timestamp();
+    pub fn register(self: *Timer, name: []const u8, interval: u64) !void {
+        const current_time = try std.time.Instant.now();
         const entry = TimerEntry{
             .interval = interval,
-            .last_activation = current_time - interval,
+            .last_activation = current_time,
         };
         try self.store.put(name, entry);
     }
 
     pub fn ready(self: *const Timer, name: []const u8) !bool {
         const entry = self.store.get(name) orelse return error.NotFound;
-        const current_time = std.time.timestamp();
-        if (current_time - entry.last_activation >= entry.interval) {
+
+        const current_time = try std.time.Instant.now();
+        if (current_time.since(entry.last_activation) >= entry.interval) {
             return true;
         }
         return false;
     }
 
-    pub fn step(self: *Timer) void {
-        const current_time = std.time.timestamp();
+    pub fn step(self: *Timer) !void {
+        const current_time = try std.time.Instant.now();
         var iter = self.store.valueIterator();
         while (iter.next()) |entry_ptr| {
-            if (current_time - entry_ptr.last_activation >= entry_ptr.interval) {
-                entry_ptr.last_activation += entry_ptr.interval;
+            if (current_time.since(entry_ptr.last_activation) >= entry_ptr.interval) {
+                entry_ptr.last_activation = current_time;
             }
         }
     }
@@ -269,7 +268,7 @@ pub fn Server(
                     }
                     internal_arena.reset();
                 }
-                timer.step();
+                try timer.step();
                 cl.reset();
 
                 var interval: i64 = base_conf.config.polling_interval;
