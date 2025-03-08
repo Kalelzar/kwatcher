@@ -146,7 +146,7 @@ pub const AmqpClient = struct {
                 },
             },
             .{
-                .heartbeat = 5,
+                .heartbeat = config_file.server.heartbeat,
                 .properties = &table,
             },
         ) catch |err| switch (err) {
@@ -165,6 +165,8 @@ pub const AmqpClient = struct {
     }
 
     pub fn openChannel(self: *AmqpClient, exchange: []const u8, queue: []const u8, route: []const u8) !void {
+        if (self.channels.contains(queue)) return;
+
         var amqp_channel = amqp.Channel{
             .connection = self.connection,
             .number = self.next,

@@ -296,7 +296,7 @@ pub fn Server(
             cl.reset();
         }
 
-        pub fn handleConsume(self: *Self, interval: i64) !void {
+        pub fn handleConsume(self: *Self, interval: u64) !void {
             const ConsumeArgs = std.meta.Tuple(&.{ *Injector, []const u8 });
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(&self.user_deps, &base_injector);
@@ -304,12 +304,13 @@ pub fn Server(
             var internal_arena = try user_injector.require(mem.InternalArena);
             var routes = ds.DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
 
-            var remaining = interval;
+            var remaining: i64 = @intCast(interval);
             var total: i32 = 0;
             var handled: i32 = 0;
             main: while (remaining > 0) {
+                const rabbitmq_wait = @divTrunc(remaining, std.time.ns_per_us);
                 const start = try std.time.Instant.now();
-                const envelope = try cl.consume(remaining);
+                const envelope = try cl.consume(rabbitmq_wait);
                 if (envelope) |response| {
                     total += 1;
                     var pub_route_iterator = routes.iterator();
@@ -334,8 +335,8 @@ pub fn Server(
                             var current_channel = try cl.getChannel(route.metadata.queue);
                             try current_channel.ack(response.delivery_tag);
                             const end = try std.time.Instant.now();
-                            const diff: i64 = @intCast(end.since(start));
-                            remaining -= diff;
+                            const diff = end.since(start);
+                            remaining -= @intCast(diff);
                         }
                         internal_arena.reset();
                         // Release the memory used up by the message processing.
@@ -349,8 +350,8 @@ pub fn Server(
                     }
                 }
                 const end = try std.time.Instant.now();
-                const diff: i64 = @intCast(end.since(start));
-                remaining -= diff;
+                const diff = end.since(start);
+                remaining -= @intCast(diff);
             }
             //std.log.info("Cycle: {}/{}.", .{ handled, total });
         }
@@ -364,7 +365,7 @@ pub fn Server(
                 log.err("Encountered an error while configuring the client: {}", .{e});
                 return e;
             };
-            const interval: i64 = base_conf.config.polling_interval;
+            const interval: u64 = base_conf.config.polling_interval;
             while (true) {
                 self.handlePublish() catch |e| {
                     log.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
