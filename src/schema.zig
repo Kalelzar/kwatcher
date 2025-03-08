@@ -134,3 +134,18 @@ pub const Heartbeat = struct {
         );
     }
 };
+
+pub const Metrics = struct {
+    pub fn V1() type {
+        return Schema(
+            1,
+            "metrics",
+            struct {
+                timestamp: i64,
+                client: Client.V1,
+                user: User.V1,
+                metrics: []const u8, // In Prometheus format.
+            },
+        );
+    }
+};

@@ -6,6 +6,9 @@ const config = @import("config.zig");
 const meta = @import("meta.zig");
 const mem = @import("mem.zig");
 const client = @import("client.zig");
+const ds = @import("disjoint_slice.zig");
+
+const DefaultRoutes = @import("default_routes.zig");
 
 const Injector = @import("injector.zig").Injector;
 const Route = @import("route.zig").Route;
@@ -84,6 +87,7 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
             } else {
                 var timer = Timer.init(allocator);
                 try timer.register("heartbeat", base_config.config.heartbeat_interval);
+                try timer.register("metrics", base_config.config.metrics_interval_ns);
                 self.timer = timer;
                 return self.timer.?;
             }
@@ -181,6 +185,12 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
     };
 }
 
+const DefaultEventProvider = struct {
+    pub fn metrics(timer: Timer) !bool {
+        return try timer.ready("metrics");
+    }
+};
+
 pub fn Server(
     comptime client_name: []const u8,
     comptime client_version: []const u8,
@@ -188,13 +198,14 @@ pub fn Server(
     comptime UserScopedDependencies: type,
     comptime UserConfig: type,
     comptime Routes: type,
-    comptime EventHandler: type,
+    comptime EventProvider: type,
 ) type {
     return struct {
         const Self = @This();
         deps: Dependencies(UserConfig, client_name, client_version),
         user_deps: UserSingletonDependencies,
         routes: []const Route,
+        default_routes: []const Route,
 
         pub fn init(allocator: std.mem.Allocator, deps: UserSingletonDependencies) !Self {
             const default_deps = try Dependencies(
@@ -202,12 +213,14 @@ pub fn Server(
                 client_name,
                 client_version,
             ).init(allocator);
-            const routes = comptime Route.from(Routes, EventHandler);
+            const routes = comptime Route.from(Routes, EventProvider);
+            const default_routes = comptime Route.from(DefaultRoutes, DefaultEventProvider);
 
             return .{
                 .user_deps = deps,
                 .deps = default_deps,
                 .routes = routes,
+                .default_routes = default_routes,
             };
         }
 
@@ -226,7 +239,9 @@ pub fn Server(
             var internal_arena = try user_injector.require(mem.InternalArena);
             const base_conf = try user_injector.require(config.BaseConfig);
 
-            for (self.routes) |route| {
+            var routes = ds.DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
+            var iter = routes.iterator();
+            while (iter.next()) |route| {
                 try cl.openChannel(
                     route.metadata.exchange,
                     route.metadata.queue,
@@ -239,8 +254,8 @@ pub fn Server(
             }
             while (true) {
                 var timer = try base_injector.require(Timer);
-                for (0..self.routes.len) |i| {
-                    const route = self.routes[i];
+                var route_iterator = routes.iterator();
+                while (route_iterator.next()) |route| {
                     if (route.method != .publish) continue;
                     if (route.handlers.event) |event_handler| {
                         var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
@@ -279,7 +294,8 @@ pub fn Server(
                     const envelope = try cl.consume(interval);
                     if (envelope) |response| {
                         total += 1;
-                        for (self.routes) |route| {
+                        var pub_route_iterator = routes.iterator();
+                        while (pub_route_iterator.next()) |route| {
                             if (route.method != .consume) continue;
                             if (!std.mem.eql(u8, route.metadata.queue, response.queue) or
                                 !std.mem.eql(u8, route.metadata.exchange, response.exchange)) continue;
