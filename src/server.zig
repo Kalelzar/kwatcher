@@ -69,7 +69,7 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
         arena: *std.heap.ArenaAllocator,
         internal_arena: mem.InternalArena,
 
-        client_cache: ?client.AmqpClient = null,
+        client_cache: ?*client.AmqpClient = null,
         timer: ?Timer = null,
         user_info: ?schema.UserInfo = null,
         user_config: ?UserConfig = null,
@@ -145,11 +145,12 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
             }
         }
 
-        pub fn clientFactory(self: *Self, allocator: std.mem.Allocator, config_file: config.BaseConfig) !client.AmqpClient {
+        pub fn clientFactory(self: *Self, allocator: std.mem.Allocator, config_file: config.BaseConfig) !*client.AmqpClient {
             if (self.client_cache) |res| {
                 return res;
             } else {
-                const amqp_client = try client.AmqpClient.init(allocator, config_file, client_name);
+                const amqp_client = try allocator.create(client.AmqpClient);
+                amqp_client.* = try client.AmqpClient.init(allocator, config_file, client_name);
                 self.client_cache = amqp_client;
                 return self.client_cache.?;
             }
@@ -174,8 +175,10 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
             if (self.user_info) |u|
                 u.deinit();
 
-            if (self.client_cache) |c|
+            if (self.client_cache) |c| {
                 c.deinit();
+                self.allocator.destroy(c);
+            }
 
             self.arena.deinit();
             self.allocator.destroy(self.arena);
@@ -229,15 +232,11 @@ pub fn Server(
             _ = self.deps.deinit();
         }
 
-        pub fn run(self: *Self) !void {
+        pub fn configure(self: *Self) !void {
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(&self.user_deps, &base_injector);
-            const IT = std.meta.Tuple(&.{*Injector});
-            const ConsumeArgs = std.meta.Tuple(&.{ *Injector, []const u8 });
 
-            var cl = try user_injector.require(client.AmqpClient);
-            var internal_arena = try user_injector.require(mem.InternalArena);
-            const base_conf = try user_injector.require(config.BaseConfig);
+            var cl = try user_injector.require(*client.AmqpClient);
 
             var routes = ds.DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
             var iter = routes.iterator();
@@ -252,89 +251,129 @@ pub fn Server(
                     try channel.configureConsume();
                 }
             }
-            while (true) {
-                var timer = try base_injector.require(Timer);
-                var route_iterator = routes.iterator();
-                while (route_iterator.next()) |route| {
-                    if (route.method != .publish) continue;
-                    if (route.handlers.event) |event_handler| {
-                        var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
-                        var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
-                        defer scoped_injector.maybeDeconstruct();
-                        const args = IT{&scoped_injector};
-                        const ready = @call(.auto, event_handler, args) catch |e| {
+        }
+
+        pub fn handlePublish(self: *Self) !void {
+            var base_injector = try Injector.init(&self.deps, null);
+            var user_injector = try Injector.init(&self.user_deps, &base_injector);
+            const PublishArgs = std.meta.Tuple(&.{*Injector});
+            var cl = try user_injector.require(*client.AmqpClient);
+            var internal_arena = try user_injector.require(mem.InternalArena);
+            var timer = try base_injector.require(Timer);
+
+            var routes = ds.DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
+            var route_iterator = routes.iterator();
+
+            while (route_iterator.next()) |route| {
+                if (route.method != .publish) continue;
+                if (route.handlers.event) |event_handler| {
+                    var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
+                    var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
+                    defer scoped_injector.maybeDeconstruct();
+                    const args = PublishArgs{&scoped_injector};
+                    const ready = @call(.auto, event_handler, args) catch |e| {
+                        log.err(
+                            "Encountered an error while querying the event provider for '{s}/{s}': {}",
+                            .{ route.metadata.exchange, route.metadata.queue, e },
+                        );
+                        continue;
+                    };
+                    if (ready) {
+                        const msg = @call(.auto, route.handlers.publish.?, args) catch |e| {
                             log.err(
-                                "Encountered an error while querying the event provider for '{s}/{s}': {}",
+                                "Encountered an error while publishing an event on '{s}/{s}': {}",
                                 .{ route.metadata.exchange, route.metadata.queue, e },
                             );
                             continue;
                         };
-                        if (ready) {
-                            const msg = @call(.auto, route.handlers.publish.?, args) catch |e| {
+                        var current_channel = try cl.getChannel(route.metadata.queue);
+                        try current_channel.publish(msg);
+                    }
+                }
+                internal_arena.reset();
+            }
+            try timer.step();
+            cl.reset();
+        }
+
+        pub fn handleConsume(self: *Self, interval: i64) !void {
+            const ConsumeArgs = std.meta.Tuple(&.{ *Injector, []const u8 });
+            var base_injector = try Injector.init(&self.deps, null);
+            var user_injector = try Injector.init(&self.user_deps, &base_injector);
+            var cl = try user_injector.require(*client.AmqpClient);
+            var internal_arena = try user_injector.require(mem.InternalArena);
+            var routes = ds.DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
+
+            var remaining = interval;
+            var total: i32 = 0;
+            var handled: i32 = 0;
+            main: while (remaining > 0) {
+                const start = try std.time.Instant.now();
+                const envelope = try cl.consume(remaining);
+                if (envelope) |response| {
+                    total += 1;
+                    var pub_route_iterator = routes.iterator();
+                    while (pub_route_iterator.next()) |route| {
+                        if (route.method != .consume) continue;
+                        if (!std.mem.eql(u8, route.metadata.queue, response.queue) or
+                            !std.mem.eql(u8, route.metadata.exchange, response.exchange)) continue;
+                        handled += 1;
+                        {
+                            var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
+                            var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
+                            defer scoped_injector.maybeDeconstruct();
+                            const args = ConsumeArgs{ &scoped_injector, response.message.body };
+                            @call(.auto, route.handlers.consume.?, args) catch |e| {
                                 log.err(
-                                    "Encountered an error while publishing an event on '{s}/{s}': {}",
-                                    .{ route.metadata.exchange, route.metadata.queue, e },
+                                    "Encountered an error while consuming a message on '{s}/{s}': {}\n\t{s}\n",
+                                    .{ route.metadata.exchange, route.metadata.queue, e, response.message.body },
                                 );
-                                continue;
+                                var current_channel = try cl.getChannel(route.metadata.queue);
+                                try current_channel.reject(response.delivery_tag, false);
                             };
                             var current_channel = try cl.getChannel(route.metadata.queue);
-                            try current_channel.publish(msg);
+                            try current_channel.ack(response.delivery_tag);
+                            const end = try std.time.Instant.now();
+                            const diff: i64 = @intCast(end.since(start));
+                            remaining -= diff;
                         }
-                    }
-                    internal_arena.reset();
-                }
-                try timer.step();
-                cl.reset();
+                        internal_arena.reset();
+                        // Release the memory used up by the message processing.
+                        // In high volume scenarios it might be worth letting memory accumulate
+                        // and then releasing it at the end though since we hold on to the memory
+                        // this probably doesn't cost us very much.
 
-                var interval: i64 = base_conf.config.polling_interval;
-                var total: i32 = 0;
-                var handled: i32 = 0;
-                main: while (interval > 0) {
-                    const start = try std.time.Instant.now();
-                    const envelope = try cl.consume(interval);
-                    if (envelope) |response| {
-                        total += 1;
-                        var pub_route_iterator = routes.iterator();
-                        while (pub_route_iterator.next()) |route| {
-                            if (route.method != .consume) continue;
-                            if (!std.mem.eql(u8, route.metadata.queue, response.queue) or
-                                !std.mem.eql(u8, route.metadata.exchange, response.exchange)) continue;
-                            handled += 1;
-                            {
-                                var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
-                                var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
-                                defer scoped_injector.maybeDeconstruct();
-                                const args = ConsumeArgs{ &scoped_injector, response.message.body };
-                                @call(.auto, route.handlers.consume.?, args) catch |e| {
-                                    log.err(
-                                        "Encountered an error while consuming a message on '{s}/{s}': {}\n\t{s}\n",
-                                        .{ route.metadata.exchange, route.metadata.queue, e, response.message.body },
-                                    );
-                                    var current_channel = try cl.getChannel(route.metadata.queue);
-                                    try current_channel.reject(response.delivery_tag, false);
-                                };
-                                var current_channel = try cl.getChannel(route.metadata.queue);
-                                try current_channel.ack(response.delivery_tag);
-                                const end = try std.time.Instant.now();
-                                const diff: i64 = @intCast(end.since(start));
-                                interval -= diff;
-                            }
-                            internal_arena.reset();
-                            // Release the memory used up by the message processing.
-                            // In high volume scenarios it might be worth letting memory accumulate
-                            // and then releasing it at the end though since we hold on to the memory
-                            // this probably doesn't cost us very much.
-
-                            continue :main; // We can just let the loop fall through but this way we
-                            // are already prepped in case we need to add more substantial
-                            // logic after i.e rejection and whatnot
-                        }
+                        continue :main; // We can just let the loop fall through but this way we
+                        // are already prepped in case we need to add more substantial
+                        // logic after i.e rejection and whatnot
                     }
-                    const end = try std.time.Instant.now();
-                    const diff: i64 = @intCast(end.since(start));
-                    interval -= diff;
                 }
-                //std.log.info("Cycle: {}/{}.", .{ handled, total });
+                const end = try std.time.Instant.now();
+                const diff: i64 = @intCast(end.since(start));
+                remaining -= diff;
+            }
+            //std.log.info("Cycle: {}/{}.", .{ handled, total });
+        }
+
+        pub fn run(self: *Self) !void {
+            var base_injector = try Injector.init(&self.deps, null);
+            var user_injector = try Injector.init(&self.user_deps, &base_injector);
+            const base_conf = try user_injector.require(config.BaseConfig);
+
+            self.configure() catch |e| {
+                log.err("Encountered an error while configuring the client: {}", .{e});
+                return e;
+            };
+            const interval: i64 = base_conf.config.polling_interval;
+            while (true) {
+                self.handlePublish() catch |e| {
+                    log.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
+                    return e;
+                };
+                self.handleConsume(interval) catch |e| {
+                    log.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
+                    return e;
+                };
             }
         }
     };
