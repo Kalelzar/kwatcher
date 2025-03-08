@@ -120,6 +120,22 @@ fn openConfigFile(comptime ConfigType: type, allocator: std.mem.Allocator, path:
     return parsed;
 }
 
+fn updateConfigFile(path: []const u8, config: anytype) !void {
+    const file = try std.fs.openFileAbsolute(
+        path,
+        std.fs.File.OpenFlags{ .mode = .write_only },
+    );
+    defer file.close();
+
+    try file.seekTo(0);
+    const file_writer = file.writer();
+    try std.json.stringify(
+        config,
+        .{ .whitespace = .indent_2 },
+        file_writer,
+    );
+}
+
 const LoadPaths = struct {
     paths: std.ArrayList([]u8),
     allocator: std.mem.Allocator,
@@ -211,6 +227,21 @@ pub fn findConfigFile(comptime ConfigType: type, allocator: std.mem.Allocator, c
     }
 
     return result;
+}
+
+pub fn findConfigFileToUpdate(config: anytype, allocator: std.mem.Allocator, comptime configName: []const u8) !void {
+    const loadPath = try buildConfigPaths(allocator, configName);
+    defer loadPath.deinit();
+
+    for (loadPath.paths.items) |path| {
+        updateConfigFile(path, config) catch |err| switch (err) {
+            error.FileNotFound => continue,
+            else => |other_error| return other_error,
+        };
+        return;
+    }
+
+    return error.FileNotFound;
 }
 
 pub fn Config(comptime Extension: type) type {
