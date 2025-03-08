@@ -9,6 +9,7 @@ pub const BaseConfig = struct {
     server: struct {
         host: []const u8 = "localhost",
         port: i32 = 5672,
+        heartbeat: i32 = 5,
     } = .{},
     credentials: struct {
         username: []const u8,
@@ -27,7 +28,7 @@ pub const BaseConfig = struct {
         debug: bool = false,
         heartbeat_interval: u64 = std.time.ns_per_s * 5, //nanoseconds. TODO: Update name.
         metrics_interval_ns: u64 = std.time.ns_per_s * 5, //nanoseconds
-        polling_interval: i64 = std.time.us_per_s / 2, //microseconds. TODO: Update name.
+        polling_interval: u64 = std.time.ns_per_s / 2, //nanoseconds. TODO: Update name.
         timeout: struct {
             const Self = @This();
             seconds: i32 = 60,
@@ -52,6 +53,7 @@ pub const _BaseNullable = validate(struct {
     server: struct {
         host: ?[]const u8 = null,
         port: ?i32 = null,
+        heartbeat: ?i32 = null,
     } = .{},
     credentials: struct {
         username: ?[]const u8 = null,
@@ -64,7 +66,7 @@ pub const _BaseNullable = validate(struct {
         debug: ?bool = null,
         heartbeat_interval: ?u64 = null, //nanoseconds
         metrics_interval_ns: ?u64 = null, //nanoseconds
-        polling_interval: ?i64 = null, //microseconds
+        polling_interval: ?u64 = null, //nanoseconds
         timeout: struct {
             const Self = @This();
             seconds: ?i32 = null,
