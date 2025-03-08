@@ -25,8 +25,9 @@ pub const BaseConfig = struct {
     } = .{},
     config: struct {
         debug: bool = false,
-        heartbeat_interval: u64 = std.time.ns_per_s * 5, //nanoseconds
-        polling_interval: i64 = std.time.us_per_s / 2, //microseconds
+        heartbeat_interval: u64 = std.time.ns_per_s * 5, //nanoseconds. TODO: Update name.
+        metrics_interval_ns: u64 = std.time.ns_per_s * 5, //nanoseconds
+        polling_interval: i64 = std.time.us_per_s / 2, //microseconds. TODO: Update name.
         timeout: struct {
             const Self = @This();
             seconds: i32 = 60,
@@ -61,7 +62,8 @@ pub const _BaseNullable = validate(struct {
     } = .{},
     config: struct {
         debug: ?bool = null,
-        heartbeat_interval: ?u64 = null, //microseconds
+        heartbeat_interval: ?u64 = null, //nanoseconds
+        metrics_interval_ns: ?u64 = null, //nanoseconds
         polling_interval: ?i64 = null, //microseconds
         timeout: struct {
             const Self = @This();
