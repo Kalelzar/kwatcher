@@ -1,14 +1,12 @@
 const std = @import("std");
 const schema = @import("schema.zig");
+const mem = @import("mem.zig");
+const metrics = @import("metrics.zig");
 
 pub fn @"publish:metrics amq.direct/metrics"(
     user_info: schema.UserInfo,
     client_info: schema.ClientInfo,
-) schema.Metrics.V1() {
-    return .{
-        .timestamp = std.time.microTimestamp(),
-        .user = user_info.v1(),
-        .client = client_info.v1(),
-        .metrics = "", // TODO: Collect actual metrics. I know. Shocking.
-    };
+    arena: *mem.InternalArena,
+) !schema.Metrics.V1() {
+    return metrics.v1(arena.allocator(), client_info.v1(), user_info.v1());
 }

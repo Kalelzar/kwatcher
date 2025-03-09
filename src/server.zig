@@ -4,6 +4,7 @@ const log = std.log.scoped(.kwatcher);
 const schema = @import("schema.zig");
 const config = @import("config.zig");
 const meta = @import("meta.zig");
+const metrics = @import("metrics.zig");
 const mem = @import("mem.zig");
 const client = @import("client.zig");
 const ds = @import("disjoint_slice.zig");
@@ -211,6 +212,7 @@ pub fn Server(
         default_routes: []const Route,
 
         pub fn init(allocator: std.mem.Allocator, deps: UserSingletonDependencies) !Self {
+            try metrics.initialize(allocator, client_name, client_version, .{});
             const default_deps = try Dependencies(
                 UserConfig,
                 client_name,
@@ -249,6 +251,9 @@ pub fn Server(
                 if (route.method == .consume) {
                     var channel = try cl.getChannel(route.metadata.queue);
                     try channel.configureConsume();
+                    try metrics.consumeQueue(route.metadata.queue);
+                } else {
+                    try metrics.publishQueue(route.metadata.queue, route.metadata.exchange);
                 }
             }
         }
@@ -280,6 +285,7 @@ pub fn Server(
                     };
                     if (ready) {
                         const msg = @call(.auto, route.handlers.publish.?, args) catch |e| {
+                            try metrics.publishError(route.metadata.queue, route.metadata.exchange);
                             log.err(
                                 "Encountered an error while publishing an event on '{s}/{s}': {}",
                                 .{ route.metadata.exchange, route.metadata.queue, e },
@@ -288,6 +294,7 @@ pub fn Server(
                         };
                         var current_channel = try cl.getChannel(route.metadata.queue);
                         try current_channel.publish(msg);
+                        try metrics.publish(route.metadata.queue, route.metadata.exchange);
                     }
                 }
                 internal_arena.reset();
@@ -313,6 +320,7 @@ pub fn Server(
                 const envelope = try cl.consume(rabbitmq_wait);
                 if (envelope) |response| {
                     total += 1;
+                    try metrics.consume(response.queue);
                     var pub_route_iterator = routes.iterator();
                     while (pub_route_iterator.next()) |route| {
                         if (route.method != .consume) continue;
@@ -334,6 +342,7 @@ pub fn Server(
                             };
                             var current_channel = try cl.getChannel(route.metadata.queue);
                             try current_channel.ack(response.delivery_tag);
+                            try metrics.ack(route.metadata.queue);
                             const end = try std.time.Instant.now();
                             const diff = end.since(start);
                             remaining -= @intCast(diff);
@@ -367,6 +376,8 @@ pub fn Server(
             };
             const interval: u64 = base_conf.config.polling_interval;
             while (true) {
+                try metrics.resetCycle();
+                const start = try std.time.Instant.now();
                 self.handlePublish() catch |e| {
                     log.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
                     return e;
@@ -375,6 +386,9 @@ pub fn Server(
                     log.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
                     return e;
                 };
+                const end = try std.time.Instant.now();
+                const duration_us = end.since(start) / std.time.ns_per_us;
+                try metrics.cycle(duration_us);
             }
         }
     };

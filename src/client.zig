@@ -6,6 +6,7 @@ const uuid = @import("uuid");
 
 const schema = @import("schema.zig");
 const config = @import("config.zig");
+const metrics = @import("metrics.zig");
 
 pub const Channel = struct {
     queue: []const u8,
@@ -185,6 +186,8 @@ pub const AmqpClient = struct {
         try channel.bind();
 
         try self.channels.put(queue, channel);
+        try metrics.addChannel();
+        try metrics.addQueue();
     }
 
     pub fn consume(self: *AmqpClient, timeout: i64) !?Response {
