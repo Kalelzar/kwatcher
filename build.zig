@@ -7,6 +7,7 @@ const Builder = struct {
     check_step: *std.Build.Step,
     zamqp: *std.Build.Module,
     uuid: *std.Build.Module,
+    metrics: *std.Build.Module,
     kwatcher: *std.Build.Module,
     kwatcher_example: *std.Build.Module,
 
@@ -18,11 +19,13 @@ const Builder = struct {
 
         const zamqp = b.dependency("zamqp", .{ .target = target, .optimize = opt }).module("zamqp");
         const uuid = b.dependency("uuid", .{ .target = target, .optimize = opt }).module("uuid");
+        const metrics = b.dependency("metrics", .{ .target = target, .optimize = opt }).module("metrics");
         const kwatcher = b.addModule("kwatcher", .{
             .root_source_file = b.path("src/watcher.zig"),
         });
         kwatcher.addImport("zamqp", zamqp);
         kwatcher.addImport("uuid", uuid);
+        kwatcher.addImport("metrics", metrics);
         kwatcher.link_libc = true;
 
         const kwatcher_example = b.createModule(.{
@@ -39,6 +42,7 @@ const Builder = struct {
             .uuid = uuid,
             .kwatcher = kwatcher,
             .kwatcher_example = kwatcher_example,
+            .metrics = metrics,
         };
     }
 
@@ -52,6 +56,7 @@ const Builder = struct {
         step.linkSystemLibrary("rabbitmq");
         step.root_module.addImport("zamqp", self.zamqp);
         step.root_module.addImport("uuid", self.uuid);
+        step.root_module.addImport("metrics", self.metrics);
     }
 
     fn addExecutable(self: *Builder, name: []const u8, root_source_file: []const u8) *std.Build.Step.Compile {

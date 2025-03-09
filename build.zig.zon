@@ -61,6 +61,10 @@
             .url = "git+https://github.com/Kalelzar/zamqp.git#bec86ff198e7f601a65644a0dee0d8b3a95a6aeb",
             .hash = "zamqp-0.0.0--WXK-C_TAQA4PX-ySo2JnZPHbxlDmLqmn_lX4rHvggSG",
         },
+        .metrics = .{
+            .url = "https://github.com/karlseguin/metrics.zig/archive/cf2797bcb3aea7e5cdaf4de39c5550c70796e7b1.tar.gz",
+            .hash = "122061f30077ef518dd435d397598ab3c45daa3d2c25e6b45383fb94d0bd2c3af1af",
+        },
     },
 
     // Specifies the set of files and directories that are included in this package.
