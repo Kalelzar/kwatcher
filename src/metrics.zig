@@ -5,6 +5,7 @@ const meta = @import("meta.zig");
 const schema = @import("schema.zig");
 
 const Metrics = struct {
+    total_memory_allocated: MemUsage,
     published_messages: Publish,
     total_published_messages: TotalPublish,
     consumed_messages: Consume,
@@ -27,6 +28,7 @@ const Metrics = struct {
     const TargetLabel = meta.MergeStructs(QueueLabel, ExchangeLabel);
     const FullLabel = meta.MergeStructs(ClientLabel, TargetLabel);
 
+    const MemUsage = m.Gauge(i64);
     const Publish = m.CounterVec(u64, FullLabel);
     const TotalPublish = m.CounterVec(u64, ClientLabel);
     const Consume = m.CounterVec(u64, ClientWithQueueLabel);
@@ -52,6 +54,11 @@ pub fn initialize(allocator: std.mem.Allocator, client_name: []const u8, client_
         .client_version = client_version,
     };
     metrics = .{
+        .total_memory_allocated = Metrics.MemUsage.init(
+            "kwatcher_total_memory_bytes",
+            .{ .help = "The total allocated memory by the kwatcher" },
+            opts,
+        ),
         .published_messages = try Metrics.Publish.init(
             allocator,
             "kwatcher_published",
@@ -239,6 +246,14 @@ pub fn consumeQueue(queue: []const u8) !void {
         .queue = queue,
     };
     try metrics.consuming_from.set(label, 1);
+}
+
+pub fn alloc(size: usize) void {
+    metrics.total_memory_allocated.incrBy(@as(i64, @intCast(size)));
+}
+
+pub fn free(size: usize) void {
+    metrics.total_memory_allocated.incrBy(-@as(i64, @intCast(size)));
 }
 
 pub fn write(writer: anytype) !void {

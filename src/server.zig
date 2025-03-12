@@ -396,6 +396,20 @@ pub fn Server(
             }
         }
 
+        pub fn reset(self: *Self) !void {
+            var base_injector = try Injector.init(&self.deps, null);
+            var user_injector = try Injector.init(&self.user_deps, &base_injector);
+            const allocator = try user_injector.require(std.mem.Allocator);
+
+            if (self.deps.client_cache) |cl| {
+                cl.deinit(); // This is probably pointless since the connection is dead anyway but might as well.
+                allocator.destroy(cl);
+            }
+            self.deps.client_cache = null; // let it get reinitialized again by the factory.
+            std.time.sleep(self.backoff * std.time.ns_per_s);
+            try self.configure(); // if this fails we let it abort.
+        }
+
         pub fn start(self: *Self) !void {
             // In contrast to run, start will try to connect again in case a disconnection occurs.
             var base_injector = try Injector.init(&self.deps, null);

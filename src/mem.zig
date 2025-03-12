@@ -28,3 +28,6 @@ pub const InternalArena = struct {
         self.alloc.destroy(self.arena);
     }
 };
+
+pub const InstrumentedAllocator = @import("allocator.zig").InstrumentedAllocator;
+pub const MemMetricsShim = @import("allocator.zig").MemMetricsShim;
