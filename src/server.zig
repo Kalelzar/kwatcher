@@ -416,6 +416,8 @@ pub fn Server(
                         .{ e, self.retries, self.backoff },
                     );
                     std.time.sleep(self.backoff * std.time.ns_per_s);
+                    //NOTE: It might be worth it to clean out the configuration as well.
+                    //      So we can potentially 'hot-reload' a configuration that caused the error.
                     if (self.deps.client_cache) |cl| {
                         cl.deinit(); // This is probably pointless since the connection is dead anyway but might as well.
                         allocator.destroy(cl);

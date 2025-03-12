@@ -116,4 +116,9 @@ pub fn build(b: *std.Build) !void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+
+    const t = builder.addTest("test", "test/test.zig");
+    builder.addDependencies(t);
+    t.root_module.addImport("kwatcher", builder.kwatcher);
+    try builder.installAndCheck(t);
 }
