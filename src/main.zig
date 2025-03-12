@@ -70,14 +70,7 @@ const ScopedDeps = struct {};
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var instrumented_allocator = kwatcher.mem.InstrumentedAllocator.init(
-        gpa.allocator(),
-        .{
-            .free = &kwatcher.metrics.free,
-            .alloc = &kwatcher.metrics.alloc,
-        },
-    );
-    const allocator = instrumented_allocator.allocator();
+    const allocator = gpa.allocator();
     const deps = SingletonDeps{};
     var server = try kwatcher.server.Server(
         "test",

@@ -206,6 +206,7 @@ pub fn Server(
 ) type {
     return struct {
         const Self = @This();
+        instrumented_allocator: *mem.InstrumentedAllocator,
         deps: Dependencies(UserConfig, client_name, client_version),
         user_deps: UserSingletonDependencies,
         routes: []const Route,
@@ -214,16 +215,26 @@ pub fn Server(
         backoff: u64 = 5,
 
         pub fn init(allocator: std.mem.Allocator, deps: UserSingletonDependencies) !Self {
-            try metrics.initialize(allocator, client_name, client_version, .{});
+            var instrumented_allocator = try allocator.create(mem.InstrumentedAllocator);
+            instrumented_allocator.* = mem.InstrumentedAllocator.init(
+                allocator,
+                .{
+                    .free = &metrics.free,
+                    .alloc = &metrics.alloc,
+                },
+            );
+            const alloc = instrumented_allocator.allocator();
+            try metrics.initialize(alloc, client_name, client_version, .{});
             const default_deps = try Dependencies(
                 UserConfig,
                 client_name,
                 client_version,
-            ).init(allocator);
+            ).init(alloc);
             const routes = comptime Route.from(Routes, EventProvider);
             const default_routes = comptime Route.from(DefaultRoutes, DefaultEventProvider);
 
             return .{
+                .instrumented_allocator = instrumented_allocator,
                 .user_deps = deps,
                 .deps = default_deps,
                 .routes = routes,
@@ -234,6 +245,7 @@ pub fn Server(
         pub fn deinit(self: *Self) void {
             log.info("Shutting server down...", .{});
             _ = self.deps.deinit();
+            self.instrumented_allocator.*.child_allocator.destroy(self.instrumented_allocator);
         }
 
         pub fn configure(self: *Self) !void {
