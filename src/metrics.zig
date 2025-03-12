@@ -28,7 +28,7 @@ const Metrics = struct {
     const TargetLabel = meta.MergeStructs(QueueLabel, ExchangeLabel);
     const FullLabel = meta.MergeStructs(ClientLabel, TargetLabel);
 
-    const MemUsage = m.Gauge(i64);
+    const MemUsage = m.GaugeVec(i64, ClientLabel);
     const Publish = m.CounterVec(u64, FullLabel);
     const TotalPublish = m.CounterVec(u64, ClientLabel);
     const Consume = m.CounterVec(u64, ClientWithQueueLabel);
@@ -47,14 +47,18 @@ const Metrics = struct {
 
 var metrics = m.initializeNoop(Metrics);
 var client_label: Metrics.ClientLabel = undefined;
+var memsafe_buffer: [4 * 1024 * 1024]u8 = undefined;
+var buf_alloc: std.heap.FixedBufferAllocator = undefined;
 
 pub fn initialize(allocator: std.mem.Allocator, client_name: []const u8, client_version: []const u8, comptime opts: m.RegistryOpts) !void {
+    buf_alloc = std.heap.FixedBufferAllocator.init(&memsafe_buffer);
     client_label = .{
         .client_name = client_name,
         .client_version = client_version,
     };
     metrics = .{
-        .total_memory_allocated = Metrics.MemUsage.init(
+        .total_memory_allocated = try Metrics.MemUsage.init(
+            buf_alloc.allocator(),
             "kwatcher_total_memory_bytes",
             .{ .help = "The total allocated memory by the kwatcher" },
             opts,
@@ -249,11 +253,11 @@ pub fn consumeQueue(queue: []const u8) !void {
 }
 
 pub fn alloc(size: usize) void {
-    metrics.total_memory_allocated.incrBy(@as(i64, @intCast(size)));
+    metrics.total_memory_allocated.incrBy(client_label, @as(i64, @intCast(size))) catch unreachable;
 }
 
 pub fn free(size: usize) void {
-    metrics.total_memory_allocated.incrBy(-@as(i64, @intCast(size)));
+    metrics.total_memory_allocated.incrBy(client_label, -@as(i64, @intCast(size))) catch unreachable;
 }
 
 pub fn write(writer: anytype) !void {
