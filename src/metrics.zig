@@ -2,6 +2,7 @@ const std = @import("std");
 const m = @import("metrics");
 
 const meta = @import("meta.zig");
+const mem = @import("mem.zig");
 const schema = @import("schema.zig");
 
 const Metrics = struct {
@@ -275,4 +276,14 @@ pub fn v1(arena_allocator: std.mem.Allocator, client_info: schema.Client.V1, use
         .user = user_info,
         .metrics = arr.items,
     };
+}
+
+pub fn instrumentAllocator(allocator: std.mem.Allocator) mem.InstrumentedAllocator {
+    return mem.InstrumentedAllocator.init(
+        allocator,
+        .{
+            .free = &free,
+            .alloc = &alloc,
+        },
+    );
 }
