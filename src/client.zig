@@ -67,7 +67,12 @@ pub const Channel = struct {
         );
     }
 
+    pub fn configureQoS(self: *Channel) !void {
+        try self.channel.basic_qos(0, 200, false); // RabbitMQ does not support prefetch_size!=0
+    }
+
     pub fn configureConsume(self: *Channel) !void {
+        try self.configureQoS();
         _ = try self.channel.basic_consume(
             amqp.bytes_t.init(self.queue),
             .{
