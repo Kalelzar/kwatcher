@@ -47,7 +47,7 @@ const Metrics = struct {
 
 var metrics = m.initializeNoop(Metrics);
 var client_label: Metrics.ClientLabel = undefined;
-var memsafe_buffer: [4 * 1024 * 1024]u8 = undefined;
+var memsafe_buffer: [4 * 1024]u8 = undefined;
 var buf_alloc: std.heap.FixedBufferAllocator = undefined;
 
 pub fn initialize(allocator: std.mem.Allocator, client_name: []const u8, client_version: []const u8, comptime opts: m.RegistryOpts) !void {
