@@ -1,15 +1,19 @@
 const std = @import("std");
+const metrics = @import("metrics.zig");
 
 pub const InternalArena = struct {
     alloc: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
+    instrumented: *InstrumentedAllocator,
 
     pub fn init(alloc: std.mem.Allocator) !InternalArena {
         const result = InternalArena{
             .alloc = alloc,
             .arena = try alloc.create(std.heap.ArenaAllocator),
+            .instrumented = try alloc.create(InstrumentedAllocator),
         };
-        result.arena.* = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        result.instrumented.* = metrics.instrumentAllocator(std.heap.page_allocator);
+        result.arena.* = std.heap.ArenaAllocator.init(result.instrumented.allocator());
         return result;
     }
 
@@ -26,6 +30,7 @@ pub const InternalArena = struct {
     pub fn deinit(self: *InternalArena) void {
         self.arena.deinit();
         self.alloc.destroy(self.arena);
+        self.alloc.destroy(self.instrumented);
     }
 };
 

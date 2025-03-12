@@ -69,6 +69,7 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
         allocator: std.mem.Allocator,
         arena: *std.heap.ArenaAllocator,
         internal_arena: mem.InternalArena,
+        instrumented_allocator: *mem.InstrumentedAllocator,
 
         client_cache: ?*client.AmqpClient = null,
         timer: ?Timer = null,
@@ -159,13 +160,16 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
 
         pub fn init(allocator: std.mem.Allocator) !Self {
             const arr_ptr = try allocator.create(std.heap.ArenaAllocator);
+            const instr_ptr = try allocator.create(mem.InstrumentedAllocator);
             errdefer allocator.destroy(arr_ptr);
             const result = Self{
                 .allocator = allocator,
+                .instrumented_allocator = instr_ptr,
                 .arena = arr_ptr,
                 .internal_arena = try mem.InternalArena.init(allocator),
             };
-            result.arena.* = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            result.instrumented_allocator.* = metrics.instrumentAllocator(std.heap.page_allocator);
+            result.arena.* = std.heap.ArenaAllocator.init(instr_ptr.allocator());
             return result;
         }
 
@@ -183,6 +187,7 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
 
             self.arena.deinit();
             self.allocator.destroy(self.arena);
+            self.allocator.destroy(self.instrumented_allocator);
 
             return .{};
         }
@@ -216,13 +221,7 @@ pub fn Server(
 
         pub fn init(allocator: std.mem.Allocator, deps: UserSingletonDependencies) !Self {
             var instrumented_allocator = try allocator.create(mem.InstrumentedAllocator);
-            instrumented_allocator.* = mem.InstrumentedAllocator.init(
-                allocator,
-                .{
-                    .free = &metrics.free,
-                    .alloc = &metrics.alloc,
-                },
-            );
+            instrumented_allocator.* = metrics.instrumentAllocator(allocator);
             const alloc = instrumented_allocator.allocator();
             try metrics.initialize(alloc, client_name, client_version, .{});
             const default_deps = try Dependencies(
