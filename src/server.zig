@@ -210,6 +210,8 @@ pub fn Server(
         user_deps: UserSingletonDependencies,
         routes: []const Route,
         default_routes: []const Route,
+        retries: i8 = 0,
+        backoff: u64 = 5,
 
         pub fn init(allocator: std.mem.Allocator, deps: UserSingletonDependencies) !Self {
             try metrics.initialize(allocator, client_name, client_version, .{});
@@ -316,7 +318,7 @@ pub fn Server(
             var handled: i32 = 0;
             main: while (remaining > 0) {
                 const rabbitmq_wait = @divTrunc(remaining, std.time.ns_per_us);
-                const start = try std.time.Instant.now();
+                const start_time = try std.time.Instant.now();
                 const envelope = try cl.consume(rabbitmq_wait);
                 if (envelope) |response| {
                     total += 1;
@@ -343,8 +345,8 @@ pub fn Server(
                             var current_channel = try cl.getChannel(route.metadata.queue);
                             try current_channel.ack(response.delivery_tag);
                             try metrics.ack(route.metadata.queue);
-                            const end = try std.time.Instant.now();
-                            const diff = end.since(start);
+                            const end_time = try std.time.Instant.now();
+                            const diff = end_time.since(start_time);
                             remaining -= @intCast(diff);
                         }
                         internal_arena.reset();
@@ -358,8 +360,8 @@ pub fn Server(
                         // logic after i.e rejection and whatnot
                     }
                 }
-                const end = try std.time.Instant.now();
-                const diff = end.since(start);
+                const end_time = try std.time.Instant.now();
+                const diff = end_time.since(start_time);
                 remaining -= @intCast(diff);
             }
             //std.log.info("Cycle: {}/{}.", .{ handled, total });
@@ -377,7 +379,7 @@ pub fn Server(
             const interval: u64 = base_conf.config.polling_interval;
             while (true) {
                 try metrics.resetCycle();
-                const start = try std.time.Instant.now();
+                const start_time = try std.time.Instant.now();
                 self.handlePublish() catch |e| {
                     log.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
                     return e;
@@ -386,9 +388,42 @@ pub fn Server(
                     log.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
                     return e;
                 };
-                const end = try std.time.Instant.now();
-                const duration_us = end.since(start) / std.time.ns_per_us;
+                const end_time = try std.time.Instant.now();
+                const duration_us = end_time.since(start_time) / std.time.ns_per_us;
                 try metrics.cycle(duration_us);
+                self.retries = 0;
+                self.backoff = 5;
+            }
+        }
+
+        pub fn start(self: *Self) !void {
+            // In contrast to run, start will try to connect again in case a disconnection occurs.
+            var base_injector = try Injector.init(&self.deps, null);
+            var user_injector = try Injector.init(&self.user_deps, &base_injector);
+            const allocator = try user_injector.require(std.mem.Allocator);
+            while (true) {
+                self.run() catch |e| {
+                    if (e == error.AuthFailure) {
+                        return e; // We really can't do anything if the credentials are wrong.
+                    }
+
+                    if (self.retries > 10) {
+                        log.err("Failed to reconnect after {} retries. Aborting...", .{self.retries});
+                        return error.ReconnectionFailure;
+                    }
+                    log.err(
+                        "Got disconnected with: {}. Retrying ({}) after {} seconds.",
+                        .{ e, self.retries, self.backoff },
+                    );
+                    std.time.sleep(self.backoff * std.time.ns_per_s);
+                    if (self.deps.client_cache) |cl| {
+                        cl.deinit(); // This is probably pointless since the connection is dead anyway but might as well.
+                        allocator.destroy(cl);
+                    }
+                    self.deps.client_cache = null; // let it get reinitialized again by the factory.
+                    self.backoff *= 2;
+                    self.retries += 1;
+                };
             }
         }
     };

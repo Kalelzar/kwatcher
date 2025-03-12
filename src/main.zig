@@ -84,6 +84,6 @@ pub fn main() !void {
         allocator,
         deps,
     );
-    try server.run();
+    try server.start();
     server.deinit();
 }
