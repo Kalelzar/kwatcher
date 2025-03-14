@@ -185,6 +185,7 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
                 self.allocator.destroy(c);
             }
 
+            self.internal_arena.deinit();
             self.arena.deinit();
             self.allocator.destroy(self.arena);
             self.allocator.destroy(self.instrumented_allocator);
@@ -213,13 +214,13 @@ pub fn Server(
         const Self = @This();
         instrumented_allocator: *mem.InstrumentedAllocator,
         deps: Dependencies(UserConfig, client_name, client_version),
-        user_deps: UserSingletonDependencies,
+        user_deps: *UserSingletonDependencies,
         routes: []const Route,
         default_routes: []const Route,
         retries: i8 = 0,
         backoff: u64 = 5,
 
-        pub fn init(allocator: std.mem.Allocator, deps: UserSingletonDependencies) !Self {
+        pub fn init(allocator: std.mem.Allocator, deps: *UserSingletonDependencies) !Self {
             var instrumented_allocator = try allocator.create(mem.InstrumentedAllocator);
             instrumented_allocator.* = metrics.instrumentAllocator(allocator);
             const alloc = instrumented_allocator.allocator();
@@ -243,13 +244,14 @@ pub fn Server(
 
         pub fn deinit(self: *Self) void {
             log.info("Shutting server down...", .{});
+            metrics.deinitialize();
             _ = self.deps.deinit();
             self.instrumented_allocator.*.child_allocator.destroy(self.instrumented_allocator);
         }
 
         pub fn configure(self: *Self) !void {
             var base_injector = try Injector.init(&self.deps, null);
-            var user_injector = try Injector.init(&self.user_deps, &base_injector);
+            var user_injector = try Injector.init(self.user_deps, &base_injector);
 
             var cl = try user_injector.require(*client.AmqpClient);
 
@@ -273,7 +275,7 @@ pub fn Server(
 
         pub fn handlePublish(self: *Self) !void {
             var base_injector = try Injector.init(&self.deps, null);
-            var user_injector = try Injector.init(&self.user_deps, &base_injector);
+            var user_injector = try Injector.init(self.user_deps, &base_injector);
             const PublishArgs = std.meta.Tuple(&.{*Injector});
             var cl = try user_injector.require(*client.AmqpClient);
             var internal_arena = try user_injector.require(mem.InternalArena);
@@ -319,7 +321,7 @@ pub fn Server(
         pub fn handleConsume(self: *Self, interval: u64) !void {
             const ConsumeArgs = std.meta.Tuple(&.{ *Injector, []const u8 });
             var base_injector = try Injector.init(&self.deps, null);
-            var user_injector = try Injector.init(&self.user_deps, &base_injector);
+            var user_injector = try Injector.init(self.user_deps, &base_injector);
             var cl = try user_injector.require(*client.AmqpClient);
             var internal_arena = try user_injector.require(mem.InternalArena);
             var routes = ds.DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
@@ -378,17 +380,23 @@ pub fn Server(
             //std.log.info("Cycle: {}/{}.", .{ handled, total });
         }
 
-        pub fn run(self: *Self) !void {
+        pub fn run(self: *Self, extra: struct { cycles: u64 }) !void {
             var base_injector = try Injector.init(&self.deps, null);
-            var user_injector = try Injector.init(&self.user_deps, &base_injector);
+            var user_injector = try Injector.init(self.user_deps, &base_injector);
             const base_conf = try user_injector.require(config.BaseConfig);
-
+            var rem_cycles = extra.cycles;
             self.configure() catch |e| {
                 log.err("Encountered an error while configuring the client: {}", .{e});
                 return e;
             };
             const interval: u64 = base_conf.config.polling_interval;
             while (true) {
+                if (extra.cycles > 0 and rem_cycles == 0) {
+                    break;
+                } else if (extra.cycles > 0) {
+                    rem_cycles -= 1;
+                }
+
                 try metrics.resetCycle();
                 const start_time = try std.time.Instant.now();
                 self.handlePublish() catch |e| {
@@ -409,7 +417,7 @@ pub fn Server(
 
         pub fn reset(self: *Self) !void {
             var base_injector = try Injector.init(&self.deps, null);
-            var user_injector = try Injector.init(&self.user_deps, &base_injector);
+            var user_injector = try Injector.init(self.user_deps, &base_injector);
             const allocator = try user_injector.require(std.mem.Allocator);
 
             if (self.deps.client_cache) |cl| {
@@ -424,10 +432,10 @@ pub fn Server(
         pub fn start(self: *Self) !void {
             // In contrast to run, start will try to connect again in case a disconnection occurs.
             var base_injector = try Injector.init(&self.deps, null);
-            var user_injector = try Injector.init(&self.user_deps, &base_injector);
+            var user_injector = try Injector.init(self.user_deps, &base_injector);
             const allocator = try user_injector.require(std.mem.Allocator);
             while (true) {
-                self.run() catch |e| {
+                self.run(.{ .cycles = 0 }) catch |e| {
                     if (e == error.AuthFailure) {
                         return e; // We really can't do anything if the credentials are wrong.
                     }

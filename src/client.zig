@@ -227,11 +227,10 @@ pub const AmqpClient = struct {
         return self.channels.getPtr(queue) orelse error.NotFound;
     }
 
-    pub fn deinit(self: *const AmqpClient) void {
+    pub fn deinit(self: *AmqpClient) void {
         log.info("Closing connection", .{});
-        // This should probably not accept const but oh well.
-        // We can close our eyes for now. @constCast my beloved.
-        disposeConnection(@constCast(&self.connection));
+        self.channels.deinit();
+        disposeConnection(&self.connection);
     }
 
     fn disposeConnection(connection: *amqp.Connection) void {
