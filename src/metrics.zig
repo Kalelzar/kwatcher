@@ -7,6 +7,7 @@ const schema = @import("schema.zig");
 
 const Metrics = struct {
     total_memory_allocated: MemUsage,
+    peak_memory_allocated: MemUsage,
     published_messages: Publish,
     total_published_messages: TotalPublish,
     consumed_messages: Consume,
@@ -83,6 +84,12 @@ pub fn initialize(allocator: std.mem.Allocator, client_name: []const u8, client_
             buf_alloc.allocator(),
             "kwatcher_total_memory_bytes",
             .{ .help = "The total allocated memory by the kwatcher" },
+            opts,
+        ),
+        .peak_memory_allocated = try Metrics.MemUsage.init(
+            buf_alloc.allocator(),
+            "kwatcher_peak_memory_bytes",
+            .{ .help = "The maximum allocated memory by the kwatcher" },
             opts,
         ),
         .published_messages = try Metrics.Publish.init(
@@ -276,6 +283,13 @@ pub fn consumeQueue(queue: []const u8) !void {
 
 pub fn alloc(size: usize) void {
     metrics.total_memory_allocated.incrBy(client_label, @as(i64, @intCast(size))) catch unreachable;
+    const max = metrics.peak_memory_allocated.impl.values.get(client_label);
+    const current = metrics.total_memory_allocated.impl.values.get(client_label).?;
+    if (max) |v| {
+        if (v.value < current.value)
+            metrics.peak_memory_allocated.set(client_label, current.value) catch unreachable;
+    }
+    metrics.peak_memory_allocated.set(client_label, current.value) catch unreachable;
 }
 
 pub fn free(size: usize) void {
