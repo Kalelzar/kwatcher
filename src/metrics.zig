@@ -44,12 +44,33 @@ const Metrics = struct {
     const Cycle = m.GaugeVec(u64, ClientLabel);
     const PublishQueue = m.GaugeVec(u1, FullLabel);
     const ConsumeQueue = m.GaugeVec(u1, ClientWithQueueLabel);
+
+    pub fn deinit(self: *Metrics) void {
+        self.acked_messages.deinit();
+        self.channels.deinit();
+        self.consume_errors.deinit();
+        self.consumed_cycle.deinit();
+        self.consumed_messages.deinit();
+        self.consuming_from.deinit();
+        self.publish_errors.deinit();
+        self.published_cycle.deinit();
+        self.published_messages.deinit();
+        self.publishing_on.deinit();
+        self.queues.deinit();
+        self.rejected_messages.deinit();
+        self.time_per_cycle.deinit();
+        self.total_published_messages.deinit();
+    }
 };
 
 var metrics = m.initializeNoop(Metrics);
 var client_label: Metrics.ClientLabel = undefined;
 var memsafe_buffer: [4 * 1024]u8 = undefined;
 var buf_alloc: std.heap.FixedBufferAllocator = undefined;
+
+pub fn deinitialize() void {
+    metrics.deinit();
+}
 
 pub fn initialize(allocator: std.mem.Allocator, client_name: []const u8, client_version: []const u8, comptime opts: m.RegistryOpts) !void {
     buf_alloc = std.heap.FixedBufferAllocator.init(&memsafe_buffer);

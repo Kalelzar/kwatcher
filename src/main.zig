@@ -71,7 +71,7 @@ const ScopedDeps = struct {};
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
-    const deps = SingletonDeps{};
+    var deps = SingletonDeps{};
     var server = try kwatcher.server.Server(
         "test",
         "0.1.0",
@@ -82,7 +82,7 @@ pub fn main() !void {
         EventHandler,
     ).init(
         allocator,
-        deps,
+        &deps,
     );
     try server.start();
     server.deinit();
