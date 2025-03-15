@@ -65,6 +65,10 @@
             .url = "https://github.com/karlseguin/metrics.zig/archive/cf2797bcb3aea7e5cdaf4de39c5550c70796e7b1.tar.gz",
             .hash = "122061f30077ef518dd435d397598ab3c45daa3d2c25e6b45383fb94d0bd2c3af1af",
         },
+        .klib = .{
+            .url = "git+https://github.com/Kalelzar/klib#0f919cdb8abdda80e8b598a3d7c0377e1fa2f2ba",
+            .hash = "klib-0.0.0-vum4ZGViAAD9WjA7o2AHm2w-eavtDAyPyJW4iKyU5vjF",
+        },
     },
 
     // Specifies the set of files and directories that are included in this package.

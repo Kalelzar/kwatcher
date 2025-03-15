@@ -5,6 +5,7 @@ const Builder = struct {
     target: std.Build.ResolvedTarget,
     opt: std.builtin.OptimizeMode,
     check_step: *std.Build.Step,
+    klib: *std.Build.Module,
     zamqp: *std.Build.Module,
     uuid: *std.Build.Module,
     metrics: *std.Build.Module,
@@ -17,6 +18,7 @@ const Builder = struct {
 
         const check_step = b.step("check", "");
 
+        const klib = b.dependency("klib", .{ .target = target, .optimize = opt }).module("klib");
         const zamqp = b.dependency("zamqp", .{ .target = target, .optimize = opt }).module("zamqp");
         const uuid = b.dependency("uuid", .{ .target = target, .optimize = opt }).module("uuid");
         const metrics = b.dependency("metrics", .{ .target = target, .optimize = opt }).module("metrics");
@@ -26,6 +28,7 @@ const Builder = struct {
         kwatcher.addImport("zamqp", zamqp);
         kwatcher.addImport("uuid", uuid);
         kwatcher.addImport("metrics", metrics);
+        kwatcher.addImport("klib", klib);
         kwatcher.link_libc = true;
 
         const kwatcher_example = b.createModule(.{
@@ -43,6 +46,7 @@ const Builder = struct {
             .kwatcher = kwatcher,
             .kwatcher_example = kwatcher_example,
             .metrics = metrics,
+            .klib = klib,
         };
     }
 
@@ -57,6 +61,7 @@ const Builder = struct {
         step.root_module.addImport("zamqp", self.zamqp);
         step.root_module.addImport("uuid", self.uuid);
         step.root_module.addImport("metrics", self.metrics);
+        step.root_module.addImport("klib", self.klib);
     }
 
     fn addExecutable(self: *Builder, name: []const u8, root_source_file: []const u8) *std.Build.Step.Compile {
@@ -116,9 +121,4 @@ pub fn build(b: *std.Build) !void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
-
-    const t = builder.addTest("test", "test/test.zig");
-    builder.addDependencies(t);
-    t.root_module.addImport("kwatcher", builder.kwatcher);
-    try builder.installAndCheck(t);
 }

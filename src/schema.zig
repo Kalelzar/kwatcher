@@ -1,6 +1,7 @@
 const std = @import("std");
 
-const meta = @import("meta.zig");
+const klib = @import("klib");
+const meta = klib.meta;
 
 pub const MessageOptions = struct {
     queue: []const u8,
