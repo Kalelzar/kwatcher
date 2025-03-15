@@ -1,13 +1,14 @@
 const std = @import("std");
 const log = std.log.scoped(.kwatcher);
+const klib = @import("klib");
+const meta = klib.meta;
+const DisjointSlice = klib.DisjointSlice;
 
 const schema = @import("schema.zig");
 const config = @import("config.zig");
-const meta = @import("meta.zig");
 const metrics = @import("metrics.zig");
 const mem = @import("mem.zig");
 const client = @import("client.zig");
-const ds = @import("disjoint_slice.zig");
 
 const DefaultRoutes = @import("default_routes.zig");
 
@@ -69,7 +70,7 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
         allocator: std.mem.Allocator,
         arena: *std.heap.ArenaAllocator,
         internal_arena: mem.InternalArena,
-        instrumented_allocator: *mem.InstrumentedAllocator,
+        instrumented_allocator: *klib.mem.InstrumentedAllocator,
 
         client_cache: ?*client.AmqpClient = null,
         timer: ?Timer = null,
@@ -160,13 +161,13 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
 
         pub fn init(allocator: std.mem.Allocator) !Self {
             const arr_ptr = try allocator.create(std.heap.ArenaAllocator);
-            const instr_ptr = try allocator.create(mem.InstrumentedAllocator);
+            const instr_ptr = try allocator.create(klib.mem.InstrumentedAllocator);
             errdefer allocator.destroy(arr_ptr);
             const result = Self{
                 .allocator = allocator,
                 .instrumented_allocator = instr_ptr,
                 .arena = arr_ptr,
-                .internal_arena = try mem.InternalArena.init(allocator),
+                .internal_arena = try mem.InternalArena.init(allocator, metrics.shim),
             };
             result.instrumented_allocator.* = metrics.instrumentAllocator(std.heap.page_allocator);
             result.arena.* = std.heap.ArenaAllocator.init(instr_ptr.allocator());
@@ -212,7 +213,7 @@ pub fn Server(
 ) type {
     return struct {
         const Self = @This();
-        instrumented_allocator: *mem.InstrumentedAllocator,
+        instrumented_allocator: *klib.mem.InstrumentedAllocator,
         deps: Dependencies(UserConfig, client_name, client_version),
         user_deps: *UserSingletonDependencies,
         routes: []const Route,
@@ -221,7 +222,7 @@ pub fn Server(
         backoff: u64 = 5,
 
         pub fn init(allocator: std.mem.Allocator, deps: *UserSingletonDependencies) !Self {
-            var instrumented_allocator = try allocator.create(mem.InstrumentedAllocator);
+            var instrumented_allocator = try allocator.create(klib.mem.InstrumentedAllocator);
             instrumented_allocator.* = metrics.instrumentAllocator(allocator);
             const alloc = instrumented_allocator.allocator();
             try metrics.initialize(alloc, client_name, client_version, .{});
@@ -255,7 +256,7 @@ pub fn Server(
 
             var cl = try user_injector.require(*client.AmqpClient);
 
-            var routes = ds.DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
+            var routes = DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
             var iter = routes.iterator();
             while (iter.next()) |route| {
                 try cl.openChannel(
@@ -281,7 +282,7 @@ pub fn Server(
             var internal_arena = try user_injector.require(mem.InternalArena);
             var timer = try base_injector.require(Timer);
 
-            var routes = ds.DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
+            var routes = DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
             var route_iterator = routes.iterator();
 
             while (route_iterator.next()) |route| {
@@ -324,7 +325,7 @@ pub fn Server(
             var user_injector = try Injector.init(self.user_deps, &base_injector);
             var cl = try user_injector.require(*client.AmqpClient);
             var internal_arena = try user_injector.require(mem.InternalArena);
-            var routes = ds.DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
+            var routes = DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
 
             var remaining: i64 = @intCast(interval);
             var total: i32 = 0;

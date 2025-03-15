@@ -3,7 +3,8 @@
 
 const std = @import("std");
 
-const meta = @import("meta.zig");
+const klib = @import("klib");
+const meta = klib.meta;
 const mem = @import("mem.zig");
 const schema = @import("schema.zig");
 
