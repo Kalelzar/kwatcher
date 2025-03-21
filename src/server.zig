@@ -378,6 +378,7 @@ pub fn Server(
                 const diff = end_time.since(start_time);
                 remaining -= @intCast(diff);
             }
+            cl.reset();
             //std.log.info("Cycle: {}/{}.", .{ handled, total });
         }
 
