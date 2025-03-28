@@ -279,7 +279,9 @@ pub fn Server(
             var user_injector = try Injector.init(self.user_deps, &base_injector);
             const PublishArgs = std.meta.Tuple(&.{*Injector});
             var cl = try user_injector.require(*client.AmqpClient);
+            defer cl.reset();
             var internal_arena = try user_injector.require(mem.InternalArena);
+            defer internal_arena.reset();
             var timer = try base_injector.require(Timer);
 
             var routes = DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
@@ -316,7 +318,6 @@ pub fn Server(
                 internal_arena.reset();
             }
             try timer.step();
-            cl.reset();
         }
 
         pub fn handleConsume(self: *Self, interval: u64) !void {
@@ -324,7 +325,9 @@ pub fn Server(
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(self.user_deps, &base_injector);
             var cl = try user_injector.require(*client.AmqpClient);
+            defer cl.reset();
             var internal_arena = try user_injector.require(mem.InternalArena);
+            defer internal_arena.reset();
             var routes = DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
 
             var remaining: i64 = @intCast(interval);
@@ -333,7 +336,8 @@ pub fn Server(
             main: while (remaining > 0) {
                 const rabbitmq_wait = @divTrunc(remaining, std.time.ns_per_us);
                 const start_time = try std.time.Instant.now();
-                const envelope = try cl.consume(rabbitmq_wait);
+                const envelope = try cl.consume(internal_arena.allocator(), rabbitmq_wait);
+                defer internal_arena.reset();
                 if (envelope) |response| {
                     total += 1;
                     try metrics.consume(response.queue);
@@ -378,7 +382,6 @@ pub fn Server(
                 const diff = end_time.since(start_time);
                 remaining -= @intCast(diff);
             }
-            cl.reset();
             //std.log.info("Cycle: {}/{}.", .{ handled, total });
         }
 
