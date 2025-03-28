@@ -195,26 +195,27 @@ pub const AmqpClient = struct {
         try metrics.addQueue();
     }
 
-    pub fn consume(self: *AmqpClient, timeout: i64) !?Response {
+    pub fn consume(self: *AmqpClient, alloc: std.mem.Allocator, timeout: i64) !?Response {
         var timeval = std.c.timeval{
             .sec = 0,
             .usec = @truncate(timeout),
         };
-        const envelope = self.connection.consume_message(&timeval, 0) catch |e| switch (e) {
+        var envelope = self.connection.consume_message(&timeval, 0) catch |e| switch (e) {
             error.Timeout => return null,
             else => |le| return le,
         };
+        defer envelope.destroy();
         return .{
             .channel = envelope.channel,
-            .consumer_tag = envelope.consumer_tag.slice() orelse unreachable,
-            .queue = envelope.message.properties.get(.reply_to).?.slice() orelse unreachable,
+            .consumer_tag = try alloc.dupe(u8, envelope.consumer_tag.slice() orelse unreachable),
+            .queue = try alloc.dupe(u8, envelope.message.properties.get(.reply_to).?.slice() orelse unreachable),
             .delivery_tag = envelope.delivery_tag,
-            .exchange = envelope.exchange.slice() orelse unreachable,
-            .routing_key = envelope.routing_key.slice() orelse unreachable,
+            .exchange = try alloc.dupe(u8, envelope.exchange.slice() orelse unreachable),
+            .routing_key = try alloc.dupe(u8, envelope.routing_key.slice() orelse unreachable),
             .redelivered = envelope.redelivered != 0,
             .message = .{
                 .basic_properties = envelope.message.properties,
-                .body = envelope.message.body.slice() orelse unreachable,
+                .body = try alloc.dupe(u8, envelope.message.body.slice() orelse unreachable),
             },
         };
     }
