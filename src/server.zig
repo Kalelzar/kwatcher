@@ -8,7 +8,8 @@ const schema = @import("schema.zig");
 const config = @import("config.zig");
 const metrics = @import("metrics.zig");
 const mem = @import("mem.zig");
-const client = @import("client.zig");
+const Client = @import("client.zig");
+const AmqpClient = @import("amqp_client.zig");
 
 const DefaultRoutes = @import("default_routes.zig");
 
@@ -72,7 +73,7 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
         internal_arena: mem.InternalArena,
         instrumented_allocator: *klib.mem.InstrumentedAllocator,
 
-        client_cache: ?*client.AmqpClient = null,
+        client_cache: ?*AmqpClient = null,
         timer: ?Timer = null,
         user_info: ?schema.UserInfo = null,
         user_config: ?UserConfig = null,
@@ -148,15 +149,19 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
             }
         }
 
-        pub fn clientFactory(self: *Self, allocator: std.mem.Allocator, config_file: config.BaseConfig) !*client.AmqpClient {
+        pub fn clientFactory(self: *Self, allocator: std.mem.Allocator, config_file: config.BaseConfig) !*AmqpClient {
             if (self.client_cache) |res| {
                 return res;
             } else {
-                const amqp_client = try allocator.create(client.AmqpClient);
-                amqp_client.* = try client.AmqpClient.init(allocator, config_file, client_name);
+                const amqp_client = try allocator.create(AmqpClient);
+                amqp_client.* = try AmqpClient.init(allocator, config_file, client_name);
                 self.client_cache = amqp_client;
                 return self.client_cache.?;
             }
+        }
+
+        pub fn clientProxyFactory(amqp_client: *AmqpClient) Client {
+            return amqp_client.client();
         }
 
         pub fn init(allocator: std.mem.Allocator) !Self {
@@ -182,7 +187,7 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
                 u.deinit();
 
             if (self.client_cache) |c| {
-                c.deinit();
+                c.client().deinit();
                 self.allocator.destroy(c);
             }
 
@@ -254,7 +259,7 @@ pub fn Server(
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(self.user_deps, &base_injector);
 
-            var cl = try user_injector.require(*client.AmqpClient);
+            var cl = try user_injector.require(Client);
 
             var routes = DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
             var iter = routes.iterator();
@@ -278,7 +283,7 @@ pub fn Server(
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(self.user_deps, &base_injector);
             const PublishArgs = std.meta.Tuple(&.{*Injector});
-            var cl = try user_injector.require(*client.AmqpClient);
+            var cl = try user_injector.require(Client);
             defer cl.reset();
             var internal_arena = try user_injector.require(mem.InternalArena);
             defer internal_arena.reset();
@@ -324,7 +329,7 @@ pub fn Server(
             const ConsumeArgs = std.meta.Tuple(&.{ *Injector, []const u8 });
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(self.user_deps, &base_injector);
-            var cl = try user_injector.require(*client.AmqpClient);
+            var cl = try user_injector.require(Client);
             defer cl.reset();
             var internal_arena = try user_injector.require(mem.InternalArena);
             defer internal_arena.reset();
@@ -409,7 +414,7 @@ pub fn Server(
                     return e;
                 };
                 self.handleConsume(interval) catch |e| {
-                    log.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
+                    log.err("Encountered an error while handling consuming events: {}. This is likely a bug in KWatcher.", .{e});
                     return e;
                 };
                 const end_time = try std.time.Instant.now();
@@ -457,7 +462,7 @@ pub fn Server(
                     //NOTE: It might be worth it to clean out the configuration as well.
                     //      So we can potentially 'hot-reload' a configuration that caused the error.
                     if (self.deps.client_cache) |cl| {
-                        cl.deinit(); // This is probably pointless since the connection is dead anyway but might as well.
+                        cl.client().deinit(); // This is probably pointless since the connection is dead anyway but might as well.
                         allocator.destroy(cl);
                     }
                     self.deps.client_cache = null; // let it get reinitialized again by the factory.
