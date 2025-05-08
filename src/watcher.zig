@@ -1,6 +1,8 @@
 pub const config = @import("config.zig");
 pub const inject = @import("injector.zig");
-pub const client = @import("client.zig");
+pub const Client = @import("client.zig");
+pub const Channel = @import("channel.zig");
+pub const AmqpClient = @import("amqp_client.zig");
 pub const server = @import("server.zig");
 pub const schema = @import("schema.zig");
 pub const route = @import("route.zig");
