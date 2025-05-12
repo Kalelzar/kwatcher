@@ -225,6 +225,7 @@ pub fn Server(
         default_routes: []const Route,
         retries: i8 = 0,
         backoff: u64 = 5,
+        should_run: std.atomic.Value(bool) = .init(true),
 
         pub fn init(allocator: std.mem.Allocator, deps: *UserSingletonDependencies) !Self {
             var instrumented_allocator = try allocator.create(klib.mem.InstrumentedAllocator);
@@ -400,7 +401,7 @@ pub fn Server(
                 return e;
             };
             const interval: u64 = base_conf.config.polling_interval;
-            while (true) {
+            while (self.should_run.raw) {
                 if (extra.cycles > 0 and rem_cycles == 0) {
                     break;
                 } else if (extra.cycles > 0) {
@@ -439,12 +440,16 @@ pub fn Server(
             try self.configure(); // if this fails we let it abort.
         }
 
+        pub fn stop(self: *Self) void {
+            self.should_run.store(false, .unordered);
+        }
+
         pub fn start(self: *Self) !void {
             // In contrast to run, start will try to connect again in case a disconnection occurs.
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(self.user_deps, &base_injector);
             const allocator = try user_injector.require(std.mem.Allocator);
-            while (true) {
+            while (self.should_run.raw) {
                 self.run(.{ .cycles = 0 }) catch |e| {
                     if (e == error.AuthFailure) {
                         return e; // We really can't do anything if the credentials are wrong.
