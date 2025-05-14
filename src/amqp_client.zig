@@ -43,13 +43,17 @@ pub const AmqpChannel = struct {
         const cid = uuid.v7.new();
         const urn = uuid.urn.serialize(cid);
 
-        const props = amqp.BasicProperties.init(.{
+        var props = amqp.BasicProperties.init(.{
             .correlation_id = amqp.bytes_t.init(&urn),
             .content_type = amqp.bytes_t.init("application/json"),
             .delivery_mode = 2,
-            .reply_to = amqp.bytes_t.init(message.options.queue),
         });
-        const route = amqp.bytes_t.init(message.options.routing_key);
+
+        if (message.options.reply_to) |r| {
+            props.set(.reply_to, amqp.bytes_t.init(r));
+        }
+
+        const route = amqp.bytes_t.init(message.options.routing_key orelse message.options.queue);
         const exchange = amqp.bytes_t.init(message.options.exchange);
 
         log.info(
@@ -225,19 +229,52 @@ pub fn consume(ptr: *anyopaque, alloc: std.mem.Allocator, timeout: i64) !?Client
         else => |le| return le,
     };
     defer envelope.destroy();
+    const channel = self.channelById(envelope.channel) orelse return error.BadAmqpData;
     return .{
         .channel = envelope.channel,
         .consumer_tag = try alloc.dupe(u8, envelope.consumer_tag.slice() orelse unreachable),
-        .queue = try alloc.dupe(u8, envelope.message.properties.get(.reply_to).?.slice() orelse unreachable),
+        .queue = channel.queue,
         .delivery_tag = envelope.delivery_tag,
         .exchange = try alloc.dupe(u8, envelope.exchange.slice() orelse unreachable),
         .routing_key = try alloc.dupe(u8, envelope.routing_key.slice() orelse unreachable),
         .redelivered = envelope.redelivered != 0,
         .message = .{
-            .basic_properties = envelope.message.properties,
+            .basic_properties = try dupeBP(alloc, envelope.message.properties),
             .body = try alloc.dupe(u8, envelope.message.body.slice() orelse unreachable),
         },
     };
+}
+
+fn channelById(self: *AmqpClient, id: amqp.channel_t) ?*AmqpChannel {
+    var iter = self.channels.valueIterator();
+    while (iter.next()) |channel| {
+        if (channel.achannel.number == id) {
+            return channel;
+        }
+    }
+    return null;
+}
+
+fn dupeBP(alloc: std.mem.Allocator, bp: amqp.BasicProperties) !amqp.BasicProperties {
+    var new = amqp.BasicProperties.init(.{});
+    @setEvalBranchQuota(10000);
+    inline for (comptime std.enums.values(amqp.BasicProperties.Flag)) |e| {
+        if (bp._flags & @intFromEnum(e) != 0) {
+            const FieldType = e.Type();
+            if (comptime FieldType == amqp.bytes_t) {
+                if (bp.get(e)) |bytes| {
+                    const slice = bytes.slice() orelse unreachable;
+                    const new_bytes = amqp.bytes_t.init(try alloc.dupe(u8, slice));
+                    new.set(e, new_bytes);
+                } else {
+                    new.set(e, null);
+                }
+            } else {
+                new.set(e, bp.get(e) orelse unreachable);
+            }
+        }
+    }
+    return new;
 }
 
 pub fn reset(ptr: *anyopaque) void {
