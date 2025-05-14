@@ -270,12 +270,15 @@ pub fn Server(
                     route.metadata.queue,
                     route.metadata.queue,
                 );
-                if (route.method == .consume) {
-                    var channel = try cl.getChannel(route.metadata.queue);
-                    try channel.configureConsume();
-                    try metrics.consumeQueue(route.metadata.queue);
-                } else {
-                    try metrics.publishQueue(route.metadata.queue, route.metadata.exchange);
+                switch (route.method) {
+                    .consume, .reply => {
+                        var channel = try cl.getChannel(route.metadata.queue);
+                        try channel.configureConsume();
+                        try metrics.consumeQueue(route.metadata.queue);
+                    },
+                    .publish => {
+                        try metrics.publishQueue(route.metadata.queue, route.metadata.exchange);
+                    },
                 }
             }
         }
@@ -349,29 +352,74 @@ pub fn Server(
                     try metrics.consume(response.queue);
                     var pub_route_iterator = routes.iterator();
                     while (pub_route_iterator.next()) |route| {
-                        if (route.method != .consume) continue;
+                        //std.log("TRYING {s}/{s}", .{ route.metadata.exchange, route.metadata.queue });
                         if (!std.mem.eql(u8, route.metadata.queue, response.queue) or
                             !std.mem.eql(u8, route.metadata.exchange, response.exchange)) continue;
-                        handled += 1;
-                        {
-                            var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
-                            var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
-                            defer scoped_injector.maybeDeconstruct();
-                            const args = ConsumeArgs{ &scoped_injector, response.message.body };
-                            @call(.auto, route.handlers.consume.?, args) catch |e| {
-                                log.err(
-                                    "Encountered an error while consuming a message on '{s}/{s}': {}\n\t{s}\n",
-                                    .{ route.metadata.exchange, route.metadata.queue, e, response.message.body },
-                                );
-                                var current_channel = try cl.getChannel(route.metadata.queue);
-                                try current_channel.reject(response.delivery_tag, false);
-                            };
-                            var current_channel = try cl.getChannel(route.metadata.queue);
-                            try current_channel.ack(response.delivery_tag);
-                            try metrics.ack(route.metadata.queue);
-                            const end_time = try std.time.Instant.now();
-                            const diff = end_time.since(start_time);
-                            remaining -= @intCast(diff);
+                        switch (route.method) {
+                            .consume => {
+                                handled += 1;
+                                {
+                                    var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
+                                    var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
+                                    defer scoped_injector.maybeDeconstruct();
+                                    const args = ConsumeArgs{ &scoped_injector, response.message.body };
+                                    @call(.auto, route.handlers.consume.?, args) catch |e| {
+                                        log.err(
+                                            "Encountered an error while consuming a message on '{s}/{s}': {}\n\t{s}\n",
+                                            .{ route.metadata.exchange, route.metadata.queue, e, response.message.body },
+                                        );
+                                        var current_channel = try cl.getChannel(route.metadata.queue);
+                                        try current_channel.reject(response.delivery_tag, false);
+                                    };
+                                    var current_channel = try cl.getChannel(route.metadata.queue);
+                                    try current_channel.ack(response.delivery_tag);
+                                    try metrics.ack(route.metadata.queue);
+                                    const end_time = try std.time.Instant.now();
+                                    const diff = end_time.since(start_time);
+                                    remaining -= @intCast(diff);
+                                }
+                            },
+                            .reply => {
+                                handled += 1;
+                                {
+                                    const reply_to = (response.message.basic_properties.get(.reply_to) orelse {
+                                        log.err("Reply handler didn't receive a reply queue. Not acknowledging invalid request", .{});
+                                        continue;
+                                    }).slice() orelse unreachable;
+
+                                    var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
+                                    var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
+                                    defer scoped_injector.maybeDeconstruct();
+                                    const args = ConsumeArgs{ &scoped_injector, response.message.body };
+                                    log.info("Replying to {s}/{s}", .{ route.metadata.exchange, reply_to });
+                                    var msg: schema.SendMessage = @call(.auto, route.handlers.reply.?, args) catch |e| {
+                                        log.err(
+                                            "Encountered an error while replying a message on '{s}/{s}': {}\n\t{s}\n",
+                                            .{ route.metadata.exchange, route.metadata.queue, e, response.message.body },
+                                        );
+                                        var current_channel = try cl.getChannel(route.metadata.queue);
+                                        try current_channel.reject(response.delivery_tag, false);
+                                        continue;
+                                    };
+                                    //const correlation_id = response.message.basic_properties.get(.correlation_id);
+                                    msg.options.queue = reply_to;
+                                    msg.options.routing_key = reply_to;
+                                    try cl.openChannel(route.metadata.exchange, reply_to, reply_to);
+                                    var reply_channel = try cl.getChannel(reply_to);
+                                    try reply_channel.publish(msg);
+                                    try metrics.publish(reply_to, route.metadata.exchange);
+                                    // Only ack the message if the response is successful. That way we get to retry it if it fails.
+                                    var current_channel = try cl.getChannel(route.metadata.queue);
+                                    try current_channel.ack(response.delivery_tag);
+                                    try metrics.ack(route.metadata.queue);
+                                    const end_time = try std.time.Instant.now();
+                                    const diff = end_time.since(start_time);
+                                    remaining -= @intCast(diff);
+                                }
+                            },
+                            else => {
+                                continue;
+                            },
                         }
                         internal_arena.reset();
                         // Release the memory used up by the message processing.

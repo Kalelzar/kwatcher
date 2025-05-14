@@ -3,16 +3,20 @@ const std = @import("std");
 const klib = @import("klib");
 const meta = klib.meta;
 
-pub const MessageOptions = struct {
+pub const ConfigurableMessageOptions = struct {
+    routing_key: ?[]const u8 = null,
+    reply_to: ?[]const u8 = null,
+};
+
+pub const MessageOptions = meta.MergeStructs(ConfigurableMessageOptions, struct {
     queue: []const u8,
     exchange: []const u8,
-    routing_key: []const u8,
-};
+});
 
 pub fn Message(comptime SchemaT: type) type {
     return struct {
         schema: SchemaT,
-        options: MessageOptions,
+        options: ConfigurableMessageOptions,
 
         pub fn prepare(self: *const Message(SchemaT), allocator: std.mem.Allocator) !SendMessage {
             const body = try std.json.stringifyAlloc(allocator, self.schema, .{});

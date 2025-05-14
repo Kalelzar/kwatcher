@@ -9,6 +9,7 @@ const injector = @import("injector.zig");
 pub const Method = enum {
     publish,
     consume,
+    reply,
 };
 
 fn HandlerFn(comptime T: type) type {
@@ -18,11 +19,13 @@ fn HandlerFn(comptime T: type) type {
 const PublishHandlerFn = HandlerFn(anyerror!schema.SendMessage);
 const EventHandlerFn = HandlerFn(anyerror!bool);
 const ConsumeHandlerFn = *const fn (*injector.Injector, []const u8) anyerror!void;
+const ReplyHandlerFn = *const fn (*injector.Injector, []const u8) anyerror!schema.SendMessage;
 
 pub const Handlers = struct {
     event: ?EventHandlerFn = null,
     publish: ?PublishHandlerFn = null,
     consume: ?ConsumeHandlerFn = null,
+    reply: ?ReplyHandlerFn = null,
 };
 
 pub const Route = struct {
@@ -126,6 +129,7 @@ pub const Route = struct {
         const Internal = struct {
             fn handle(inj: *injector.Injector) !schema.SendMessage {
                 var args: std.meta.ArgsTuple(@TypeOf(handler)) = undefined;
+                const ReturnType = meta.Result(handler);
 
                 inline for (0..n_deps) |i| {
                     args[i] = try inj.require(@TypeOf(args[i]));
@@ -141,16 +145,30 @@ pub const Route = struct {
 
                 var arena = try inj.require(mem.InternalArena);
                 const alloc = arena.allocator();
-                const body = try std.json.stringifyAlloc(alloc, result, .{});
+                if (comptime @hasField(ReturnType, "schema") and @hasField(ReturnType, "options") and @FieldType(ReturnType, "options") == schema.ConfigurableMessageOptions) {
+                    const opts: schema.ConfigurableMessageOptions = result.options;
+                    const body = try std.json.stringifyAlloc(alloc, result.schema, .{});
+                    return .{
+                        .body = body,
+                        .options = .{
+                            .exchange = metadata.exchange,
+                            .queue = metadata.queue,
+                            .routing_key = opts.routing_key orelse metadata.queue,
+                            .reply_to = opts.reply_to,
+                        },
+                    };
+                } else {
+                    const body = try std.json.stringifyAlloc(alloc, result, .{});
 
-                return .{
-                    .body = body,
-                    .options = .{
-                        .exchange = metadata.exchange,
-                        .queue = metadata.queue,
-                        .routing_key = metadata.queue,
-                    },
-                };
+                    return .{
+                        .body = body,
+                        .options = .{
+                            .exchange = metadata.exchange,
+                            .queue = metadata.queue,
+                            .routing_key = metadata.queue,
+                        },
+                    };
+                }
             }
         };
 
@@ -212,6 +230,74 @@ pub const Route = struct {
         return &Internal.handle;
     }
 
+    fn replyHandler(
+        comptime metadata: Route.Metadata,
+        comptime handler: anytype,
+    ) ReplyHandlerFn {
+        const n_deps = metadata.deps.len;
+
+        const Internal = struct {
+            fn handle(inj: *injector.Injector, body: []const u8) !schema.SendMessage {
+                var args: std.meta.ArgsTuple(@TypeOf(handler)) = undefined;
+                if (comptime std.meta.fields(@TypeOf(args)).len == 0) {
+                    @compileError("Reply routes need at least one parameter for the incoming message");
+                }
+
+                if (comptime !@hasField(@TypeOf(args[0]), "schema_name") or
+                    !@hasField(@TypeOf(args[0]), "schema_version"))
+                {
+                    @compileError("The first parameter of a reply route has to be a schema.");
+                }
+
+                var arena = try inj.require(mem.InternalArena);
+                const allocator = arena.allocator();
+
+                args[0] = std.json.parseFromSliceLeaky(
+                    @TypeOf(args[0]),
+                    allocator,
+                    body,
+                    .{},
+                ) catch |e| blk: {
+                    std.log.warn("Error encountered while parsing schema: {}", .{e});
+                    break :blk try std.json.parseFromSliceLeaky(
+                        @TypeOf(args[0]),
+                        allocator,
+                        body,
+                        .{
+                            .duplicate_field_behavior = .use_last,
+                            .ignore_unknown_fields = true,
+                        },
+                    );
+                };
+
+                inline for (1..n_deps) |i| {
+                    args[i] = try inj.require(@TypeOf(args[i]));
+                }
+
+                const maybe_result = @call(.auto, handler, args);
+
+                const result =
+                    switch (comptime @typeInfo(meta.Return(handler))) {
+                        .error_union => try maybe_result,
+                        else => maybe_result,
+                    };
+
+                const out_body = try std.json.stringifyAlloc(allocator, result, .{});
+
+                return .{
+                    .body = out_body,
+                    .options = .{
+                        .exchange = metadata.exchange,
+                        .queue = metadata.queue,
+                        .routing_key = metadata.queue,
+                    },
+                };
+            }
+        };
+
+        return &Internal.handle;
+    }
+
     fn eventHandler(
         comptime metadata: Route.Metadata,
         comptime handler: anytype,
@@ -252,6 +338,16 @@ pub const Route = struct {
         return .{
             .method = .consume,
             .handlers = .{ .consume = consumeHandler(metadata, handler) },
+            .metadata = &metadata,
+        };
+    }
+
+    fn reply(exchange: []const u8, queue: []const u8, comptime event_handler: anytype, comptime handler: anytype) Route {
+        _ = event_handler;
+        const metadata = comptime routeMetadata(handler, exchange, queue);
+        return .{
+            .method = .reply,
+            .handlers = .{ .reply = replyHandler(metadata, handler) },
             .metadata = &metadata,
         };
     }

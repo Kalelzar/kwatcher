@@ -45,6 +45,36 @@ const TestRoutes = struct {
         );
         deps.status = change.properties.diff.current;
     }
+
+    pub fn @"PUBLISH:heartbeat amq.direct/sent-for-reply-2"() kwatcher.schema.Message(kwatcher.schema.Schema(1, "test", struct {})) {
+        std.log.debug(
+            "Sending message for reply.",
+            .{},
+        );
+        return .{
+            .schema = .{},
+            .options = .{
+                .reply_to = "test.reply-to",
+            },
+        };
+    }
+
+    pub fn @"REPLY amq.direct/sent-for-reply-2"(msg: kwatcher.schema.Schema(1, "test", struct {})) kwatcher.schema.Schema(1, "test-response", struct {}) {
+        _ = msg;
+        std.log.debug(
+            "Sending reply.",
+            .{},
+        );
+        return .{};
+    }
+
+    pub fn @"CONSUME amq.direct/test.reply-to"(msg: kwatcher.schema.Schema(1, "test-response", struct {})) void {
+        _ = msg;
+        std.log.debug(
+            "Reply received",
+            .{},
+        );
+    }
 };
 
 const EventHandler = struct {
