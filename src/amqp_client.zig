@@ -416,7 +416,12 @@ pub fn connect(ptr: *anyopaque) !void {
 
     const cptr = try self.allocator.create(Connection);
     errdefer self.allocator.destroy(cptr);
-    cptr.* = try Connection.init(self.allocator, self.configuration, self.name);
+    cptr.* = Connection.init(
+        self.allocator,
+        self.configuration,
+        self.name,
+    ) catch |e| return recategorizeError(e);
+
     self.connection = cptr;
     self.state = .connected;
 
@@ -600,11 +605,25 @@ pub fn publish(
     );
 }
 
+fn recategorizeError(err: anyerror) anyerror {
+    return switch (err) {
+        error.ConnectionClosed,
+        error.SocketClosed,
+        error.SocketError,
+        error.HostnameResolutionFailed,
+        error.InvalidState,
+        error.HeartbeatTimeout,
+        => error.Disconnected,
+        else => err,
+    };
+}
+
 fn handleDisconnect(self: *AmqpClient, err: anyerror, conn: *Connection) !void {
     self.mutex.lock();
     defer self.mutex.unlock();
-    return switch (err) {
-        error.ConnectionClosed, error.SocketClosed, error.SocketError, error.HostnameResolutionFailed, error.InvalidState => {
+    return switch (recategorizeError(err)) {
+        error.Disconnected,
+        => {
             log.err("Client '{s}' was disconnected with error: {}.", .{ self.name, err });
             conn.deinit(self.allocator);
             self.connection = null;

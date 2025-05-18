@@ -495,9 +495,15 @@ pub fn Server(
                         return e; // We really can't do anything if the credentials are wrong.
                     }
 
-                    if (e != error.Disconnected and e != error.InvalidState) {
-                        log.err("Cannot recover from error: {}. Aborting..", .{e});
-                        return error.ReconnectionFailure;
+                    switch (e) {
+                        error.Disconnected,
+                        error.InvalidState,
+                        error.HeartbeatTimeout,
+                        => {},
+                        else => {
+                            log.err("Cannot recover from error: {}. Aborting..", .{e});
+                            return error.ReconnectionFailure;
+                        },
                     }
 
                     var last_error: anyerror = e;
@@ -511,10 +517,8 @@ pub fn Server(
 
                         self.backoff *= 2;
                         self.retries += 1;
-                        //NOTE: It might be worth it to clean out the configuration as well.
-                        //      So we can potentially 'hot-reload' a configuration that caused the error.
-                        const client = try user_injector.require(Client);
-                        client.connect() catch |ce| {
+
+                        _ = user_injector.require(Client) catch |ce| {
                             last_error = ce;
                             continue;
                         };
