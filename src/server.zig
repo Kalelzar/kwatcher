@@ -495,7 +495,7 @@ pub fn Server(
                         return e; // We really can't do anything if the credentials are wrong.
                     }
 
-                    if (e != error.Disconnected) {
+                    if (e != error.Disconnected and e != error.InvalidState) {
                         log.err("Cannot recover from error: {}. Aborting..", .{e});
                         return error.ReconnectionFailure;
                     }

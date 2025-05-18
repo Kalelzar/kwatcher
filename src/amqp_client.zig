@@ -389,6 +389,7 @@ pub fn deinit(self: *AmqpClient) void {
     self.allocator.free(self.name);
     if (self.connection) |conn| {
         conn.deinit(self.allocator);
+        self.allocator.destroy(conn);
         self.connection = null;
     }
     self.state = .invalid;
@@ -603,7 +604,7 @@ fn handleDisconnect(self: *AmqpClient, err: anyerror, conn: *Connection) !void {
     self.mutex.lock();
     defer self.mutex.unlock();
     return switch (err) {
-        error.ConnectionClosed, error.SocketClosed, error.SocketError, error.HostnameResolutionFailed => {
+        error.ConnectionClosed, error.SocketClosed, error.SocketError, error.HostnameResolutionFailed, error.InvalidState => {
             log.err("Client '{s}' was disconnected with error: {}.", .{ self.name, err });
             conn.deinit(self.allocator);
             self.connection = null;
