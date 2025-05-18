@@ -206,7 +206,7 @@ pub const Injector = struct {
         return if (self.parent) |p| try p.get(T) else null;
     }
 
-    pub fn call(self: Injector, comptime fun: anytype, extra_args: anytype) anyerror!meta.Result(fun) {
+    pub fn call(self: *Injector, comptime fun: anytype, extra_args: anytype) anyerror!meta.Result(fun) {
         if (comptime @typeInfo(@TypeOf(extra_args)) != .@"struct") {
             @compileError("Expected a tuple of arguments");
         }
@@ -222,7 +222,27 @@ pub const Injector = struct {
         };
 
         var args: std.meta.Tuple(types) = undefined;
-        inline for (0..args.len) |i| args[i] = if (i < extra_start) try self.get(@TypeOf(args[i])) else extra_args[i - extra_start];
+        inline for (0..args.len) |i| args[i] = if (i < extra_start) try self.require(@TypeOf(args[i])) else extra_args[i - extra_start];
+
+        return @call(.auto, fun, args);
+    }
+
+    pub fn call_first(self: *Injector, comptime fun: anytype, extra_args: anytype) anyerror!meta.Result(fun) {
+        if (comptime @typeInfo(@TypeOf(extra_args)) != .@"struct") {
+            @compileError("Expected a tuple of arguments");
+        }
+
+        const params = @typeInfo(@TypeOf(fun)).@"fn".params;
+
+        const types = comptime brk: {
+            var types: [params.len]type = undefined;
+            for (0..extra_args.len) |i| types[i] = @TypeOf(extra_args[i]);
+            for (extra_args.len..params.len) |i| types[i] = params[i].type orelse @compileError("reached anytype");
+            break :brk &types;
+        };
+
+        var args: std.meta.Tuple(types) = undefined;
+        inline for (0..args.len) |i| args[i] = if (i >= extra_args.len) try self.require(@TypeOf(args[i])) else extra_args[i];
 
         return @call(.auto, fun, args);
     }
