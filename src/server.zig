@@ -155,6 +155,7 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
             } else {
                 const amqp_client = try allocator.create(AmqpClient);
                 amqp_client.* = try AmqpClient.init(allocator, config_file, client_name);
+                try AmqpClient.connect(amqp_client);
                 self.client_cache = amqp_client;
                 return self.client_cache.?;
             }
@@ -187,7 +188,7 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
                 u.deinit();
 
             if (self.client_cache) |c| {
-                c.client().deinit();
+                c.deinit();
                 self.allocator.destroy(c);
             }
 
@@ -265,19 +266,18 @@ pub fn Server(
             var routes = DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
             var iter = routes.iterator();
             while (iter.next()) |route| {
-                try cl.openChannel(
-                    route.metadata.exchange,
-                    route.metadata.queue,
-                    route.metadata.queue,
-                );
                 switch (route.method) {
                     .consume, .reply => {
-                        var channel = try cl.getChannel(route.metadata.queue);
-                        try channel.configureConsume();
-                        try metrics.consumeQueue(route.metadata.queue);
+                        try cl.bind(
+                            route.metadata.queue,
+                            route.metadata.route,
+                            route.metadata.exchange,
+                            .{},
+                        );
+                        try metrics.consumeQueue(route.metadata.route);
                     },
                     .publish => {
-                        try metrics.publishQueue(route.metadata.queue, route.metadata.exchange);
+                        try metrics.publishQueue(route.metadata.route, route.metadata.exchange);
                     },
                 }
             }
@@ -306,22 +306,21 @@ pub fn Server(
                     const ready = @call(.auto, event_handler, args) catch |e| {
                         log.err(
                             "Encountered an error while querying the event provider for '{s}/{s}': {}",
-                            .{ route.metadata.exchange, route.metadata.queue, e },
+                            .{ route.metadata.exchange, route.metadata.route, e },
                         );
                         continue;
                     };
                     if (ready) {
                         const msg = @call(.auto, route.handlers.publish.?, args) catch |e| {
-                            try metrics.publishError(route.metadata.queue, route.metadata.exchange);
+                            try metrics.publishError(route.metadata.route, route.metadata.exchange);
                             log.err(
                                 "Encountered an error while publishing an event on '{s}/{s}': {}",
-                                .{ route.metadata.exchange, route.metadata.queue, e },
+                                .{ route.metadata.exchange, route.metadata.route, e },
                             );
                             continue;
                         };
-                        var current_channel = try cl.getChannel(route.metadata.queue);
-                        try current_channel.publish(msg);
-                        try metrics.publish(route.metadata.queue, route.metadata.exchange);
+                        try cl.publish(msg, .{});
+                        try metrics.publish(route.metadata.route, route.metadata.exchange);
                     }
                 }
                 internal_arena.reset();
@@ -345,15 +344,15 @@ pub fn Server(
             main: while (remaining > 0) {
                 const rabbitmq_wait = @divTrunc(remaining, std.time.ns_per_us);
                 const start_time = try std.time.Instant.now();
-                const envelope = try cl.consume(internal_arena.allocator(), rabbitmq_wait);
+                var envelope = try cl.consume(rabbitmq_wait);
                 defer internal_arena.reset();
-                if (envelope) |response| {
+                if (envelope) |*response| {
+                    defer response.deinit();
                     total += 1;
-                    try metrics.consume(response.queue);
+                    try metrics.consume(response.routing_key);
                     var pub_route_iterator = routes.iterator();
                     while (pub_route_iterator.next()) |route| {
-                        //std.log("TRYING {s}/{s}", .{ route.metadata.exchange, route.metadata.queue });
-                        if (!std.mem.eql(u8, route.metadata.queue, response.queue) or
+                        if (!std.mem.eql(u8, route.metadata.route, response.routing_key) or
                             !std.mem.eql(u8, route.metadata.exchange, response.exchange)) continue;
                         switch (route.method) {
                             .consume => {
@@ -366,14 +365,12 @@ pub fn Server(
                                     @call(.auto, route.handlers.consume.?, args) catch |e| {
                                         log.err(
                                             "Encountered an error while consuming a message on '{s}/{s}': {}\n\t{s}\n",
-                                            .{ route.metadata.exchange, route.metadata.queue, e, response.message.body },
+                                            .{ route.metadata.exchange, route.metadata.route, e, response.message.body },
                                         );
-                                        var current_channel = try cl.getChannel(route.metadata.queue);
-                                        try current_channel.reject(response.delivery_tag, false);
+                                        try cl.reject(response.delivery_tag, false, .{});
                                     };
-                                    var current_channel = try cl.getChannel(route.metadata.queue);
-                                    try current_channel.ack(response.delivery_tag);
-                                    try metrics.ack(route.metadata.queue);
+                                    try cl.ack(response.delivery_tag, .{});
+                                    try metrics.ack(route.metadata.route);
                                     const end_time = try std.time.Instant.now();
                                     const diff = end_time.since(start_time);
                                     remaining -= @intCast(diff);
@@ -395,23 +392,20 @@ pub fn Server(
                                     var msg: schema.SendMessage = @call(.auto, route.handlers.reply.?, args) catch |e| {
                                         log.err(
                                             "Encountered an error while replying a message on '{s}/{s}': {}\n\t{s}\n",
-                                            .{ route.metadata.exchange, route.metadata.queue, e, response.message.body },
+                                            .{ route.metadata.exchange, route.metadata.route, e, response.message.body },
                                         );
-                                        var current_channel = try cl.getChannel(route.metadata.queue);
-                                        try current_channel.reject(response.delivery_tag, false);
+                                        try cl.reject(response.delivery_tag, false, .{});
                                         continue;
                                     };
-                                    //const correlation_id = response.message.basic_properties.get(.correlation_id);
-                                    msg.options.queue = reply_to;
+                                    if (response.message.basic_properties.get(.correlation_id)) |ci| {
+                                        msg.options.correlation_id = ci.slice();
+                                    }
                                     msg.options.routing_key = reply_to;
-                                    try cl.openChannel(route.metadata.exchange, reply_to, reply_to);
-                                    var reply_channel = try cl.getChannel(reply_to);
-                                    try reply_channel.publish(msg);
+                                    try cl.publish(msg, .{});
                                     try metrics.publish(reply_to, route.metadata.exchange);
                                     // Only ack the message if the response is successful. That way we get to retry it if it fails.
-                                    var current_channel = try cl.getChannel(route.metadata.queue);
-                                    try current_channel.ack(response.delivery_tag);
-                                    try metrics.ack(route.metadata.queue);
+                                    try cl.ack(response.delivery_tag, .{});
+                                    try metrics.ack(route.metadata.route);
                                     const end_time = try std.time.Instant.now();
                                     const diff = end_time.since(start_time);
                                     remaining -= @intCast(diff);
@@ -469,22 +463,21 @@ pub fn Server(
                 const end_time = try std.time.Instant.now();
                 const duration_us = end_time.since(start_time) / std.time.ns_per_us;
                 try metrics.cycle(duration_us);
-                self.retries = 0;
-                self.backoff = 5;
             }
         }
 
         pub fn reset(self: *Self) !void {
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(self.user_deps, &base_injector);
-            const allocator = try user_injector.require(std.mem.Allocator);
+            const client = try user_injector.require(Client);
 
-            if (self.deps.client_cache) |cl| {
-                cl.deinit(); // This is probably pointless since the connection is dead anyway but might as well.
-                allocator.destroy(cl);
-            }
-            self.deps.client_cache = null; // let it get reinitialized again by the factory.
+            client.disconnect() catch |e| switch (e) {
+                .InvalidState => {},
+                else => return e,
+            };
+
             std.time.sleep(self.backoff * std.time.ns_per_s);
+            try client.connect();
             try self.configure(); // if this fails we let it abort.
         }
 
@@ -496,31 +489,43 @@ pub fn Server(
             // In contrast to run, start will try to connect again in case a disconnection occurs.
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(self.user_deps, &base_injector);
-            const allocator = try user_injector.require(std.mem.Allocator);
-            while (self.should_run.raw) {
+            main_loop: while (self.should_run.raw) {
                 self.run(.{ .cycles = 0 }) catch |e| {
                     if (e == error.AuthFailure) {
                         return e; // We really can't do anything if the credentials are wrong.
                     }
 
-                    if (self.retries > 10) {
-                        log.err("Failed to reconnect after {} retries. Aborting...", .{self.retries});
+                    if (e != error.Disconnected) {
+                        log.err("Cannot recover from error: {}. Aborting..", .{e});
                         return error.ReconnectionFailure;
                     }
-                    log.err(
-                        "Got disconnected with: {}. Retrying ({}) after {} seconds.",
-                        .{ e, self.retries, self.backoff },
-                    );
-                    std.time.sleep(self.backoff * std.time.ns_per_s);
-                    //NOTE: It might be worth it to clean out the configuration as well.
-                    //      So we can potentially 'hot-reload' a configuration that caused the error.
-                    if (self.deps.client_cache) |cl| {
-                        cl.client().deinit(); // This is probably pointless since the connection is dead anyway but might as well.
-                        allocator.destroy(cl);
+
+                    var last_error: anyerror = e;
+
+                    while (self.retries <= 10) {
+                        log.err(
+                            "Got disconnected with: {}. Retrying ({}) after {} seconds.",
+                            .{ last_error, self.retries, self.backoff },
+                        );
+                        std.time.sleep(self.backoff * std.time.ns_per_s);
+
+                        self.backoff *= 2;
+                        self.retries += 1;
+                        //NOTE: It might be worth it to clean out the configuration as well.
+                        //      So we can potentially 'hot-reload' a configuration that caused the error.
+                        const client = try user_injector.require(Client);
+                        client.connect() catch |ce| {
+                            last_error = ce;
+                            continue;
+                        };
+
+                        self.backoff = 5;
+                        self.retries = 0;
+                        continue :main_loop;
                     }
-                    self.deps.client_cache = null; // let it get reinitialized again by the factory.
-                    self.backoff *= 2;
-                    self.retries += 1;
+
+                    log.err("Failed to reconnect after {} retries. Aborting...", .{self.retries});
+                    return error.ReconnectionFailure;
                 };
             }
         }

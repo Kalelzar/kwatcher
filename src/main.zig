@@ -38,7 +38,7 @@ const TestRoutes = struct {
         };
     }
 
-    pub fn @"CONSUME amq.direct/afk-status"(change: AfkStatusChange, deps: *SingletonDeps) void {
+    pub fn @"CONSUME amq.direct/afk-status/afk-status"(change: AfkStatusChange, deps: *SingletonDeps) void {
         std.log.debug(
             "[{}]: Status changed {} -> {}",
             .{ change.timestamp, change.properties.diff.prev, change.properties.diff.current },
@@ -59,7 +59,7 @@ const TestRoutes = struct {
         };
     }
 
-    pub fn @"REPLY amq.direct/sent-for-reply-2"(msg: kwatcher.schema.Schema(1, "test", struct {})) kwatcher.schema.Schema(1, "test-response", struct {}) {
+    pub fn @"REPLY amq.direct/sent-for-reply-2/test-replies"(msg: kwatcher.schema.Schema(1, "test", struct {})) kwatcher.schema.Schema(1, "test-response", struct {}) {
         _ = msg;
         std.log.debug(
             "Sending reply.",
