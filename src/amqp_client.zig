@@ -613,6 +613,7 @@ fn recategorizeError(err: anyerror) anyerror {
         error.HostnameResolutionFailed,
         error.InvalidState,
         error.HeartbeatTimeout,
+        error.UnexpectedState,
         => error.Disconnected,
         else => err,
     };

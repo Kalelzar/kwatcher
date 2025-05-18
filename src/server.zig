@@ -15,6 +15,7 @@ const DefaultRoutes = @import("default_routes.zig");
 
 const Injector = @import("injector.zig").Injector;
 const Route = @import("route.zig").Route;
+const context = @import("context.zig");
 
 pub const Timer = struct {
     const TimerEntry = struct { interval: u64, last_activation: std.time.Instant };
@@ -63,7 +64,7 @@ pub const Timer = struct {
     }
 };
 
-fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, comptime client_version: []const u8) type {
+fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime client_name: []const u8, comptime client_version: []const u8) type {
     const __ignore = struct {};
 
     return struct {
@@ -79,6 +80,7 @@ fn Dependencies(comptime UserConfig: type, comptime client_name: []const u8, com
         user_config: ?UserConfig = null,
         base_config: ?config.BaseConfig = null,
         merged_config: ?config.Config(UserConfig) = null,
+        context: Context = .{},
 
         clientInfo: schema.ClientInfo = .{
             .version = client_version,
@@ -214,16 +216,18 @@ pub fn Server(
     comptime UserSingletonDependencies: type,
     comptime UserScopedDependencies: type,
     comptime UserConfig: type,
+    comptime UserContext: type,
     comptime Routes: type,
     comptime EventProvider: type,
 ) type {
     return struct {
         const Self = @This();
+        const Context = context.Context(UserContext);
         instrumented_allocator: *klib.mem.InstrumentedAllocator,
-        deps: Dependencies(UserConfig, client_name, client_version),
+        deps: Dependencies(Context, UserConfig, client_name, client_version),
         user_deps: *UserSingletonDependencies,
-        routes: []const Route,
-        default_routes: []const Route,
+        routes: []const Route(Context),
+        default_routes: []const Route(Context),
         retries: i8 = 0,
         backoff: u64 = 5,
         should_run: std.atomic.Value(bool) = .init(true),
@@ -234,12 +238,13 @@ pub fn Server(
             const alloc = instrumented_allocator.allocator();
             try metrics.initialize(alloc, client_name, client_version, .{});
             const default_deps = try Dependencies(
+                Context,
                 UserConfig,
                 client_name,
                 client_version,
             ).init(alloc);
-            const routes = comptime Route.from(Routes, EventProvider);
-            const default_routes = comptime Route.from(DefaultRoutes, DefaultEventProvider);
+            const routes = comptime Route(Context).from(Routes, EventProvider);
+            const default_routes = comptime Route(Context).from(DefaultRoutes, DefaultEventProvider);
 
             return .{
                 .instrumented_allocator = instrumented_allocator,
@@ -263,21 +268,30 @@ pub fn Server(
 
             var cl = try user_injector.require(Client);
 
-            var routes = DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
+            var routes = DisjointSlice(Route(Context)){ .slices = &.{ self.routes, self.default_routes } };
             var iter = routes.iterator();
             while (iter.next()) |route| {
                 switch (route.method) {
                     .consume, .reply => {
+                        var inj_args: std.meta.Tuple(&.{*Injector}) = undefined;
+                        inj_args[0] = &user_injector;
+                        const route_str = try @call(.auto, route.metadata.route, inj_args);
+                        const exchange = try @call(.auto, route.metadata.exchange, inj_args);
+                        const queue = if (route.metadata.queue) |q| try @call(.auto, q, inj_args) else null;
                         try cl.bind(
-                            route.metadata.queue,
-                            route.metadata.route,
-                            route.metadata.exchange,
+                            queue,
+                            route_str,
+                            exchange,
                             .{},
                         );
-                        try metrics.consumeQueue(route.metadata.route);
+                        try metrics.consumeQueue(route_str);
                     },
                     .publish => {
-                        try metrics.publishQueue(route.metadata.route, route.metadata.exchange);
+                        var inj_args: std.meta.Tuple(&.{*Injector}) = undefined;
+                        inj_args[0] = &user_injector;
+                        const route_str = try @call(.auto, route.metadata.route, inj_args);
+                        const exchange = try @call(.auto, route.metadata.exchange, inj_args);
+                        try metrics.publishQueue(route_str, exchange);
                     },
                 }
             }
@@ -293,7 +307,7 @@ pub fn Server(
             defer internal_arena.reset();
             var timer = try base_injector.require(Timer);
 
-            var routes = DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
+            var routes = DisjointSlice(Route(Context)){ .slices = &.{ self.routes, self.default_routes } };
             var route_iterator = routes.iterator();
 
             while (route_iterator.next()) |route| {
@@ -311,16 +325,20 @@ pub fn Server(
                         continue;
                     };
                     if (ready) {
+                        var inj_args: std.meta.Tuple(&.{*Injector}) = undefined;
+                        inj_args[0] = &user_injector;
+                        const route_str = try @call(.auto, route.metadata.route, inj_args);
+                        const exchange = try @call(.auto, route.metadata.exchange, inj_args);
                         const msg = @call(.auto, route.handlers.publish.?, args) catch |e| {
-                            try metrics.publishError(route.metadata.route, route.metadata.exchange);
+                            try metrics.publishError(route_str, exchange);
                             log.err(
                                 "Encountered an error while publishing an event on '{s}/{s}': {}",
-                                .{ route.metadata.exchange, route.metadata.route, e },
+                                .{ exchange, route_str, e },
                             );
                             continue;
                         };
                         try cl.publish(msg, .{});
-                        try metrics.publish(route.metadata.route, route.metadata.exchange);
+                        try metrics.publish(route_str, exchange);
                     }
                 }
                 internal_arena.reset();
@@ -336,7 +354,7 @@ pub fn Server(
             defer cl.reset();
             var internal_arena = try user_injector.require(mem.InternalArena);
             defer internal_arena.reset();
-            var routes = DisjointSlice(Route){ .slices = &.{ self.routes, self.default_routes } };
+            var routes = DisjointSlice(Route(Context)){ .slices = &.{ self.routes, self.default_routes } };
 
             var remaining: i64 = @intCast(interval);
             var total: i32 = 0;
@@ -352,8 +370,12 @@ pub fn Server(
                     try metrics.consume(response.routing_key);
                     var pub_route_iterator = routes.iterator();
                     while (pub_route_iterator.next()) |route| {
-                        if (!std.mem.eql(u8, route.metadata.route, response.routing_key) or
-                            !std.mem.eql(u8, route.metadata.exchange, response.exchange)) continue;
+                        var inj_args: std.meta.Tuple(&.{*Injector}) = undefined;
+                        inj_args[0] = &user_injector;
+                        const route_str = try @call(.auto, route.metadata.route, inj_args);
+                        const exchange = try @call(.auto, route.metadata.exchange, inj_args);
+                        if (!std.mem.eql(u8, route_str, response.routing_key) or
+                            !std.mem.eql(u8, exchange, response.exchange)) continue;
                         switch (route.method) {
                             .consume => {
                                 handled += 1;
@@ -365,12 +387,12 @@ pub fn Server(
                                     @call(.auto, route.handlers.consume.?, args) catch |e| {
                                         log.err(
                                             "Encountered an error while consuming a message on '{s}/{s}': {}\n\t{s}\n",
-                                            .{ route.metadata.exchange, route.metadata.route, e, response.message.body },
+                                            .{ exchange, route_str, e, response.message.body },
                                         );
                                         try cl.reject(response.delivery_tag, false, .{});
                                     };
                                     try cl.ack(response.delivery_tag, .{});
-                                    try metrics.ack(route.metadata.route);
+                                    try metrics.ack(route_str);
                                     const end_time = try std.time.Instant.now();
                                     const diff = end_time.since(start_time);
                                     remaining -= @intCast(diff);
@@ -388,11 +410,11 @@ pub fn Server(
                                     var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
                                     defer scoped_injector.maybeDeconstruct();
                                     const args = ConsumeArgs{ &scoped_injector, response.message.body };
-                                    log.info("Replying to {s}/{s}", .{ route.metadata.exchange, reply_to });
+                                    log.info("Replying to {s}/{s}", .{ exchange, reply_to });
                                     var msg: schema.SendMessage = @call(.auto, route.handlers.reply.?, args) catch |e| {
                                         log.err(
                                             "Encountered an error while replying a message on '{s}/{s}': {}\n\t{s}\n",
-                                            .{ route.metadata.exchange, route.metadata.route, e, response.message.body },
+                                            .{ exchange, route_str, e, response.message.body },
                                         );
                                         try cl.reject(response.delivery_tag, false, .{});
                                         continue;
@@ -402,10 +424,10 @@ pub fn Server(
                                     }
                                     msg.options.routing_key = reply_to;
                                     try cl.publish(msg, .{});
-                                    try metrics.publish(reply_to, route.metadata.exchange);
+                                    try metrics.publish(reply_to, exchange);
                                     // Only ack the message if the response is successful. That way we get to retry it if it fails.
                                     try cl.ack(response.delivery_tag, .{});
-                                    try metrics.ack(route.metadata.route);
+                                    try metrics.ack(route_str);
                                     const end_time = try std.time.Instant.now();
                                     const diff = end_time.since(start_time);
                                     remaining -= @intCast(diff);
