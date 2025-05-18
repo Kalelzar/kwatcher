@@ -199,6 +199,7 @@ const Connection = struct {
 
     pub fn bind(
         self: *Connection,
+        consumer_tag: []const u8,
         queue: []const u8,
         route: []const u8,
         exchange: []const u8,
@@ -224,7 +225,7 @@ const Connection = struct {
             .no_local = false,
             .no_ack = false,
             .exclusive = false,
-            .consumer_tag = route_bytes,
+            .consumer_tag = amqp.bytes_t.init(consumer_tag),
         });
     }
 
@@ -349,6 +350,9 @@ configuration: config.BaseConfig,
 /// @lifetime The allocator needs to outlive the client.
 allocator: std.mem.Allocator,
 
+buf: [1024 * 8]u8 = undefined,
+buf_allocator: std.heap.FixedBufferAllocator = undefined,
+
 /// The name of this client.
 /// @lifetime From client initialization to client deinitialization.
 /// @ownership `AmqpClient` instance
@@ -371,12 +375,14 @@ fn ensureState(self: *AmqpClient, state: State) StateError!void {
 /// @own name
 pub fn init(allocator: std.mem.Allocator, configuration: config.BaseConfig, name: []const u8) MemError!AmqpClient {
     const own_name = try allocator.dupe(u8, name);
-    return .{
+    var cl: AmqpClient = .{
         .allocator = allocator,
         .configuration = configuration,
         .name = own_name,
         .state = .disconnected,
     };
+    cl.buf_allocator = std.heap.FixedBufferAllocator.init(&cl.buf);
+    return cl;
 }
 
 pub fn deinit(self: *AmqpClient) void {
@@ -495,14 +501,18 @@ pub fn bind(
         else
             try declareEphemeralQueue(self);
 
+    const consumer_tag = try std.fmt.allocPrint(self.buf_allocator.allocator(), "{s}-{s}.{s}.{s}-{s}", .{ self.name, declared_queue, route, exchange, opts.channel_name orelse "__consume" });
+
     conn.bind(
+        consumer_tag,
         declared_queue,
         route,
         exchange,
         opts,
     ) catch |e| try self.handleDisconnect(e, conn);
 
-    log.info("Binding {s}/{s} to queue {s} on channel {s}.", .{
+    log.info("[{s}] Binding {s}/{s} to queue {s} on channel {s}.", .{
+        consumer_tag,
         exchange,
         route,
         declared_queue,
