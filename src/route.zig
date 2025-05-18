@@ -36,8 +36,9 @@ pub const Route = struct {
     const Metadata = struct {
         deps: []const meta.TypeId,
         errors: []const anyerror,
-        queue: []const u8,
+        route: []const u8,
         exchange: []const u8,
+        queue: ?[]const u8,
     };
 
     pub fn from(comptime ContainerType: type, comptime EventProvider: type) []const Route {
@@ -74,11 +75,15 @@ pub const Route = struct {
                     u8,
                     route,
                     '/',
-                ) orelse @compileError("route must contain an exchange");
+                ) orelse @compileError("route must contain a routing key and exchange");
                 const exchange = route[0..end_of_exchange];
-                const queue = route[end_of_exchange + 1 ..];
+                const routing_key_and_maybe_queue = route[end_of_exchange + 1 ..];
 
-                res = res ++ .{@field(@This(), method)(exchange, queue, event_handler, @field(ContainerType, d.name))};
+                const end_of_routing_key = std.mem.indexOfScalar(u8, routing_key_and_maybe_queue, '/') orelse routing_key_and_maybe_queue.len;
+                const routing_key = routing_key_and_maybe_queue[0..end_of_routing_key];
+                const queue = if (routing_key.len == routing_key_and_maybe_queue.len) null else routing_key_and_maybe_queue[end_of_routing_key + 1 ..];
+
+                res = res ++ .{@field(@This(), method)(exchange, routing_key, queue, event_handler, @field(ContainerType, d.name))};
             }
 
             break :blk res;
@@ -90,7 +95,8 @@ pub const Route = struct {
     fn routeMetadata(
         comptime handler: anytype,
         exchange: []const u8,
-        queue: []const u8,
+        route: []const u8,
+        queue: ?[]const u8,
     ) Route.Metadata {
         const fields = std.meta.fields(std.meta.ArgsTuple(@TypeOf(handler)));
         const n_deps = comptime fields.len;
@@ -103,6 +109,7 @@ pub const Route = struct {
                 break :brk &res;
             },
             .exchange = exchange,
+            .route = route,
             .queue = queue,
             .errors = comptime brk: {
                 switch (@typeInfo(meta.Return(handler))) {
@@ -152,8 +159,7 @@ pub const Route = struct {
                         .body = body,
                         .options = .{
                             .exchange = metadata.exchange,
-                            .queue = metadata.queue,
-                            .routing_key = opts.routing_key orelse metadata.queue,
+                            .routing_key = metadata.route,
                             .reply_to = opts.reply_to,
                         },
                     };
@@ -164,8 +170,7 @@ pub const Route = struct {
                         .body = body,
                         .options = .{
                             .exchange = metadata.exchange,
-                            .queue = metadata.queue,
-                            .routing_key = metadata.queue,
+                            .routing_key = metadata.route,
                         },
                     };
                 }
@@ -287,9 +292,8 @@ pub const Route = struct {
                 return .{
                     .body = out_body,
                     .options = .{
-                        .exchange = metadata.exchange,
-                        .queue = metadata.queue,
-                        .routing_key = metadata.queue,
+                        .exchange = "amq.direct",
+                        .routing_key = metadata.route,
                     },
                 };
             }
@@ -319,9 +323,10 @@ pub const Route = struct {
         return &Internal.handle;
     }
 
-    fn publish(exchange: []const u8, queue: []const u8, comptime event_handler: anytype, comptime handler: anytype) Route {
-        const metadata = comptime routeMetadata(handler, exchange, queue);
-        const e_metadata = comptime routeMetadata(event_handler, exchange, queue);
+    fn publish(exchange: []const u8, route: []const u8, comptime queue: ?[]const u8, comptime event_handler: anytype, comptime handler: anytype) Route {
+        if (comptime queue != null) @compileError("You cannot specify a queue while publishing");
+        const metadata = comptime routeMetadata(handler, exchange, route, queue);
+        const e_metadata = comptime routeMetadata(event_handler, exchange, route, queue);
         return .{
             .method = .publish,
             .handlers = .{
@@ -332,9 +337,9 @@ pub const Route = struct {
         };
     }
 
-    fn consume(exchange: []const u8, queue: []const u8, comptime event_handler: anytype, comptime handler: anytype) Route {
+    fn consume(exchange: []const u8, route: []const u8, queue: ?[]const u8, comptime event_handler: anytype, comptime handler: anytype) Route {
         _ = event_handler;
-        const metadata = comptime routeMetadata(handler, exchange, queue);
+        const metadata = comptime routeMetadata(handler, exchange, route, queue);
         return .{
             .method = .consume,
             .handlers = .{ .consume = consumeHandler(metadata, handler) },
@@ -342,9 +347,9 @@ pub const Route = struct {
         };
     }
 
-    fn reply(exchange: []const u8, queue: []const u8, comptime event_handler: anytype, comptime handler: anytype) Route {
+    fn reply(exchange: []const u8, route: []const u8, queue: ?[]const u8, comptime event_handler: anytype, comptime handler: anytype) Route {
         _ = event_handler;
-        const metadata = comptime routeMetadata(handler, exchange, queue);
+        const metadata = comptime routeMetadata(handler, exchange, route, queue);
         return .{
             .method = .reply,
             .handlers = .{ .reply = replyHandler(metadata, handler) },

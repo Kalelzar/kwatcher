@@ -4,12 +4,12 @@ const klib = @import("klib");
 const meta = klib.meta;
 
 pub const ConfigurableMessageOptions = struct {
-    routing_key: ?[]const u8 = null,
     reply_to: ?[]const u8 = null,
+    correlation_id: ?[]const u8 = null,
 };
 
 pub const MessageOptions = meta.MergeStructs(ConfigurableMessageOptions, struct {
-    queue: []const u8,
+    routing_key: []const u8,
     exchange: []const u8,
 });
 
