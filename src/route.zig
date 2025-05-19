@@ -6,6 +6,7 @@ const mem = @import("mem.zig");
 const schema = @import("schema.zig");
 const injector = @import("injector.zig");
 const resolver = @import("resolver.zig");
+const InternFmtCache = @import("intern_fmt_cache.zig");
 
 pub const Method = enum {
     publish,
@@ -37,6 +38,7 @@ pub fn Route(PathParams: type) type {
             return struct {
                 pub fn fromParams(inj: *injector.Injector) anyerror![]const u8 {
                     const params: *PathParams = try inj.require(*PathParams);
+                    const intern_cache: *InternFmtCache = try inj.require(*InternFmtCache);
 
                     const Resolver = resolver.Resolver(PathParams);
 
@@ -44,7 +46,7 @@ pub fn Route(PathParams: type) type {
                     if (comptime @TypeOf(value) != []const u8) {
                         @compileError("Currently only []const u8 parameters are supported. Sorry!");
                     } else {
-                        return value;
+                        return intern_cache.internFmt(ctx, "{s}", .{value});
                     }
                 }
 

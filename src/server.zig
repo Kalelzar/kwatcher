@@ -16,6 +16,7 @@ const DefaultRoutes = @import("default_routes.zig");
 const Injector = @import("injector.zig").Injector;
 const Route = @import("route.zig").Route;
 const context = @import("context.zig");
+const InternFmtCache = @import("intern_fmt_cache.zig");
 
 pub const Timer = struct {
     const TimerEntry = struct { interval: u64, last_activation: std.time.Instant };
@@ -73,6 +74,7 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
         arena: *std.heap.ArenaAllocator,
         internal_arena: mem.InternalArena,
         instrumented_allocator: *klib.mem.InstrumentedAllocator,
+        intern_fmt_cache: *InternFmtCache,
 
         client_cache: ?*AmqpClient = null,
         timer: ?Timer = null,
@@ -171,7 +173,11 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
             const arr_ptr = try allocator.create(std.heap.ArenaAllocator);
             const instr_ptr = try allocator.create(klib.mem.InstrumentedAllocator);
             errdefer allocator.destroy(arr_ptr);
+            const ifc_ptr = try allocator.create(InternFmtCache);
+            errdefer allocator.destroy(ifc_ptr);
+
             const result = Self{
+                .intern_fmt_cache = ifc_ptr,
                 .allocator = allocator,
                 .instrumented_allocator = instr_ptr,
                 .arena = arr_ptr,
@@ -179,6 +185,7 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
             };
             result.instrumented_allocator.* = metrics.instrumentAllocator(std.heap.page_allocator);
             result.arena.* = std.heap.ArenaAllocator.init(instr_ptr.allocator());
+            result.intern_fmt_cache.* = InternFmtCache.init(instr_ptr.allocator());
             return result;
         }
 
@@ -194,6 +201,8 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
                 self.allocator.destroy(c);
             }
 
+            self.intern_fmt_cache.deinit();
+            self.allocator.destroy(self.intern_fmt_cache);
             self.internal_arena.deinit();
             self.arena.deinit();
             self.allocator.destroy(self.arena);
