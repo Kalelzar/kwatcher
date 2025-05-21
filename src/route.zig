@@ -6,7 +6,9 @@ const mem = @import("mem.zig");
 const schema = @import("schema.zig");
 const injector = @import("injector.zig");
 const resolver = @import("resolver.zig");
+const metrics = @import("metrics.zig");
 const InternFmtCache = @import("intern_fmt_cache.zig");
+const Client = @import("client.zig");
 
 pub const Method = enum {
     publish,
@@ -23,20 +25,13 @@ const EventHandlerFn = HandlerFn(anyerror!bool);
 const ConsumeHandlerFn = *const fn (*injector.Injector, []const u8) anyerror!void;
 const ReplyHandlerFn = *const fn (*injector.Injector, []const u8) anyerror!schema.SendMessage;
 
-pub const Handlers = struct {
-    event: ?EventHandlerFn = null,
-    publish: ?PublishHandlerFn = null,
-    consume: ?ConsumeHandlerFn = null,
-    reply: ?ReplyHandlerFn = null,
-};
-
 pub fn Route(PathParams: type) type {
-    const RouteHandlerFn = *const fn (*injector.Injector) anyerror![]const u8;
+    const RouteHandlerFn = *const fn (*injector.Injector) anyerror!InternFmtCache.Lease;
 
     const RouteHandlers = struct {
-        pub fn with(comptime ctx: []const u8) type {
+        pub fn with(comptime key: []const u8, comptime ctx: []const u8) type {
             return struct {
-                pub fn fromParams(inj: *injector.Injector) anyerror![]const u8 {
+                pub fn fromParams(inj: *injector.Injector) anyerror!InternFmtCache.Lease {
                     const params: *PathParams = try inj.require(*PathParams);
                     const intern_cache: *InternFmtCache = try inj.require(*InternFmtCache);
 
@@ -46,38 +41,120 @@ pub fn Route(PathParams: type) type {
                     if (comptime @TypeOf(value) != []const u8) {
                         @compileError("Currently only []const u8 parameters are supported. Sorry!");
                     } else {
-                        return intern_cache.internFmt(ctx, "{s}", .{value});
+                        return intern_cache.internFmtWithLease(key, "{s}", .{value});
                     }
                 }
 
-                pub fn static(_: *injector.Injector) anyerror![]const u8 {
-                    return ctx;
+                pub fn static(inj: *injector.Injector) anyerror!InternFmtCache.Lease {
+                    const alloc = try inj.require(std.mem.Allocator);
+                    return .{ .new = ctx, .old = null, .allocator = alloc };
                 }
             };
         }
+    };
+
+    const Handlers = struct {
+        event: ?EventHandlerFn = null,
+        publish: ?PublishHandlerFn = null,
+        consume: ?ConsumeHandlerFn = null,
+        reply: ?ReplyHandlerFn = null,
+        route: RouteHandlerFn,
+        exchange: RouteHandlerFn,
+        queue: ?RouteHandlerFn = null,
     };
 
     return struct {
         method: Method,
         handlers: Handlers,
         metadata: *const Metadata,
+        binding: Binding,
 
         const Self = @This();
 
         const Metadata = struct {
             deps: []const meta.TypeId,
             errors: []const anyerror,
-            route: RouteHandlerFn,
-            exchange: RouteHandlerFn,
-            queue: ?RouteHandlerFn,
         };
 
-        fn parseRouteHandlers(comptime path: []const u8) RouteHandlerFn {
+        const Binding = struct {
+            route: []const u8,
+            exchange: []const u8,
+            queue: ?[]const u8,
+            consumer_tag: ?[]const u8,
+
+            pub fn update(self: *Binding, inj: *injector.Injector) !?[]const u8 {
+                var parent: *Self = @fieldParentPtr("binding", self);
+                return parent.updateBindings(inj);
+            }
+        };
+
+        pub fn updateBindings(self: *Self, inj: *injector.Injector) !?[]const u8 {
+            var inj_args: std.meta.Tuple(&.{*injector.Injector}) = undefined;
+            inj_args[0] = inj;
+
+            const client = try inj.require(Client);
+
+            var _route = try @call(.auto, self.handlers.route, inj_args);
+            defer _route.deinit();
+            var _exchange = try @call(.auto, self.handlers.exchange, inj_args);
+            defer _exchange.deinit();
+            var _queue = if (self.handlers.queue) |q| try @call(.auto, q, inj_args) else null;
+            defer if (_queue) |*q| q.deinit();
+
+            const new = _route.updated() or _exchange.updated() or if (_queue) |q| q.updated() else false;
+
+            self.binding.route = _route.new;
+            self.binding.exchange = _exchange.new;
+            self.binding.queue = if (_queue) |q| q.new else null;
+
+            std.log.debug(
+                "[{?s}, new: {}] Updated bindings for {} route {s}/{s}/{?s}",
+                .{
+                    self.binding.consumer_tag,
+                    new,
+                    self.method,
+                    self.binding.exchange,
+                    self.binding.route,
+                    self.binding.queue,
+                },
+            );
+
+            if (!new) return null;
+
+            if (self.binding.consumer_tag) |ct| {
+                try client.unbind(ct, .{});
+                return self.bind(client);
+            }
+
+            return null;
+        }
+
+        fn parseRouteHandlers(comptime key: []const u8, comptime path: []const u8) RouteHandlerFn {
             if (path.len > 3 and path[0] == '{' and path[path.len - 1] == '}') {
                 const realpath = path[1 .. path.len - 1];
-                return &RouteHandlers.with(realpath).fromParams;
+                return &RouteHandlers.with(key, realpath).fromParams;
             }
-            return &RouteHandlers.with(path).static;
+            return &RouteHandlers.with(key, path).static;
+        }
+
+        pub fn bind(self: *Self, client: Client) !?[]const u8 {
+            switch (self.method) {
+                .consume, .reply => {
+                    const res = try client.bind(
+                        self.binding.queue,
+                        self.binding.route,
+                        self.binding.exchange,
+                        .{},
+                    );
+                    try metrics.consumeQueue(self.binding.route);
+                    self.binding.consumer_tag = res;
+                    return res;
+                },
+                .publish => {
+                    try metrics.publishQueue(self.binding.route, self.binding.exchange);
+                    return null;
+                },
+            }
         }
 
         pub fn from(comptime ContainerType: type, comptime EventProvider: type) []const Self {
@@ -122,9 +199,9 @@ pub fn Route(PathParams: type) type {
                     const routing_key = routing_key_and_maybe_queue[0..end_of_routing_key];
                     const queue = if (routing_key.len == routing_key_and_maybe_queue.len) null else routing_key_and_maybe_queue[end_of_routing_key + 1 ..];
 
-                    const exchange_handler = parseRouteHandlers(exchange);
-                    const route_handler = parseRouteHandlers(routing_key);
-                    const queue_handler = if (routing_key.len == routing_key_and_maybe_queue.len) null else parseRouteHandlers(queue);
+                    const exchange_handler = parseRouteHandlers(route, exchange);
+                    const route_handler = parseRouteHandlers(route, routing_key);
+                    const queue_handler = if (routing_key.len == routing_key_and_maybe_queue.len) null else parseRouteHandlers(route, queue);
 
                     res = res ++ .{@field(@This(), method)(exchange_handler, route_handler, queue_handler, event_handler, @field(ContainerType, d.name))};
                 }
@@ -137,9 +214,6 @@ pub fn Route(PathParams: type) type {
 
         fn routeMetadata(
             comptime handler: anytype,
-            exchange: RouteHandlerFn,
-            route: RouteHandlerFn,
-            queue: ?RouteHandlerFn,
         ) Self.Metadata {
             const fields = std.meta.fields(std.meta.ArgsTuple(@TypeOf(handler)));
             const n_deps = comptime fields.len;
@@ -151,9 +225,6 @@ pub fn Route(PathParams: type) type {
                     const res = deps;
                     break :brk &res;
                 },
-                .exchange = exchange,
-                .route = route,
-                .queue = queue,
                 .errors = comptime brk: {
                     switch (@typeInfo(meta.Return(handler))) {
                         .error_union => |r| {
@@ -193,10 +264,10 @@ pub fn Route(PathParams: type) type {
                             else => maybe_result,
                         };
 
-                    var inj_args: std.meta.Tuple(&.{*injector.Injector}) = undefined;
-                    inj_args[0] = inj;
-                    const exchange = try @call(.auto, metadata.exchange, inj_args);
-                    const route = try @call(.auto, metadata.route, inj_args);
+                    const binding = try inj.require(*Binding);
+                    const exchange = binding.exchange;
+                    const route = binding.route;
+                    std.log.debug("pub handler: {s}/{s}", .{ exchange, route });
 
                     var arena = try inj.require(mem.InternalArena);
                     const alloc = arena.allocator();
@@ -305,9 +376,8 @@ pub fn Route(PathParams: type) type {
                     var arena = try inj.require(mem.InternalArena);
                     const allocator = arena.allocator();
 
-                    var inj_args: std.meta.Tuple(&.{*injector.Injector}) = undefined;
-                    inj_args[0] = inj;
-                    const route = try @call(.auto, metadata.route, inj_args);
+                    const binding = try inj.require(*Binding);
+                    const route = binding.route;
 
                     args[0] = std.json.parseFromSliceLeaky(
                         @TypeOf(args[0]),
@@ -377,13 +447,22 @@ pub fn Route(PathParams: type) type {
 
         fn publish(exchange: RouteHandlerFn, route: RouteHandlerFn, comptime queue: ?RouteHandlerFn, comptime event_handler: anytype, comptime handler: anytype) Self {
             if (comptime queue != null) @compileError("You cannot specify a queue while publishing");
-            const metadata = comptime routeMetadata(handler, exchange, route, queue);
-            const e_metadata = comptime routeMetadata(event_handler, exchange, route, queue);
+            const metadata = comptime routeMetadata(handler);
+            const e_metadata = comptime routeMetadata(event_handler);
             return .{
                 .method = .publish,
                 .handlers = .{
                     .publish = publishHandler(metadata, handler),
                     .event = eventHandler(e_metadata, event_handler),
+                    .route = route,
+                    .queue = queue,
+                    .exchange = exchange,
+                },
+                .binding = .{
+                    .route = "",
+                    .queue = null,
+                    .exchange = "",
+                    .consumer_tag = null,
                 },
                 .metadata = &metadata,
             };
@@ -391,21 +470,43 @@ pub fn Route(PathParams: type) type {
 
         fn consume(exchange: RouteHandlerFn, route: RouteHandlerFn, queue: ?RouteHandlerFn, comptime event_handler: anytype, comptime handler: anytype) Self {
             _ = event_handler;
-            const metadata = comptime routeMetadata(handler, exchange, route, queue);
+            const metadata = comptime routeMetadata(handler);
             return .{
                 .method = .consume,
-                .handlers = .{ .consume = consumeHandler(metadata, handler) },
+                .handlers = .{
+                    .consume = consumeHandler(metadata, handler),
+                    .route = route,
+                    .queue = queue,
+                    .exchange = exchange,
+                },
                 .metadata = &metadata,
+                .binding = .{
+                    .route = "",
+                    .queue = null,
+                    .exchange = "",
+                    .consumer_tag = null,
+                },
             };
         }
 
         fn reply(exchange: RouteHandlerFn, route: RouteHandlerFn, queue: ?RouteHandlerFn, comptime event_handler: anytype, comptime handler: anytype) Self {
             _ = event_handler;
-            const metadata = comptime routeMetadata(handler, exchange, route, queue);
+            const metadata = comptime routeMetadata(handler);
             return .{
                 .method = .reply,
-                .handlers = .{ .reply = replyHandler(metadata, handler) },
+                .handlers = .{
+                    .reply = replyHandler(metadata, handler),
+                    .exchange = exchange,
+                    .route = route,
+                    .queue = queue,
+                },
                 .metadata = &metadata,
+                .binding = .{
+                    .route = "",
+                    .queue = null,
+                    .exchange = "",
+                    .consumer_tag = null,
+                },
             };
         }
     };

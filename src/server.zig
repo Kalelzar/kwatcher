@@ -235,8 +235,8 @@ pub fn Server(
         instrumented_allocator: *klib.mem.InstrumentedAllocator,
         deps: Dependencies(Context, UserConfig, client_name, client_version),
         user_deps: *UserSingletonDependencies,
-        routes: []const Route(Context),
-        default_routes: []const Route(Context),
+        routes: std.ArrayListUnmanaged(Route(Context)),
+
         retries: i8 = 0,
         backoff: u64 = 5,
         should_run: std.atomic.Value(bool) = .init(true),
@@ -252,15 +252,20 @@ pub fn Server(
                 client_name,
                 client_version,
             ).init(alloc);
-            const routes = comptime Route(Context).from(Routes, EventProvider);
+
+            const user_routes = comptime Route(Context).from(Routes, EventProvider);
             const default_routes = comptime Route(Context).from(DefaultRoutes, DefaultEventProvider);
+
+            var routes = try std.ArrayListUnmanaged(Route(Context)).initCapacity(alloc, user_routes.len + default_routes.len);
+
+            routes.appendSliceAssumeCapacity(user_routes);
+            routes.appendSliceAssumeCapacity(default_routes);
 
             return .{
                 .instrumented_allocator = instrumented_allocator,
                 .user_deps = deps,
                 .deps = default_deps,
                 .routes = routes,
-                .default_routes = default_routes,
             };
         }
 
@@ -275,33 +280,17 @@ pub fn Server(
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(self.user_deps, &base_injector);
 
-            var cl = try user_injector.require(Client);
+            const client = try user_injector.require(Client);
 
-            var routes = DisjointSlice(Route(Context)){ .slices = &.{ self.routes, self.default_routes } };
-            var iter = routes.iterator();
-            while (iter.next()) |route| {
-                switch (route.method) {
-                    .consume, .reply => {
-                        var inj_args: std.meta.Tuple(&.{*Injector}) = undefined;
-                        inj_args[0] = &user_injector;
-                        const route_str = try @call(.auto, route.metadata.route, inj_args);
-                        const exchange = try @call(.auto, route.metadata.exchange, inj_args);
-                        const queue = if (route.metadata.queue) |q| try @call(.auto, q, inj_args) else null;
-                        try cl.bind(
-                            queue,
-                            route_str,
-                            exchange,
-                            .{},
-                        );
-                        try metrics.consumeQueue(route_str);
-                    },
-                    .publish => {
-                        var inj_args: std.meta.Tuple(&.{*Injector}) = undefined;
-                        inj_args[0] = &user_injector;
-                        const route_str = try @call(.auto, route.metadata.route, inj_args);
-                        const exchange = try @call(.auto, route.metadata.exchange, inj_args);
-                        try metrics.publishQueue(route_str, exchange);
-                    },
+            for (self.routes.items) |*route| {
+                // TODO: Map the route to the given consumer_tag if any.
+                // TODO: Make a separate list of routes with no consumer tag.
+                // FIXME: This should COPY the route into the map/list instead of modifying it in-place
+                _ = try @constCast(route).updateBindings(&user_injector);
+                const ct = try route.bind(client);
+                if (ct) |consumer_tag| {
+                    _ = consumer_tag;
+                    //                    self.bindings.put(consumer_tag
                 }
             }
         }
@@ -316,38 +305,33 @@ pub fn Server(
             defer internal_arena.reset();
             var timer = try base_injector.require(Timer);
 
-            var routes = DisjointSlice(Route(Context)){ .slices = &.{ self.routes, self.default_routes } };
-            var route_iterator = routes.iterator();
-
-            while (route_iterator.next()) |route| {
+            for (self.routes.items) |*route| {
                 if (route.method != .publish) continue;
                 if (route.handlers.event) |event_handler| {
                     var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
                     var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
                     defer scoped_injector.maybeDeconstruct();
-                    const args = PublishArgs{&scoped_injector};
+                    var binding_injector = try Injector.init(@constCast(&.{ .binding = @constCast(&route.binding) }), &scoped_injector);
+                    defer binding_injector.maybeDeconstruct();
+                    const args = PublishArgs{&binding_injector};
                     const ready = @call(.auto, event_handler, args) catch |e| {
                         log.err(
                             "Encountered an error while querying the event provider for '{s}/{s}': {}",
-                            .{ route.metadata.exchange, route.metadata.route, e },
+                            .{ route.binding.exchange, route.binding.route, e },
                         );
                         continue;
                     };
                     if (ready) {
-                        var inj_args: std.meta.Tuple(&.{*Injector}) = undefined;
-                        inj_args[0] = &user_injector;
-                        const route_str = try @call(.auto, route.metadata.route, inj_args);
-                        const exchange = try @call(.auto, route.metadata.exchange, inj_args);
                         const msg = @call(.auto, route.handlers.publish.?, args) catch |e| {
-                            try metrics.publishError(route_str, exchange);
+                            try metrics.publishError(route.binding.route, route.binding.exchange);
                             log.err(
                                 "Encountered an error while publishing an event on '{s}/{s}': {}",
-                                .{ exchange, route_str, e },
+                                .{ route.binding.exchange, route.binding.route, e },
                             );
                             continue;
                         };
                         try cl.publish(msg, .{});
-                        try metrics.publish(route_str, exchange);
+                        try metrics.publish(route.binding.route, route.binding.exchange);
                     }
                 }
                 internal_arena.reset();
@@ -363,7 +347,6 @@ pub fn Server(
             defer cl.reset();
             var internal_arena = try user_injector.require(mem.InternalArena);
             defer internal_arena.reset();
-            var routes = DisjointSlice(Route(Context)){ .slices = &.{ self.routes, self.default_routes } };
 
             var remaining: i64 = @intCast(interval);
             var total: i32 = 0;
@@ -377,31 +360,28 @@ pub fn Server(
                     defer response.deinit();
                     total += 1;
                     try metrics.consume(response.routing_key);
-                    var pub_route_iterator = routes.iterator();
-                    while (pub_route_iterator.next()) |route| {
-                        var inj_args: std.meta.Tuple(&.{*Injector}) = undefined;
-                        inj_args[0] = &user_injector;
-                        const route_str = try @call(.auto, route.metadata.route, inj_args);
-                        const exchange = try @call(.auto, route.metadata.exchange, inj_args);
-                        if (!std.mem.eql(u8, route_str, response.routing_key) or
-                            !std.mem.eql(u8, exchange, response.exchange)) continue;
+                    for (self.routes.items) |*route| {
+                        if (!std.mem.eql(u8, route.binding.route, response.routing_key) or
+                            !std.mem.eql(u8, route.binding.exchange, response.exchange)) continue;
+                        var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
+                        var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
+                        defer scoped_injector.maybeDeconstruct();
+                        var binding_injector = try Injector.init(@constCast(&.{ .binding = &route.binding }), &scoped_injector);
+                        defer binding_injector.maybeDeconstruct();
                         switch (route.method) {
                             .consume => {
                                 handled += 1;
                                 {
-                                    var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
-                                    var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
-                                    defer scoped_injector.maybeDeconstruct();
-                                    const args = ConsumeArgs{ &scoped_injector, response.message.body };
+                                    const args = ConsumeArgs{ &binding_injector, response.message.body };
                                     @call(.auto, route.handlers.consume.?, args) catch |e| {
                                         log.err(
                                             "Encountered an error while consuming a message on '{s}/{s}': {}\n\t{s}\n",
-                                            .{ exchange, route_str, e, response.message.body },
+                                            .{ route.binding.exchange, route.binding.route, e, response.message.body },
                                         );
                                         try cl.reject(response.delivery_tag, false, .{});
                                     };
                                     try cl.ack(response.delivery_tag, .{});
-                                    try metrics.ack(route_str);
+                                    try metrics.ack(route.binding.route);
                                     const end_time = try std.time.Instant.now();
                                     const diff = end_time.since(start_time);
                                     remaining -= @intCast(diff);
@@ -415,15 +395,12 @@ pub fn Server(
                                         continue;
                                     }).slice() orelse unreachable;
 
-                                    var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
-                                    var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
-                                    defer scoped_injector.maybeDeconstruct();
-                                    const args = ConsumeArgs{ &scoped_injector, response.message.body };
-                                    log.info("Replying to {s}/{s}", .{ exchange, reply_to });
+                                    const args = ConsumeArgs{ &binding_injector, response.message.body };
+                                    log.info("Replying to {s}/{s}", .{ route.binding.exchange, reply_to });
                                     var msg: schema.SendMessage = @call(.auto, route.handlers.reply.?, args) catch |e| {
                                         log.err(
                                             "Encountered an error while replying a message on '{s}/{s}': {}\n\t{s}\n",
-                                            .{ exchange, route_str, e, response.message.body },
+                                            .{ route.binding.exchange, route.binding.route, e, response.message.body },
                                         );
                                         try cl.reject(response.delivery_tag, false, .{});
                                         continue;
@@ -433,10 +410,10 @@ pub fn Server(
                                     }
                                     msg.options.routing_key = reply_to;
                                     try cl.publish(msg, .{});
-                                    try metrics.publish(reply_to, exchange);
+                                    try metrics.publish(reply_to, route.binding.exchange);
                                     // Only ack the message if the response is successful. That way we get to retry it if it fails.
                                     try cl.ack(response.delivery_tag, .{});
-                                    try metrics.ack(route_str);
+                                    try metrics.ack(route.binding.route);
                                     const end_time = try std.time.Instant.now();
                                     const diff = end_time.since(start_time);
                                     remaining -= @intCast(diff);
@@ -483,6 +460,11 @@ pub fn Server(
 
                 try metrics.resetCycle();
                 const start_time = try std.time.Instant.now();
+                for (self.routes.items) |*route| {
+                    // TODO: Update the mapping of consumer_tag -> route
+                    //       With the new value if it was changed.
+                    _ = try @constCast(route).updateBindings(&user_injector);
+                }
                 self.handlePublish() catch |e| {
                     log.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
                     return e;

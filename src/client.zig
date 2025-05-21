@@ -44,6 +44,11 @@ pub const VTable = struct {
         route: []const u8,
         exchange: []const u8,
         opts: ChannelOpts,
+    ) anyerror![]const u8,
+    unbind: *const fn (
+        self_ptr: *anyopaque,
+        consumer_tag: []const u8,
+        opts: ChannelOpts,
     ) anyerror!void,
     consume: *const fn (self_ptr: *anyopaque, timeout: i64) anyerror!?Response,
     publish: *const fn (
@@ -95,8 +100,16 @@ pub fn bind(
     route: []const u8,
     exchange: []const u8,
     opts: ChannelOpts,
-) !void {
+) ![]const u8 {
     return self.vtable.bind(self.ptr, queue, route, exchange, opts);
+}
+
+pub fn unbind(
+    self: Client,
+    consumer_tag: []const u8,
+    opts: ChannelOpts,
+) !void {
+    return self.vtable.unbind(self.ptr, consumer_tag, opts);
 }
 
 pub fn consume(self: Client, timeout: i64) !?Response {

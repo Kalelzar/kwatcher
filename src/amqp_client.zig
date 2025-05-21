@@ -31,11 +31,30 @@ pub const State = enum {
     invalid, //< A client in an invalid state.
 };
 
+const Channel = struct {
+    const Binding = struct {
+        queue: []const u8,
+        route: []const u8,
+        exchange: []const u8,
+    };
+
+    this: amqp.Channel,
+    /// Maps a consumer tag to the relevant binding.
+    bindings: std.StringHashMapUnmanaged(Binding),
+
+    pub fn init(ch: amqp.Channel) Channel {
+        return .{
+            .this = ch,
+            .bindings = .{},
+        };
+    }
+};
+
 /// Data related to the active connection.
 const Connection = struct {
     this: amqp.Connection,
     socket: amqp.TcpSocket,
-    channels: std.StringHashMapUnmanaged(amqp.Channel),
+    channels: std.StringHashMapUnmanaged(Channel),
     counter: u16 = 1,
 
     /// While the underlying AMQP library is not thread-safe
@@ -49,7 +68,7 @@ const Connection = struct {
     /// @borrow allocator
     pub fn init(allocator: std.mem.Allocator, configuration: config.BaseConfig, name: []const u8) (MemError || AuthError || AmqpError)!Connection {
         log.info("Initializing client .{s}", .{name});
-        const channel_map = std.StringHashMapUnmanaged(amqp.Channel){};
+        const channel_map = std.StringHashMapUnmanaged(Channel){};
 
         // Setup
         var timeout = configuration.config.timeout.toTimeval();
@@ -154,7 +173,7 @@ const Connection = struct {
 
         log.debug("Configured prefetch for {s}.", .{channel_name});
 
-        try self.channels.put(allocator, channel_name, amqp_channel);
+        try self.channels.put(allocator, channel_name, .init(amqp_channel));
         try metrics.addChannel();
     }
 
@@ -164,7 +183,7 @@ const Connection = struct {
         self.lock.lock();
         defer self.lock.unlock();
         if (self.channels.fetchRemove(channel_name)) |entry| {
-            try entry.value.close(.REPLY_SUCCESS);
+            try entry.value.this.close(.REPLY_SUCCESS);
         }
     }
 
@@ -186,7 +205,7 @@ const Connection = struct {
 
         const queue_bytes = if (queue) |q| amqp.bytes_t.init(q) else amqp.bytes_t.empty();
 
-        const response = try rpc_channel.queue_declare(queue_bytes, .{
+        const response = try rpc_channel.this.queue_declare(queue_bytes, .{
             .passive = extra.passive,
             .durable = extra.durable,
             .exclusive = extra.exclusive,
@@ -199,6 +218,7 @@ const Connection = struct {
 
     pub fn bind(
         self: *Connection,
+        allocator: std.mem.Allocator,
         consumer_tag: []const u8,
         queue: []const u8,
         route: []const u8,
@@ -208,25 +228,65 @@ const Connection = struct {
         self.lock.lock();
         defer self.lock.unlock();
 
-        const rpc_channel = self.channels.get(opts.channel_name orelse "__consume") orelse return error.StateCorrupted;
+        var rpc_channel = self.channels.getPtr(opts.channel_name orelse "__consume") orelse return error.StateCorrupted;
 
         const queue_bytes = amqp.bytes_t.init(queue);
         const route_bytes = amqp.bytes_t.init(route);
         const exchange_bytes = amqp.bytes_t.init(exchange);
 
-        try rpc_channel.queue_bind(
+        try rpc_channel.this.queue_bind(
             queue_bytes,
             exchange_bytes,
             route_bytes,
             amqp.table_t.empty(),
         );
 
-        _ = try rpc_channel.basic_consume(queue_bytes, .{
+        _ = try rpc_channel.this.basic_consume(queue_bytes, .{
             .no_local = false,
             .no_ack = false,
             .exclusive = false,
             .consumer_tag = amqp.bytes_t.init(consumer_tag),
         });
+
+        try rpc_channel.bindings.put(
+            allocator,
+            consumer_tag,
+            .{
+                .queue = queue,
+                .exchange = exchange,
+                .route = route,
+            },
+        );
+    }
+
+    pub fn unbind(
+        self: *Connection,
+        alloc: std.mem.Allocator,
+        consumer_tag: []const u8,
+        opts: Client.ChannelOpts,
+    ) !void {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        var rpc_channel = self.channels.get(opts.channel_name orelse "__consume") orelse return error.StateCorrupted;
+        const binding = rpc_channel.bindings.get(consumer_tag) orelse return error.NotAConsumer;
+
+        const queue_bytes = amqp.bytes_t.init(binding.queue);
+        const route_bytes = amqp.bytes_t.init(binding.route);
+        const exchange_bytes = amqp.bytes_t.init(binding.exchange);
+
+        try rpc_channel.this.queue_unbind(
+            queue_bytes,
+            exchange_bytes,
+            route_bytes,
+            amqp.table_t.empty(),
+        );
+
+        const consumer_bytes = amqp.bytes_t.init(consumer_tag);
+        _ = try rpc_channel.this.basic_cancel(consumer_bytes);
+
+        const e = rpc_channel.bindings.fetchRemove(consumer_tag).?;
+        alloc.free(e.key);
     }
 
     pub fn publish(
@@ -246,7 +306,7 @@ const Connection = struct {
 
         const rpc_channel = self.channels.get(opts.channel_name orelse "__publish") orelse return error.StateCorrupted;
 
-        try rpc_channel.basic_publish(
+        try rpc_channel.this.basic_publish(
             exchange_bytes,
             route_bytes,
             body_bytes,
@@ -262,6 +322,9 @@ const Connection = struct {
             .sec = 0,
             .usec = @truncate(timeout),
         };
+
+        std.log.debug("Attempting to consume", .{});
+
         var envelope = self.this.consume_message(&timeval, 0) catch |e| switch (e) {
             error.Timeout => return null,
             else => |le| return le,
@@ -307,7 +370,7 @@ const Connection = struct {
         self.lock.lock();
         defer self.lock.unlock();
         const rpc_channel = self.channels.get(opts.channel_name orelse "__consume") orelse return error.StateCorrupted;
-        try rpc_channel.basic_ack(delivery_tag, false);
+        try rpc_channel.this.basic_ack(delivery_tag, false);
     }
 
     pub fn reject(
@@ -319,7 +382,7 @@ const Connection = struct {
         self.lock.lock();
         defer self.lock.unlock();
         const rpc_channel = self.channels.get(opts.channel_name orelse "__consume") orelse return error.StateCorrupted;
-        try rpc_channel.basic_reject(delivery_tag, requeue);
+        try rpc_channel.this.basic_reject(delivery_tag, requeue);
     }
 
     pub fn deinit(self: *Connection, allocator: std.mem.Allocator) void {
@@ -329,7 +392,7 @@ const Connection = struct {
         var channelIt = self.channels.iterator();
 
         while (channelIt.next()) |channel| {
-            channel.value_ptr.close(.REPLY_SUCCESS) catch |e| {
+            channel.value_ptr.this.close(.REPLY_SUCCESS) catch |e| {
                 log.warn("Failed to close channel '{s}' with error {}.", .{ channel.key_ptr.*, e });
             };
         }
@@ -497,7 +560,7 @@ pub fn bind(
     route: []const u8,
     exchange: []const u8,
     opts: Client.ChannelOpts,
-) !void {
+) ![]const u8 {
     var self = getSelf(ptr);
     var conn = try self.ensureConnected();
 
@@ -507,9 +570,11 @@ pub fn bind(
         else
             try declareEphemeralQueue(self);
 
-    const consumer_tag = try std.fmt.allocPrint(self.buf_allocator.allocator(), "{s}-{s}.{s}.{s}-{s}", .{ self.name, declared_queue, route, exchange, opts.channel_name orelse "__consume" });
+    const alloc = self.buf_allocator.allocator();
+    const consumer_tag = try std.fmt.allocPrint(alloc, "{s}-{s}.{s}.{s}-{s}", .{ self.name, declared_queue, route, exchange, opts.channel_name orelse "__consume" });
 
     conn.bind(
+        alloc,
         consumer_tag,
         declared_queue,
         route,
@@ -524,6 +589,29 @@ pub fn bind(
         declared_queue,
         opts.channel_name orelse "__consume",
     });
+
+    return consumer_tag;
+}
+
+pub fn unbind(
+    ptr: *anyopaque,
+    consumer_tag: []const u8,
+    opts: Client.ChannelOpts,
+) !void {
+    var self = getSelf(ptr);
+    var conn = try self.ensureConnected();
+    const alloc = self.buf_allocator.allocator();
+
+    log.info("[{s}] Unbinding from channel {s}.", .{
+        consumer_tag,
+        opts.channel_name orelse "__consume",
+    });
+
+    conn.unbind(
+        alloc,
+        consumer_tag,
+        opts,
+    ) catch |e| try self.handleDisconnect(e, conn);
 }
 
 pub fn consume(ptr: *anyopaque, timeout: i64) !?Client.Response {
@@ -652,6 +740,7 @@ pub fn client(self: *AmqpClient) Client {
             .declareEphemeralQueue = declareEphemeralQueue,
             .declareDurableQueue = declareDurableQueue,
             .bind = bind,
+            .unbind = unbind,
             .ack = ack,
             .reject = reject,
         },
