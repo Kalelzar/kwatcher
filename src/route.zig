@@ -199,9 +199,9 @@ pub fn Route(PathParams: type) type {
                     const routing_key = routing_key_and_maybe_queue[0..end_of_routing_key];
                     const queue = if (routing_key.len == routing_key_and_maybe_queue.len) null else routing_key_and_maybe_queue[end_of_routing_key + 1 ..];
 
-                    const exchange_handler = parseRouteHandlers(route, exchange);
-                    const route_handler = parseRouteHandlers(route, routing_key);
-                    const queue_handler = if (routing_key.len == routing_key_and_maybe_queue.len) null else parseRouteHandlers(route, queue);
+                    const exchange_handler = parseRouteHandlers("exchange." ++ route, exchange);
+                    const route_handler = parseRouteHandlers("route." ++ route, routing_key);
+                    const queue_handler = if (routing_key.len == routing_key_and_maybe_queue.len) null else parseRouteHandlers("queue." ++ route, queue);
 
                     res = res ++ .{@field(@This(), method)(exchange_handler, route_handler, queue_handler, event_handler, @field(ContainerType, d.name))};
                 }
