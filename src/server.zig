@@ -237,6 +237,9 @@ pub fn Server(
         user_deps: *UserSingletonDependencies,
         routes: std.ArrayListUnmanaged(Route(Context)),
 
+        consumers: std.StringHashMapUnmanaged(Route(Context)),
+        publishers: std.ArrayListUnmanaged(Route(Context)),
+
         retries: i8 = 0,
         backoff: u64 = 5,
         should_run: std.atomic.Value(bool) = .init(true),
@@ -266,6 +269,8 @@ pub fn Server(
                 .user_deps = deps,
                 .deps = default_deps,
                 .routes = routes,
+                .consumers = .{},
+                .publishers = .{},
             };
         }
 
@@ -277,20 +282,41 @@ pub fn Server(
         }
 
         pub fn configure(self: *Self) !void {
+            log.debug("Configuring server", .{});
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(self.user_deps, &base_injector);
 
             const client = try user_injector.require(Client);
 
-            for (self.routes.items) |*route| {
-                // TODO: Map the route to the given consumer_tag if any.
-                // TODO: Make a separate list of routes with no consumer tag.
-                // FIXME: This should COPY the route into the map/list instead of modifying it in-place
-                _ = try @constCast(route).updateBindings(&user_injector);
-                const ct = try route.bind(client);
+            const alloc = self.instrumented_allocator.allocator();
+            self.publishers.clearRetainingCapacity();
+            var ki = self.consumers.keyIterator();
+            while (ki.next()) |e| {
+                alloc.free(e.*);
+            }
+            self.consumers.clearRetainingCapacity();
+
+            for (self.routes.items) |*route_ptr| {
+                var route = route_ptr.*;
+                const existing = try (&route).updateBindings(&user_injector);
+                if (existing) |_| {
+                    @panic("A consumer tag shouldn't exist yet. Something is very wrong. Server state corrupted... Aborting");
+                }
+                const ct = try (&route).bind(client);
                 if (ct) |consumer_tag| {
-                    _ = consumer_tag;
-                    //                    self.bindings.put(consumer_tag
+                    log.debug(
+                        "Assigning '{} {s}/{s}/{?s}' to {s}",
+                        .{
+                            route.method,
+                            route.binding.exchange,
+                            route.binding.route,
+                            route.binding.queue,
+                            consumer_tag,
+                        },
+                    );
+                    try self.consumers.put(alloc, try alloc.dupe(u8, consumer_tag), route);
+                } else {
+                    try self.publishers.append(alloc, route);
                 }
             }
         }
@@ -304,37 +330,39 @@ pub fn Server(
             var internal_arena = try user_injector.require(mem.InternalArena);
             defer internal_arena.reset();
             var timer = try base_injector.require(Timer);
+            for (self.publishers.items) |*route| {
+                defer internal_arena.reset();
+                const event_handler = route.handlers.event.?;
 
-            for (self.routes.items) |*route| {
-                if (route.method != .publish) continue;
-                if (route.handlers.event) |event_handler| {
-                    var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
-                    var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
-                    defer scoped_injector.maybeDeconstruct();
-                    var binding_injector = try Injector.init(@constCast(&.{ .binding = @constCast(&route.binding) }), &scoped_injector);
-                    defer binding_injector.maybeDeconstruct();
-                    const args = PublishArgs{&binding_injector};
-                    const ready = @call(.auto, event_handler, args) catch |e| {
-                        log.err(
-                            "Encountered an error while querying the event provider for '{s}/{s}': {}",
-                            .{ route.binding.exchange, route.binding.route, e },
-                        );
-                        continue;
-                    };
-                    if (ready) {
-                        const msg = @call(.auto, route.handlers.publish.?, args) catch |e| {
-                            try metrics.publishError(route.binding.route, route.binding.exchange);
-                            log.err(
-                                "Encountered an error while publishing an event on '{s}/{s}': {}",
-                                .{ route.binding.exchange, route.binding.route, e },
-                            );
-                            continue;
-                        };
-                        try cl.publish(msg, .{});
-                        try metrics.publish(route.binding.route, route.binding.exchange);
-                    }
-                }
-                internal_arena.reset();
+                // Prepare dependency injection
+                var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
+                var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
+                defer scoped_injector.maybeDeconstruct();
+                var binding_injector = try Injector.init(@constCast(&.{ .binding = @constCast(&route.binding) }), &scoped_injector);
+                defer binding_injector.maybeDeconstruct();
+                const args = PublishArgs{&binding_injector};
+
+                // Readiness check
+                const ready = @call(.auto, event_handler, args) catch |e| {
+                    log.err(
+                        "Encountered an error while querying the event provider for '{s}/{s}': {}",
+                        .{ route.binding.exchange, route.binding.route, e },
+                    );
+                    continue;
+                };
+                if (!ready) continue;
+
+                // Publish message to the client.
+                const msg = @call(.auto, route.handlers.publish.?, args) catch |e| {
+                    try metrics.publishError(route.binding.route, route.binding.exchange);
+                    log.err(
+                        "Encountered an error while publishing an event on '{s}/{s}': {}",
+                        .{ route.binding.exchange, route.binding.route, e },
+                    );
+                    continue;
+                };
+                try cl.publish(msg, .{});
+                try metrics.publish(route.binding.route, route.binding.exchange);
             }
             try timer.step();
         }
@@ -360,79 +388,79 @@ pub fn Server(
                     defer response.deinit();
                     total += 1;
                     try metrics.consume(response.routing_key);
-                    for (self.routes.items) |*route| {
-                        if (!std.mem.eql(u8, route.binding.route, response.routing_key) or
-                            !std.mem.eql(u8, route.binding.exchange, response.exchange)) continue;
-                        var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
-                        var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
-                        defer scoped_injector.maybeDeconstruct();
-                        var binding_injector = try Injector.init(@constCast(&.{ .binding = &route.binding }), &scoped_injector);
-                        defer binding_injector.maybeDeconstruct();
-                        switch (route.method) {
-                            .consume => {
-                                handled += 1;
-                                {
-                                    const args = ConsumeArgs{ &binding_injector, response.message.body };
-                                    @call(.auto, route.handlers.consume.?, args) catch |e| {
-                                        log.err(
-                                            "Encountered an error while consuming a message on '{s}/{s}': {}\n\t{s}\n",
-                                            .{ route.binding.exchange, route.binding.route, e, response.message.body },
-                                        );
-                                        try cl.reject(response.delivery_tag, false, .{});
-                                    };
-                                    try cl.ack(response.delivery_tag, .{});
-                                    try metrics.ack(route.binding.route);
-                                    const end_time = try std.time.Instant.now();
-                                    const diff = end_time.since(start_time);
-                                    remaining -= @intCast(diff);
-                                }
-                            },
-                            .reply => {
-                                handled += 1;
-                                {
-                                    const reply_to = (response.message.basic_properties.get(.reply_to) orelse {
-                                        log.err("Reply handler didn't receive a reply queue. Not acknowledging invalid request", .{});
-                                        continue;
-                                    }).slice() orelse unreachable;
+                    const maybe_route = self.consumers.getPtr(response.consumer_tag);
+                    if (maybe_route == null) return error.InvalidConsumer;
+                    const route = maybe_route.?;
 
-                                    const args = ConsumeArgs{ &binding_injector, response.message.body };
-                                    log.info("Replying to {s}/{s}", .{ route.binding.exchange, reply_to });
-                                    var msg: schema.SendMessage = @call(.auto, route.handlers.reply.?, args) catch |e| {
-                                        log.err(
-                                            "Encountered an error while replying a message on '{s}/{s}': {}\n\t{s}\n",
-                                            .{ route.binding.exchange, route.binding.route, e, response.message.body },
-                                        );
-                                        try cl.reject(response.delivery_tag, false, .{});
-                                        continue;
-                                    };
-                                    if (response.message.basic_properties.get(.correlation_id)) |ci| {
-                                        msg.options.correlation_id = ci.slice();
-                                    }
-                                    msg.options.routing_key = reply_to;
-                                    try cl.publish(msg, .{});
-                                    try metrics.publish(reply_to, route.binding.exchange);
-                                    // Only ack the message if the response is successful. That way we get to retry it if it fails.
-                                    try cl.ack(response.delivery_tag, .{});
-                                    try metrics.ack(route.binding.route);
-                                    const end_time = try std.time.Instant.now();
-                                    const diff = end_time.since(start_time);
-                                    remaining -= @intCast(diff);
-                                }
-                            },
-                            else => {
-                                continue;
-                            },
-                        }
-                        internal_arena.reset();
-                        // Release the memory used up by the message processing.
-                        // In high volume scenarios it might be worth letting memory accumulate
-                        // and then releasing it at the end though since we hold on to the memory
-                        // this probably doesn't cost us very much.
+                    var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
+                    var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
+                    defer scoped_injector.maybeDeconstruct();
+                    var binding_injector = try Injector.init(@constCast(&.{ .binding = &route.binding }), &scoped_injector);
+                    defer binding_injector.maybeDeconstruct();
+                    switch (route.method) {
+                        .consume => {
+                            handled += 1;
+                            {
+                                const args = ConsumeArgs{ &binding_injector, response.message.body };
+                                @call(.auto, route.handlers.consume.?, args) catch |e| {
+                                    log.err(
+                                        "Encountered an error while consuming a message on '{s}/{s}': {}\n\t{s}\n",
+                                        .{ route.binding.exchange, route.binding.route, e, response.message.body },
+                                    );
+                                    try cl.reject(response.delivery_tag, false, .{});
+                                };
+                                try cl.ack(response.delivery_tag, .{});
+                                try metrics.ack(route.binding.route);
+                                const end_time = try std.time.Instant.now();
+                                const diff = end_time.since(start_time);
+                                remaining -= @intCast(diff);
+                            }
+                        },
+                        .reply => {
+                            handled += 1;
+                            {
+                                const reply_to = (response.message.basic_properties.get(.reply_to) orelse {
+                                    log.err("Reply handler didn't receive a reply queue. Not acknowledging invalid request", .{});
+                                    continue;
+                                }).slice() orelse unreachable;
 
-                        continue :main; // We can just let the loop fall through but this way we
-                        // are already prepped in case we need to add more substantial
-                        // logic after i.e rejection and whatnot
+                                const args = ConsumeArgs{ &binding_injector, response.message.body };
+                                log.info("Replying to {s}/{s}", .{ route.binding.exchange, reply_to });
+                                var msg: schema.SendMessage = @call(.auto, route.handlers.reply.?, args) catch |e| {
+                                    log.err(
+                                        "Encountered an error while replying a message on '{s}/{s}': {}\n\t{s}\n",
+                                        .{ route.binding.exchange, route.binding.route, e, response.message.body },
+                                    );
+                                    try cl.reject(response.delivery_tag, false, .{});
+                                    continue;
+                                };
+                                if (response.message.basic_properties.get(.correlation_id)) |ci| {
+                                    msg.options.correlation_id = ci.slice();
+                                }
+                                msg.options.routing_key = reply_to;
+                                try cl.publish(msg, .{});
+                                try metrics.publish(reply_to, route.binding.exchange);
+                                // Only ack the message if the response is successful. That way we get to retry it if it fails.
+                                try cl.ack(response.delivery_tag, .{});
+                                try metrics.ack(route.binding.route);
+                                const end_time = try std.time.Instant.now();
+                                const diff = end_time.since(start_time);
+                                remaining -= @intCast(diff);
+                            }
+                        },
+                        else => {
+                            return error.InvalidMethod;
+                        },
                     }
+                    internal_arena.reset();
+                    // Release the memory used up by the message processing.
+                    // In high volume scenarios it might be worth letting memory accumulate
+                    // and then releasing it at the end though since we hold on to the memory
+                    // this probably doesn't cost us very much.
+
+                    continue :main; // We can just let the loop fall through but this way we
+                    // are already prepped in case we need to add more substantial
+                    // logic after i.e rejection and whatnot
                 }
                 const end_time = try std.time.Instant.now();
                 const diff = end_time.since(start_time);
@@ -442,6 +470,7 @@ pub fn Server(
         }
 
         pub fn run(self: *Self, extra: struct { cycles: u64 }) !void {
+            const alloc = self.instrumented_allocator.allocator();
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(self.user_deps, &base_injector);
             const base_conf = try user_injector.require(config.BaseConfig);
@@ -460,11 +489,32 @@ pub fn Server(
 
                 try metrics.resetCycle();
                 const start_time = try std.time.Instant.now();
-                for (self.routes.items) |*route| {
-                    // TODO: Update the mapping of consumer_tag -> route
-                    //       With the new value if it was changed.
-                    _ = try @constCast(route).updateBindings(&user_injector);
+                for (self.publishers.items) |*route| {
+                    const ct = try route.updateBindings(&user_injector);
+                    if (ct) |_| {
+                        return error.UnexpectedConsumerTag;
+                    }
                 }
+
+                var it = self.consumers.iterator();
+                while (it.next()) |entry| {
+                    log.debug("--------------- Updating {s} -----------", .{entry.key_ptr.*});
+                    const maybe_new = try entry.value_ptr.updateBindings(&user_injector);
+                    if (maybe_new == null) return error.ExpectedConsumerTag;
+                    const new = maybe_new.?;
+                    if (!std.mem.eql(u8, new, entry.key_ptr.*)) {
+                        const v = entry.value_ptr.*;
+                        const k = entry.key_ptr.*;
+                        self.consumers.removeByPtr(entry.key_ptr);
+                        alloc.free(k);
+                        try self.consumers.put(alloc, try alloc.dupe(u8, new), v);
+                        log.debug("--------------- NEW {s}     -----------", .{new});
+                        log.debug("--------------- Updated {s} -----------", .{k});
+                        continue;
+                    }
+                    log.debug("--------------- Updated {s} -----------", .{entry.key_ptr.*});
+                }
+
                 self.handlePublish() catch |e| {
                     log.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
                     return e;

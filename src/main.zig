@@ -46,7 +46,7 @@ const TestRoutes = struct {
         deps.status = change.properties.diff.current;
     }
 
-    pub fn @"PUBLISH:heartbeat amq.direct/{id}"() kwatcher.schema.Message(kwatcher.schema.Schema(1, "test", struct {})) {
+    pub fn @"PUBLISH:heartbeat amq.direct/{custom.i}"() kwatcher.schema.Message(kwatcher.schema.Schema(1, "test", struct {})) {
         std.log.debug(
             "Sending message for reply.",
             .{},
@@ -59,7 +59,7 @@ const TestRoutes = struct {
         };
     }
 
-    pub fn @"REPLY amq.direct/{id}/test-replies"(msg: kwatcher.schema.Schema(1, "test", struct {})) kwatcher.schema.Schema(1, "test-response", struct {}) {
+    pub fn @"REPLY amq.direct/{custom.i}/test-replies"(msg: kwatcher.schema.Schema(1, "test", struct {})) kwatcher.schema.Schema(1, "test-response", struct {}) {
         _ = msg;
         std.log.debug(
             "Sending reply.",
@@ -68,13 +68,18 @@ const TestRoutes = struct {
         return .{};
     }
 
-    pub fn @"CONSUME amq.direct/test.reply-to"(msg: kwatcher.schema.Schema(1, "test-response", struct {})) void {
+    pub fn @"CONSUME amq.direct/test.reply-to"(msg: kwatcher.schema.Schema(1, "test-response", struct {}), ctx: *kwatcher.context.Context(UserContext)) void {
         _ = msg;
+        ctx.custom.i += 1;
         std.log.debug(
             "Reply received",
             .{},
         );
     }
+};
+
+const UserContext = struct {
+    i: u64 = 0,
 };
 
 const EventHandler = struct {
@@ -108,7 +113,7 @@ pub fn main() !void {
         SingletonDeps,
         ScopedDeps,
         ExtraConfig,
-        struct {},
+        UserContext,
         TestRoutes,
         EventHandler,
     ).init(

@@ -38,11 +38,11 @@ pub fn Route(PathParams: type) type {
                     const Resolver = resolver.Resolver(PathParams);
 
                     const value = try Resolver.resolve(inj, ctx, params);
-                    if (comptime @TypeOf(value) != []const u8) {
-                        @compileError("Currently only []const u8 parameters are supported. Sorry!");
-                    } else {
-                        return intern_cache.internFmtWithLease(key, "{s}", .{value});
-                    }
+                    return switch (comptime @TypeOf(value)) {
+                        []const u8, []u8 => intern_cache.internFmtWithLease(key, "{s}", .{value}),
+                        u64 => intern_cache.internFmtWithLease(key, "{}", .{value}),
+                        else => @compileError("Parameters don't support this type at the moment. Sorry!"),
+                    };
                 }
 
                 pub fn static(inj: *injector.Injector) anyerror!InternFmtCache.Lease {
@@ -119,14 +119,14 @@ pub fn Route(PathParams: type) type {
                 },
             );
 
-            if (!new) return null;
+            if (!new) return self.binding.consumer_tag;
 
             if (self.binding.consumer_tag) |ct| {
                 try client.unbind(ct, .{});
                 return self.bind(client);
             }
 
-            return null;
+            return self.binding.consumer_tag;
         }
 
         fn parseRouteHandlers(comptime key: []const u8, comptime path: []const u8) RouteHandlerFn {
