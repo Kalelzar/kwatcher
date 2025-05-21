@@ -70,6 +70,7 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
 
     return struct {
         const Self = @This();
+        const UserContext = @FieldType(Context, "custom");
         allocator: std.mem.Allocator,
         arena: *std.heap.ArenaAllocator,
         internal_arena: mem.InternalArena,
@@ -88,6 +89,10 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
             .version = client_version,
             .name = client_name,
         },
+
+        pub fn userContextFactory(ctx: *Context) *UserContext {
+            return &ctx.custom;
+        }
 
         pub fn timerFactory(self: *Self, allocator: std.mem.Allocator, base_config: config.BaseConfig) !Timer {
             if (self.timer) |res| {

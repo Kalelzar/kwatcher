@@ -68,9 +68,9 @@ const TestRoutes = struct {
         return .{};
     }
 
-    pub fn @"CONSUME amq.direct/test.reply-to"(msg: kwatcher.schema.Schema(1, "test-response", struct {}), ctx: *kwatcher.context.Context(UserContext)) void {
+    pub fn @"CONSUME amq.direct/test.reply-to"(msg: kwatcher.schema.Schema(1, "test-response", struct {}), ctx: *UserContext) void {
         _ = msg;
-        ctx.custom.i += 1;
+        ctx.i += 1;
         std.log.debug(
             "Reply received",
             .{},
