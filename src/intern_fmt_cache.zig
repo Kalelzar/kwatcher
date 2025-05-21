@@ -25,6 +25,21 @@ pub fn deinit(self: *InternFmtCache) void {
     self.table.deinit(self.allocator);
 }
 
+pub const Lease = struct {
+    new: []const u8,
+    old: ?[]const u8,
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: *Lease) void {
+        if (self.old) |old|
+            self.allocator.free(old);
+    }
+
+    pub fn updated(self: *const Lease) bool {
+        return if (self.old) |_| true else false;
+    }
+};
+
 pub fn intern(self: *InternFmtCache, comptime string: []const u8) ![]const u8 {
     if (self.table.get(string)) |entry| {
         return entry.string;
@@ -37,6 +52,12 @@ pub fn intern(self: *InternFmtCache, comptime string: []const u8) ![]const u8 {
 }
 
 pub fn internFmt(self: *InternFmtCache, comptime key: []const u8, comptime fmt: []const u8, args: anytype) ![]const u8 {
+    var lease = try self.internFmtWithLease(key, fmt, args);
+    defer lease.deinit();
+    return lease.new;
+}
+
+pub fn internFmtWithLease(self: *InternFmtCache, comptime key: []const u8, comptime fmt: []const u8, args: anytype) !Lease {
     var hasher = std.hash.Fnv1a_64.init();
     std.hash.autoHashStrat(&hasher, args, .DeepRecursive);
 
@@ -44,12 +65,21 @@ pub fn internFmt(self: *InternFmtCache, comptime key: []const u8, comptime fmt: 
 
     if (self.table.getPtr(key)) |entry| {
         if (entry.id == hash) {
-            return entry.string;
+            return .{
+                .new = entry.string,
+                .old = null,
+                .allocator = self.allocator,
+            };
         } else {
-            self.allocator.free(entry.string);
+            const new = try std.fmt.allocPrint(self.allocator, fmt, args);
+            const old = entry.string;
             entry.id = hash;
-            entry.string = try std.fmt.allocPrint(self.allocator, fmt, args);
-            return entry.string;
+            entry.string = new;
+            return .{
+                .new = new,
+                .old = old,
+                .allocator = self.allocator,
+            };
         }
     } else {
         const out = try std.fmt.allocPrint(self.allocator, fmt, args);
@@ -60,7 +90,11 @@ pub fn internFmt(self: *InternFmtCache, comptime key: []const u8, comptime fmt: 
             key,
             .{ .id = hash, .string = out },
         );
-        return out;
+        return .{
+            .new = out,
+            .old = null,
+            .allocator = self.allocator,
+        };
     }
 }
 
