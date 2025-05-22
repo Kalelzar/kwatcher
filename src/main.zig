@@ -46,7 +46,7 @@ const TestRoutes = struct {
         deps.status = change.properties.diff.current;
     }
 
-    pub fn @"PUBLISH:heartbeat amq.direct/{custom.i}"() kwatcher.schema.Message(kwatcher.schema.Schema(1, "test", struct {})) {
+    pub fn @"PUBLISH:heartbeat amq.direct/inc.{custom.i}"() kwatcher.schema.Message(kwatcher.schema.Schema(1, "test", struct {})) {
         std.log.debug(
             "Sending message for reply.",
             .{},
@@ -59,7 +59,7 @@ const TestRoutes = struct {
         };
     }
 
-    pub fn @"REPLY amq.direct/{custom.i}/test-replies"(msg: kwatcher.schema.Schema(1, "test", struct {})) kwatcher.schema.Schema(1, "test-response", struct {}) {
+    pub fn @"REPLY amq.direct/inc.{custom.i}/test-replies"(msg: kwatcher.schema.Schema(1, "test", struct {})) kwatcher.schema.Schema(1, "test-response", struct {}) {
         _ = msg;
         std.log.debug(
             "Sending reply.",
