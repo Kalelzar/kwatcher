@@ -108,5 +108,34 @@ pub fn Resolver(comptime Container: type) type {
                 }
             }
         }
+
+        pub inline fn specifier(comptime path: []const u8) []const u8 {
+            const T = resolveType(path);
+            const ti: std.builtin.Type = @typeInfo(T);
+            return switch (comptime ti) {
+                .bool, .@"enum", .error_set, .enum_literal => "{}",
+                .int, .float, .comptime_float, .comptime_int => "{d}",
+                .array, .pointer => |p| {
+                    if (comptime p.child == u8) {
+                        return "{s}";
+                    } else {
+                        @compileError(std.fmt.comptimePrint(
+                            "The type '{}' of '{s}' is not formattable.",
+                            .{
+                                T,
+                                path,
+                            },
+                        ));
+                    }
+                },
+                else => @compileError(std.fmt.comptimePrint(
+                    "The type '{}' of '{s}' is not formattable.",
+                    .{
+                        T,
+                        path,
+                    },
+                )),
+            };
+        }
     };
 }

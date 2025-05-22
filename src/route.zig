@@ -9,6 +9,7 @@ const resolver = @import("resolver.zig");
 const metrics = @import("metrics.zig");
 const InternFmtCache = @import("intern_fmt_cache.zig");
 const Client = @import("client.zig");
+const Template = @import("template.zig").Template;
 
 pub const Method = enum {
     publish,
