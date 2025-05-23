@@ -6,6 +6,7 @@ const meta = klib.meta;
 pub const ConfigurableMessageOptions = struct {
     reply_to: ?[]const u8 = null,
     correlation_id: ?[]const u8 = null,
+    expiration: ?u64 = null,
 };
 
 pub const MessageOptions = meta.MergeStructs(ConfigurableMessageOptions, struct {

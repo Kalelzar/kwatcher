@@ -115,7 +115,20 @@ pub fn Resolver(comptime Container: type) type {
             return switch (comptime ti) {
                 .bool, .@"enum", .error_set, .enum_literal => "{}",
                 .int, .float, .comptime_float, .comptime_int => "{d}",
-                .array, .pointer => |p| {
+                .array => |p| {
+                    if (comptime p.child == u8) {
+                        return "{s}";
+                    } else {
+                        @compileError(std.fmt.comptimePrint(
+                            "The type '{}' of '{s}' is not formattable.",
+                            .{
+                                T,
+                                path,
+                            },
+                        ));
+                    }
+                },
+                .pointer => |p| {
                     if (comptime p.child == u8) {
                         return "{s}";
                     } else {

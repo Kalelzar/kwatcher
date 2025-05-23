@@ -18,52 +18,8 @@ const Route = @import("route.zig").Route;
 const context = @import("context.zig");
 const InternFmtCache = @import("intern_fmt_cache.zig");
 
-pub const Timer = struct {
-    const TimerEntry = struct { interval: u64, last_activation: std.time.Instant };
-    store: std.StringHashMap(TimerEntry),
-    allocator: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator) Timer {
-        const map = std.StringHashMap(TimerEntry).init(allocator);
-        return .{
-            .store = map,
-            .allocator = allocator,
-        };
-    }
-
-    pub fn register(self: *Timer, name: []const u8, interval: u64) !void {
-        const current_time = try std.time.Instant.now();
-        const entry = TimerEntry{
-            .interval = interval,
-            .last_activation = current_time,
-        };
-        try self.store.put(name, entry);
-    }
-
-    pub fn ready(self: *const Timer, name: []const u8) !bool {
-        const entry = self.store.get(name) orelse return error.NotFound;
-
-        const current_time = try std.time.Instant.now();
-        if (current_time.since(entry.last_activation) >= entry.interval) {
-            return true;
-        }
-        return false;
-    }
-
-    pub fn step(self: *Timer) !void {
-        const current_time = try std.time.Instant.now();
-        var iter = self.store.valueIterator();
-        while (iter.next()) |entry_ptr| {
-            if (current_time.since(entry_ptr.last_activation) >= entry_ptr.interval) {
-                entry_ptr.last_activation = current_time;
-            }
-        }
-    }
-
-    pub fn deinit(self: *Timer) void {
-        self.store.deinit();
-    }
-};
+const protocol = @import("protocol/protocol.zig");
+const Timer = @import("timer.zig");
 
 fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime client_name: []const u8, comptime client_version: []const u8) type {
     const __ignore = struct {};
@@ -94,6 +50,10 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
             return &ctx.custom;
         }
 
+        pub fn clientRegistryFactory(ctx: *Context) *protocol.client_registration.registry {
+            return &ctx.client;
+        }
+
         pub fn timerFactory(self: *Self, allocator: std.mem.Allocator, base_config: config.BaseConfig) !Timer {
             if (self.timer) |res| {
                 return res;
@@ -101,6 +61,8 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
                 var timer = Timer.init(allocator);
                 try timer.register("heartbeat", base_config.config.heartbeat_interval);
                 try timer.register("metrics", base_config.config.metrics_interval_ns);
+                // TODO: Register elsewhere
+                try timer.register("announce", base_config.config.heartbeat_interval);
                 self.timer = timer;
                 return self.timer.?;
             }
@@ -263,11 +225,18 @@ pub fn Server(
 
             const user_routes = comptime Route(Context).from(Routes, EventProvider);
             const default_routes = comptime Route(Context).from(DefaultRoutes, DefaultEventProvider);
+            const client_registration_routes = comptime Route(Context).from(
+                protocol.client_registration.route,
+                protocol.client_registration.events,
+            );
 
-            var routes = try std.ArrayListUnmanaged(Route(Context)).initCapacity(alloc, user_routes.len + default_routes.len);
+            const route_count = user_routes.len + client_registration_routes.len + default_routes.len;
+
+            var routes = try std.ArrayListUnmanaged(Route(Context)).initCapacity(alloc, route_count);
 
             routes.appendSliceAssumeCapacity(user_routes);
             routes.appendSliceAssumeCapacity(default_routes);
+            routes.appendSliceAssumeCapacity(client_registration_routes);
 
             return .{
                 .instrumented_allocator = instrumented_allocator,

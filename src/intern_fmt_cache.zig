@@ -62,8 +62,9 @@ pub fn internFmtWithLease(self: *InternFmtCache, comptime key: []const u8, compt
     std.hash.autoHashStrat(&hasher, args, .DeepRecursive);
 
     const hash = hasher.final();
-
+    std.log.debug("++ Interning {s}: {s} [{}]", .{ key, fmt, hash });
     if (self.table.getPtr(key)) |entry| {
+        std.log.debug("+++ Found {s} [{}]", .{ entry.string, entry.id });
         if (entry.id == hash) {
             return .{
                 .new = entry.string,
@@ -82,6 +83,7 @@ pub fn internFmtWithLease(self: *InternFmtCache, comptime key: []const u8, compt
             };
         }
     } else {
+        std.log.debug("+++ New", .{});
         const out = try std.fmt.allocPrint(self.allocator, fmt, args);
         errdefer self.allocator.free(out);
 

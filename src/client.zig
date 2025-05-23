@@ -4,6 +4,7 @@ const amqp = @import("zamqp");
 
 const Client = @This();
 
+id: []const u8,
 ptr: *anyopaque,
 vtable: *const VTable,
 

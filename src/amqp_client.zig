@@ -452,6 +452,7 @@ name: []const u8,
 
 /// The current connection or null if disconnected.
 connection: ?*Connection = null,
+id: []const u8,
 
 /// The client lock.
 mutex: std.Thread.Mutex.Recursive = .init,
@@ -467,11 +468,13 @@ fn ensureState(self: *AmqpClient, state: State) StateError!void {
 /// @own name
 pub fn init(allocator: std.mem.Allocator, configuration: config.BaseConfig, name: []const u8) MemError!AmqpClient {
     const own_name = try allocator.dupe(u8, name);
+    const id = try std.fmt.allocPrint(allocator, "ti_{s}_{x}", .{ own_name, std.crypto.random.int(u128) });
     var cl: AmqpClient = .{
         .allocator = allocator,
         .configuration = configuration,
         .name = own_name,
         .state = .disconnected,
+        .id = id,
     };
     cl.buf_allocator = std.heap.FixedBufferAllocator.init(&cl.buf);
     return cl;
@@ -485,6 +488,7 @@ pub fn deinit(self: *AmqpClient) void {
         self.connection = null;
     }
     self.state = .invalid;
+    self.allocator.free(self.id);
 }
 
 pub fn reset(ptr: *anyopaque) void {
@@ -758,6 +762,7 @@ fn getSelf(ptr: *anyopaque) *AmqpClient {
 
 pub fn client(self: *AmqpClient) Client {
     return .{
+        .id = self.id,
         .vtable = &.{
             .connect = connect,
             .disconnect = disconnect,

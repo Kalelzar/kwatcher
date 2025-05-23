@@ -83,7 +83,7 @@ const UserContext = struct {
 };
 
 const EventHandler = struct {
-    pub fn heartbeat(timer: kwatcher.server.Timer, status: AfkStatus) !bool {
+    pub fn heartbeat(timer: kwatcher.Timer, status: AfkStatus) !bool {
         if (status == .Inactive) return false;
         return try timer.ready("heartbeat");
     }
