@@ -22,8 +22,13 @@ fn c(comptime a: []const u8, comptime b: []const u8) bool {
 }
 
 pub fn scan(comptime raw_source: []const u8) []const Token {
-    var source_buf: [raw_source.len]u8 = undefined;
-    const source = std.ascii.lowerString(&source_buf, raw_source);
+    const source: []const u8 = comptime blk: {
+        var source_buf: [raw_source.len]u8 = undefined;
+        _ = std.ascii.lowerString(&source_buf, raw_source);
+        const output = source_buf;
+        break :blk &output;
+    };
+
     var point: u64 = 0;
     var mark = 0;
     var tokens: []const Token = &.{};
@@ -36,10 +41,10 @@ pub fn scan(comptime raw_source: []const u8) []const Token {
             ' ', '/', ':' => |sep| {
                 if (point - mark == 0) {
                     tokens = tokens ++ .{Token{ .type = .separator, .lexeme = source[mark .. point + 1] }};
-                    while (source[point] == sep) {
-                        mark += 1;
+                    while (source[point] == sep and point < source.len) {
                         point += 1;
                     }
+                    mark = point;
                     continue;
                 }
                 tokens = tokens ++ .{Token{ .type = .identifier, .lexeme = source[mark..point] }};
@@ -69,6 +74,7 @@ pub fn scan(comptime raw_source: []const u8) []const Token {
                 tokens = tokens ++ .{Token{ .type = .parameter, .lexeme = source[mark + 1 .. point] }};
                 point += 1;
                 mark = point;
+                continue;
             },
             else => {},
         }
@@ -97,7 +103,7 @@ pub fn scan(comptime raw_source: []const u8) []const Token {
     return tokens;
 }
 
-const ValueExpr = struct {
+pub const ValueExpr = struct {
     fmt: []const u8,
     raw: []const u8,
     params: []const []const u8,
@@ -122,7 +128,8 @@ const ConstExpr = struct {
     }
 };
 
-const ConsumeExpr = struct {
+pub const ConsumeExpr = struct {
+    method: ExprType = .consume,
     exchange: ValueExpr,
     route: ValueExpr,
     queue: ?ValueExpr,
@@ -142,7 +149,14 @@ const ConsumeExpr = struct {
     }
 };
 
-const ReplyExpr = struct {
+const ExprType = enum {
+    reply,
+    publish,
+    consume,
+};
+
+pub const ReplyExpr = struct {
+    method: ExprType = .reply,
     exchange: ValueExpr,
     route: ValueExpr,
     queue: ?ValueExpr,
@@ -162,7 +176,8 @@ const ReplyExpr = struct {
     }
 };
 
-const PublishExpr = struct {
+pub const PublishExpr = struct {
+    method: ExprType = .publish,
     event: ConstExpr,
     exchange: ValueExpr,
     route: ValueExpr,
@@ -240,15 +255,15 @@ pub fn Template(comptime Context: type) type {
                         @compileError("Found an unexpected separator while parsing value");
                     },
                     .identifier => {
-                        fmt = fmt ++ s.lexeme;
-                        raw = raw ++ s.lexeme;
-                        _ = self.next();
+                        const id = self.consume(.identifier, "sanity check: Identifier was expected.");
+                        fmt = fmt ++ id.lexeme;
+                        raw = raw ++ id.lexeme;
                     },
                     .parameter => {
-                        fmt = fmt ++ R.specifier(s.lexeme);
-                        raw = raw ++ "{" ++ s.lexeme ++ "}";
-                        params = params ++ .{s.lexeme};
-                        _ = self.next();
+                        const param = self.consume(.parameter, "sanity check: Parameter was expected.");
+                        fmt = fmt ++ R.specifier(param.lexeme);
+                        raw = raw ++ "{" ++ param.lexeme ++ "}";
+                        params = params ++ .{param.lexeme};
                     },
                 }
             }
