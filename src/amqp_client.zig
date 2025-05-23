@@ -327,6 +327,35 @@ const Connection = struct {
 
         var envelope = self.this.consume_message(&timeval, 0) catch |e| switch (e) {
             error.Timeout => return null,
+            error.UnexpectedState => {
+                const frame = try self.this.simple_wait_frame(null);
+                switch (frame.frame_type) {
+                    .METHOD => {
+                        switch (frame.payload.method.id) {
+                            .BASIC_RETURN => {
+                                log.err("Unrouted message", .{});
+                                return null;
+                            },
+                            .CHANNEL_CLOSE => {
+                                log.err("Channel was closed.", .{});
+                                return error.ChannelClosed;
+                            },
+                            .CONNECTION_CLOSE => {
+                                log.err("Connection was closed.", .{});
+                                return error.ConnectionClosed;
+                            },
+                            else => |mi| {
+                                log.err("Found method '{}' while reading a message.", .{mi});
+                                return error.UnexpectedMethod;
+                            },
+                        }
+                    },
+                    else => |f| {
+                        log.err("Received a frame of type '{}' while consuming message.", .{f});
+                        return error.UnexpectedFrame;
+                    },
+                }
+            },
             else => |le| return le,
         };
 
