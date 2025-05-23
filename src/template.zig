@@ -21,14 +21,7 @@ fn c(comptime a: []const u8, comptime b: []const u8) bool {
     return comptime std.mem.eql(u8, a, b);
 }
 
-pub fn scan(comptime raw_source: []const u8) []const Token {
-    const source: []const u8 = comptime blk: {
-        var source_buf: [raw_source.len]u8 = undefined;
-        _ = std.ascii.lowerString(&source_buf, raw_source);
-        const output = source_buf;
-        break :blk &output;
-    };
-
+pub fn scan(comptime source: []const u8) []const Token {
     var point: u64 = 0;
     var mark = 0;
     var tokens: []const Token = &.{};
@@ -62,13 +55,13 @@ pub fn scan(comptime raw_source: []const u8) []const Token {
                     point += 1;
                     switch (source[point]) {
                         ' ', '/', ':' => {
-                            @compileError("Unclosed parameter here: '" ++ source[mark .. point + 1] ++ "' while parsing '" ++ raw_source ++ "'.");
+                            @compileError("Unclosed parameter here: '" ++ source[mark .. point + 1] ++ "' while parsing '" ++ source ++ "'.");
                         },
                         else => {},
                     }
                 }
                 if (point == source.len) {
-                    @compileError("Unexpected EOF in parameter: '" ++ source[mark .. point + 1] ++ "' while parsing '" ++ raw_source ++ "'.");
+                    @compileError("Unexpected EOF in parameter: '" ++ source[mark .. point + 1] ++ "' while parsing '" ++ source ++ "'.");
                 }
 
                 tokens = tokens ++ .{Token{ .type = .parameter, .lexeme = source[mark + 1 .. point] }};
@@ -79,13 +72,20 @@ pub fn scan(comptime raw_source: []const u8) []const Token {
             else => {},
         }
 
+        const normalized: []const u8 = blk: {
+            var source_buf: [string.len]u8 = undefined;
+            _ = std.ascii.lowerString(&source_buf, string);
+            const output = source_buf;
+            break :blk &output;
+        };
+
         const token: Token =
-            if (c("publish", string))
-                .{ .type = .publish, .lexeme = string }
-            else if (c("consume", string))
-                .{ .type = .consume, .lexeme = string }
-            else if (c("reply", string))
-                .{ .type = .reply, .lexeme = string }
+            if (c("publish", normalized))
+                .{ .type = .publish, .lexeme = normalized }
+            else if (c("consume", normalized))
+                .{ .type = .consume, .lexeme = normalized }
+            else if (c("reply", normalized))
+                .{ .type = .reply, .lexeme = normalized }
             else {
                 point += 1;
                 continue;
