@@ -235,7 +235,6 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
                     const binding = try inj.require(*Binding);
                     const exchange = binding.exchange;
                     const route = binding.route;
-                    std.log.debug("pub handler: {s}/{s}", .{ exchange, route });
 
                     var arena = try inj.require(mem.InternalArena);
                     const alloc = arena.allocator();
