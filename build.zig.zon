@@ -58,8 +58,8 @@
         },
         .zamqp = .{
             //.path = "../zamqp",
-            .url = "git+https://github.com/Kalelzar/zamqp.git#275df2e3fb02734d79bdd419245f7e2ca52d032f",
-            .hash = "zamqp-0.0.0--WXK-K_UAQDF9mMtkf1CNy7y1iAJ5xDUq75YQzKZPxsC",
+            .url = "git+https://github.com/Kalelzar/zamqp.git#4a8484efe4a438b7bcfad94b572698cb51dbe92f",
+            .hash = "zamqp-0.0.0--WXK-ObTAQAGn9zbC5rn8wdHkHSI9DTFZjwwi19ArfjC",
         },
         .metrics = .{
             .url = "https://github.com/karlseguin/metrics.zig/archive/cf2797bcb3aea7e5cdaf4de39c5550c70796e7b1.tar.gz",

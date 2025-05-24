@@ -534,9 +534,15 @@ pub fn Server(
 
                     switch (e) {
                         error.Disconnected,
-                        error.InvalidState,
                         error.HeartbeatTimeout,
                         => {},
+                        error.InvalidState => {
+                            const old_client = self.deps.client_cache;
+                            if (old_client) |c| {
+                                c.deinit();
+                            }
+                            self.deps.client_cache = null;
+                        },
                         else => {
                             log.err("Cannot recover from error: {}. Aborting..", .{e});
                             return error.ReconnectionFailure;

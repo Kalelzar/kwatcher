@@ -334,7 +334,13 @@ const Connection = struct {
                         switch (frame.payload.method.id) {
                             .BASIC_RETURN => {
                                 log.err("Unrouted message", .{});
-                                return null;
+                                if (self.getById(frame.channel)) |c| {
+                                    var message = try c.this.read_message(0);
+                                    defer message.destroy();
+                                    log.err("  Body: {s}", .{message.body.slice() orelse unreachable});
+                                    return null;
+                                }
+                                return error.InvalidChannel;
                             },
                             .CHANNEL_CLOSE => {
                                 log.err("Channel was closed.", .{});
@@ -429,6 +435,16 @@ const Connection = struct {
         self.channels.deinit(allocator);
 
         close(&self.this);
+    }
+
+    fn getById(self: *Connection, id: u16) ?*Channel {
+        var it = self.channels.iterator();
+        while (it.next()) |c| {
+            if (c.value_ptr.this.number == id) {
+                return c.value_ptr;
+            }
+        }
+        return null;
     }
 };
 
