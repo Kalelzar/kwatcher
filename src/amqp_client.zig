@@ -458,7 +458,7 @@ configuration: config.BaseConfig,
 /// @lifetime The allocator needs to outlive the client.
 allocator: std.mem.Allocator,
 
-buf: [1024 * 8]u8 = undefined,
+buf: [1024 * 128]u8 = undefined,
 buf_allocator: std.heap.FixedBufferAllocator = undefined,
 
 /// The name of this client.

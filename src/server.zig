@@ -473,7 +473,6 @@ pub fn Server(
 
                 var it = self.consumers.iterator();
                 while (it.next()) |entry| {
-                    log.debug("--------------- Updating {s} -----------", .{entry.key_ptr.*});
                     const maybe_new = try entry.value_ptr.updateBindings(&user_injector);
                     if (maybe_new == null) return error.ExpectedConsumerTag;
                     const new = maybe_new.?;
@@ -484,10 +483,8 @@ pub fn Server(
                         alloc.free(k);
                         try self.consumers.put(alloc, try alloc.dupe(u8, new), v);
                         log.debug("--------------- NEW {s}     -----------", .{new});
-                        log.debug("--------------- Updated {s} -----------", .{k});
                         continue;
                     }
-                    log.debug("--------------- Updated {s} -----------", .{entry.key_ptr.*});
                 }
 
                 self.handlePublish() catch |e| {

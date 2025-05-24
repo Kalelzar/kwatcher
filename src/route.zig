@@ -46,18 +46,6 @@ pub fn Route(PathParams: type) type {
             self.binding.exchange = _exchange.new;
             self.binding.queue = if (_queue) |q| q.new else null;
 
-            std.log.debug(
-                "[{?s}, new: {}] Updated bindings for {} route {s}/{s}/{?s}",
-                .{
-                    self.binding.consumer_tag,
-                    new,
-                    self.method,
-                    self.binding.exchange,
-                    self.binding.route,
-                    self.binding.queue,
-                },
-            );
-
             if (!new) return self.binding.consumer_tag;
 
             if (self.binding.consumer_tag) |ct| {
