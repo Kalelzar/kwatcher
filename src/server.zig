@@ -382,6 +382,7 @@ pub fn Server(
                                         .{ route.binding.exchange, route.binding.route, e, response.message.body },
                                     );
                                     try cl.reject(response.delivery_tag, false, .{});
+                                    continue;
                                 };
                                 try cl.ack(response.delivery_tag, .{});
                                 try metrics.ack(route.binding.route);
