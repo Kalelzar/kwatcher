@@ -32,6 +32,7 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
         internal_arena: mem.InternalArena,
         instrumented_allocator: *klib.mem.InstrumentedAllocator,
         intern_fmt_cache: *InternFmtCache,
+        context: *Context,
 
         client_cache: ?*AmqpClient = null,
         timer: ?Timer = null,
@@ -39,7 +40,6 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
         user_config: ?UserConfig = null,
         base_config: ?config.BaseConfig = null,
         merged_config: ?config.Config(UserConfig) = null,
-        context: Context = .{},
 
         clientInfo: schema.ClientInfo = .{
             .version = client_version,
@@ -142,8 +142,11 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
             errdefer allocator.destroy(arr_ptr);
             const ifc_ptr = try allocator.create(InternFmtCache);
             errdefer allocator.destroy(ifc_ptr);
+            const ctx = try allocator.create(Context);
+            errdefer allocator.destroy(ctx);
 
             const result = Self{
+                .context = ctx,
                 .intern_fmt_cache = ifc_ptr,
                 .allocator = allocator,
                 .instrumented_allocator = instr_ptr,
@@ -153,6 +156,7 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
             result.instrumented_allocator.* = metrics.instrumentAllocator(std.heap.page_allocator);
             result.arena.* = std.heap.ArenaAllocator.init(instr_ptr.allocator());
             result.intern_fmt_cache.* = InternFmtCache.init(instr_ptr.allocator());
+            result.context.* = .{};
             return result;
         }
 
@@ -170,6 +174,7 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
 
             self.intern_fmt_cache.deinit();
             self.allocator.destroy(self.intern_fmt_cache);
+            self.allocator.destroy(self.context);
             self.internal_arena.deinit();
             self.arena.deinit();
             self.allocator.destroy(self.arena);
