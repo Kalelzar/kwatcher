@@ -29,7 +29,7 @@ pub fn Resolver(comptime Container: type) type {
                                 },
                                 else => {
                                     if (mself_type == Container) {
-                                        return inj.call_first(@field(Container, path), .{@constCast(container.*)});
+                                        return inj.call_first(@field(Container, path), .{container.*});
                                     }
                                 },
                             }
@@ -54,18 +54,18 @@ pub fn Resolver(comptime Container: type) type {
                             switch (mself_ti) {
                                 .pointer => |p| {
                                     if (p.child == Container) {
-                                        return try inj.call_first(@field(Container, path), .{@constCast(container)});
+                                        return inj.call_first(@field(Container, path), .{@constCast(container)});
                                     }
                                 },
                                 else => {
                                     if (mself_type == Container) {
-                                        return try inj.call_first(@field(Container, path), .{container.*});
+                                        return inj.call_first(@field(Container, path), .{container.*});
                                     }
                                 },
                             }
                         }
                     }
-                    return try inj.call(@field(Container, path), .{});
+                    return inj.call(@field(Container, path), .{});
                 } else {
                     @compileLog(Container, path);
                     @compileError("No such field is available within struct.");
