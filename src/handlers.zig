@@ -238,28 +238,13 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
 
                     var arena = try inj.require(mem.InternalArena);
                     const alloc = arena.allocator();
-                    if (comptime @hasField(ReturnType, "schema") and @hasField(ReturnType, "options") and @FieldType(ReturnType, "options") == schema.ConfigurableMessageOptions) {
-                        const opts: schema.ConfigurableMessageOptions = result.options;
-                        const body = try std.json.stringifyAlloc(alloc, result.schema, .{});
-                        return .{
-                            .body = body,
-                            .options = .{
-                                .exchange = exchange,
-                                .routing_key = route,
-                                .reply_to = opts.reply_to,
-                            },
-                        };
-                    } else {
-                        const body = try std.json.stringifyAlloc(alloc, result, .{});
-
-                        return .{
-                            .body = body,
-                            .options = .{
-                                .exchange = exchange,
-                                .routing_key = route,
-                            },
-                        };
-                    }
+                    return handlePublish(
+                        ReturnType,
+                        result,
+                        alloc,
+                        exchange,
+                        route,
+                    );
                 }
             };
 
@@ -376,15 +361,13 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
                             else => maybe_result,
                         };
 
-                    const out_body = try std.json.stringifyAlloc(allocator, result, .{});
-
-                    return .{
-                        .body = out_body,
-                        .options = .{
-                            .exchange = "amq.direct",
-                            .routing_key = route,
-                        },
-                    };
+                    return handlePublish(
+                        meta.Result(handler),
+                        result,
+                        allocator,
+                        "amq.direct",
+                        route,
+                    );
                 }
             };
 
@@ -410,6 +393,37 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
             };
 
             return &Internal.handle;
+        }
+
+        fn handlePublish(
+            comptime ResultType: type,
+            result: anytype,
+            alloc: std.mem.Allocator,
+            exchange: []const u8,
+            route: []const u8,
+        ) !schema.SendMessage {
+            if (comptime @hasField(ResultType, "schema") and @hasField(ResultType, "options") and @FieldType(ResultType, "options") == schema.ConfigurableMessageOptions) {
+                const opts: schema.ConfigurableMessageOptions = result.options;
+                const body = try std.json.stringifyAlloc(alloc, result.schema, .{});
+                return .{
+                    .body = body,
+                    .options = .{
+                        .exchange = exchange,
+                        .routing_key = route,
+                        .reply_to = opts.reply_to,
+                    },
+                };
+            } else {
+                const body = try std.json.stringifyAlloc(alloc, result, .{});
+
+                return .{
+                    .body = body,
+                    .options = .{
+                        .exchange = exchange,
+                        .routing_key = route,
+                    },
+                };
+            }
         }
     };
 }

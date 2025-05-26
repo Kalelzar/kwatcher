@@ -17,11 +17,11 @@ pub fn @"publish:announce amq.direct/client.announce"(
 ) !base_schema.Message(schema.Client.Announce.V1) {
     reg.state = .announcing;
 
-    const reply_to = try strings.internFmt("client_ack_id", "client.ack.{s}", .{client.id()});
+    const reply_to = try strings.internFmt("client_ack_id", "client.ack.{s}", .{reg.id(client)});
 
     return .{
         .schema = .{
-            .id = client.id(),
+            .id = reg.id(client),
             .client = client_info.v1(),
             .host = user_info.hostname,
         },
