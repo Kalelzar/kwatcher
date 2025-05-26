@@ -34,9 +34,11 @@ pub fn @"publish:announce amq.direct/client.announce"(
 
 pub fn @"consume amq.direct/client.ack.{client.id}/client.ack"(
     ack: schema.Client.Ack.V1,
+    arena: *std.heap.ArenaAllocator,
     reg: *ClientRegistry,
-) void {
-    reg.assigned_id = ack.id;
+) !void {
+    const alloc = arena.allocator();
+    reg.assigned_id = try alloc.dupe(u8, ack.id);
     reg.state = .registered;
 }
 
