@@ -458,9 +458,6 @@ configuration: config.BaseConfig,
 /// @lifetime The allocator needs to outlive the client.
 allocator: std.mem.Allocator,
 
-buf: [1024 * 128]u8 = undefined,
-buf_allocator: std.heap.FixedBufferAllocator = undefined,
-
 /// The name of this client.
 /// @lifetime From client initialization to client deinitialization.
 /// @ownership `AmqpClient` instance
@@ -485,15 +482,13 @@ fn ensureState(self: *AmqpClient, state: State) StateError!void {
 pub fn init(allocator: std.mem.Allocator, configuration: config.BaseConfig, name: []const u8) MemError!AmqpClient {
     const own_name = try allocator.dupe(u8, name);
     const id = try std.fmt.allocPrint(allocator, "ti_{s}_{x}", .{ own_name, std.crypto.random.int(u128) });
-    var cl: AmqpClient = .{
+    return .{
         .allocator = allocator,
         .configuration = configuration,
         .name = own_name,
         .state = .disconnected,
         .id = id,
     };
-    cl.buf_allocator = std.heap.FixedBufferAllocator.init(&cl.buf);
-    return cl;
 }
 
 pub fn deinit(self: *AmqpClient) void {
@@ -619,7 +614,7 @@ pub fn bind(
         else
             try declareEphemeralQueue(self);
 
-    const alloc = self.buf_allocator.allocator();
+    const alloc = self.allocator;
     const consumer_tag = try std.fmt.allocPrint(alloc, "{s}-{s}.{s}.{s}-{s}", .{ self.name, declared_queue, route, exchange, opts.channel_name orelse "__consume" });
 
     conn.bind(
@@ -649,7 +644,7 @@ pub fn unbind(
 ) !void {
     var self = getSelf(ptr);
     var conn = try self.ensureConnected();
-    const alloc = self.buf_allocator.allocator();
+    const alloc = self.allocator;
 
     log.info("[{s}] Unbinding from channel {s}.", .{
         consumer_tag,
