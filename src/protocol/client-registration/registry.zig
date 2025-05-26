@@ -9,6 +9,6 @@ pub fn id(self: *const ClientRegistry, client: Client) []const u8 {
     if (self.assigned_id) |aid| {
         return aid;
     } else {
-        return client.id;
+        return client.id();
     }
 }

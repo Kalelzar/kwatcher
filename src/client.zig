@@ -4,7 +4,6 @@ const amqp = @import("zamqp");
 
 const Client = @This();
 
-id: []const u8,
 ptr: *anyopaque,
 vtable: *const VTable,
 
@@ -33,6 +32,7 @@ pub const Response = struct {
 
 /// Optional parameters for operations that can target a specific communication channel.
 pub const VTable = struct {
+    id: *const fn (self_ptr: *anyopaque) []const u8,
     connect: *const fn (self_ptr: *anyopaque) anyerror!void,
     disconnect: *const fn (self_ptr: *anyopaque) anyerror!void,
     openChannel: *const fn (self_ptr: *anyopaque, name: []const u8) anyerror!void,
@@ -70,6 +70,10 @@ pub const VTable = struct {
     ) anyerror!void,
     reset: *const fn (self_ptr: *anyopaque) void,
 };
+
+pub fn id(self: Client) []const u8 {
+    return self.vtable.id(self.ptr);
+}
 
 pub fn connect(self: Client) !void {
     return self.vtable.connect(self.ptr);

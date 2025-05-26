@@ -767,13 +767,17 @@ fn handleDisconnect(self: *AmqpClient, err: anyerror, conn: *Connection) !void {
     };
 }
 
+fn getId(ptr: *anyopaque) []const u8 {
+    const self = getSelf(ptr);
+    return self.id;
+}
+
 fn getSelf(ptr: *anyopaque) *AmqpClient {
     return @ptrCast(@alignCast(ptr));
 }
 
 pub fn client(self: *AmqpClient) Client {
     return .{
-        .id = self.id,
         .vtable = &.{
             .connect = connect,
             .disconnect = disconnect,
@@ -788,6 +792,7 @@ pub fn client(self: *AmqpClient) Client {
             .unbind = unbind,
             .ack = ack,
             .reject = reject,
+            .id = getId,
         },
         .ptr = self,
     };
