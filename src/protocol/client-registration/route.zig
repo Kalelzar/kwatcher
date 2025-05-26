@@ -32,7 +32,7 @@ pub fn @"publish:announce amq.direct/client.announce"(
     };
 }
 
-pub fn @"consume amq.direct/client.ack.{client.id}/client.ack"(
+pub fn @"consume amq.direct/client.ack.{client.id}"(
     ack: schema.Client.Ack.V1,
     arena: *std.heap.ArenaAllocator,
     reg: *ClientRegistry,
