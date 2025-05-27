@@ -2,15 +2,29 @@
 //! a route string into a functioning route object.
 //!
 //! A route string is defined as follows:
-//! ```
-//! route = <method><publisher|consumer>
-//! method = publish|reply|consume
-//! publisher = :<event> <exchange>/<routing_key>
-//! consumer = <exchange>/<binding_key>(/<queue>)
-//! event = [<identifier>...]
-//! exchange|routing_key|binding_key|queue = [<identifier|parameter>...]
-//! parameter= {<identifier>}
-//! identifier= {any:not(,|:| )}
+//! ```ebnf
+//! RouteString    ::= MethodDeclaration
+//! MethodDeclaration ::= PublishDeclaration | ConsumeDeclaration | ReplyDeclaration
+//!
+//! PublishDeclaration ::= "publish" ":" EventName " " ExchangeName "/" RoutingKey
+//! ConsumeDeclaration ::= "consume" " " ExchangeName "/" BindingKey [ "/" QueueName ]
+//! ReplyDeclaration   ::= "reply" " " ExchangeName "/" BindingKey [ "/" QueueName ]
+//!
+//! EventName      ::= Identifier
+//!
+//! ExchangeName   ::= PathExpression
+//! RoutingKey     ::= PathExpression
+//! BindingKey     ::= PathExpression
+//! QueueName      ::= PathExpression
+//!
+//! PathExpression ::= ( Identifier | Parameter )+
+//!
+//! Parameter      ::= "{" Identifier ( "." Identifier )* "}"
+//!
+//! Identifier     ::= ( Letter | Digit | "_" | "-" | "." )+
+//!
+//! Letter         ::= "a"..."z" | "A"..."Z"
+//! Digit          ::= "0"..."9"
 //! ```
 //! as an example:
 //! `publish:heartbeat amq.topic/invalidate.{client.id}`
