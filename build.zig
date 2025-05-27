@@ -5,12 +5,9 @@ const Builder = struct {
     target: std.Build.ResolvedTarget,
     opt: std.builtin.OptimizeMode,
     check_step: *std.Build.Step,
-    klib: *std.Build.Module,
-    zamqp: *std.Build.Module,
-    uuid: *std.Build.Module,
-    metrics: *std.Build.Module,
     kwatcher: *std.Build.Module,
     kwatcher_example: *std.Build.Module,
+    kwatcher_test: *std.Build.Module,
 
     fn init(b: *std.Build) Builder {
         const target = b.standardTargetOptions(.{});
@@ -23,7 +20,9 @@ const Builder = struct {
         const uuid = b.dependency("uuid", .{ .target = target, .optimize = opt }).module("uuid");
         const metrics = b.dependency("metrics", .{ .target = target, .optimize = opt }).module("metrics");
         const kwatcher = b.addModule("kwatcher", .{
-            .root_source_file = b.path("src/watcher.zig"),
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = opt,
         });
         kwatcher.addImport("zamqp", zamqp);
         kwatcher.addImport("uuid", uuid);
@@ -31,22 +30,33 @@ const Builder = struct {
         kwatcher.addImport("klib", klib);
         kwatcher.link_libc = true;
 
+        const kwatcher_test = b.addModule("test", .{
+            .root_source_file = b.path("src/test.zig"),
+            .target = target,
+            .optimize = opt,
+        });
+        kwatcher_test.addImport("zamqp", zamqp);
+        kwatcher_test.addImport("uuid", uuid);
+        kwatcher_test.addImport("metrics", metrics);
+        kwatcher_test.addImport("klib", klib);
+        kwatcher_test.link_libc = true;
+
         const kwatcher_example = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = opt,
         });
         kwatcher_example.link_libc = true;
+        kwatcher_example.addImport("kwatcher", kwatcher);
 
         return .{
             .b = b,
             .check_step = check_step,
             .target = target,
             .opt = opt,
-            .zamqp = zamqp,
-            .uuid = uuid,
             .kwatcher = kwatcher,
             .kwatcher_example = kwatcher_example,
-            .metrics = metrics,
-            .klib = klib,
+            .kwatcher_test = kwatcher_test,
         };
     }
 
@@ -54,40 +64,30 @@ const Builder = struct {
         self: *Builder,
         step: *std.Build.Step.Compile,
     ) void {
+        _ = self;
         step.linkLibC();
         step.addLibraryPath(.{ .cwd_relative = "." });
-        step.addLibraryPath(.{ .cwd_relative = "." });
         step.linkSystemLibrary("rabbitmq");
-        step.root_module.addImport("zamqp", self.zamqp);
-        step.root_module.addImport("uuid", self.uuid);
-        step.root_module.addImport("metrics", self.metrics);
-        step.root_module.addImport("klib", self.klib);
     }
 
-    fn addExecutable(self: *Builder, name: []const u8, root_source_file: []const u8) *std.Build.Step.Compile {
+    fn addExecutable(self: *Builder, name: []const u8, root_module: *std.Build.Module) *std.Build.Step.Compile {
         return self.b.addExecutable(.{
             .name = name,
-            .root_source_file = self.b.path(root_source_file),
-            .target = self.target,
-            .optimize = self.opt,
+            .root_module = root_module,
         });
     }
 
-    fn addStaticLibrary(self: *Builder, name: []const u8, root_source_file: []const u8) *std.Build.Step.Compile {
+    fn addStaticLibrary(self: *Builder, name: []const u8, root_module: *std.Build.Module) *std.Build.Step.Compile {
         return self.b.addStaticLibrary(.{
             .name = name,
-            .root_source_file = self.b.path(root_source_file),
-            .target = self.target,
-            .optimize = self.opt,
+            .root_module = root_module,
         });
     }
 
-    fn addTest(self: *Builder, name: []const u8, root_source_file: []const u8) *std.Build.Step.Compile {
+    fn addTest(self: *Builder, name: []const u8, root_module: *std.Build.Module) *std.Build.Step.Compile {
         return self.b.addTest(.{
             .name = name,
-            .root_source_file = self.b.path(root_source_file),
-            .target = self.target,
-            .optimize = self.opt,
+            .root_module = root_module,
         });
     }
 
@@ -102,13 +102,12 @@ const Builder = struct {
 pub fn build(b: *std.Build) !void {
     var builder = Builder.init(b);
 
-    const lib = builder.addStaticLibrary("kwatcher", "src/watcher.zig");
+    const lib = builder.addStaticLibrary("kwatcher", builder.kwatcher);
     builder.addDependencies(lib);
     try builder.installAndCheck(lib);
 
-    const exe = builder.addExecutable("kwatcher-examples", "src/main.zig");
+    const exe = builder.addExecutable("kwatcher-examples", builder.kwatcher_example);
     builder.addDependencies(exe);
-    exe.root_module.addImport("kwatcher", builder.kwatcher);
     try builder.installAndCheck(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -119,6 +118,23 @@ pub fn build(b: *std.Build) !void {
         run_cmd.addArgs(args);
     }
 
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
+    const lib_unit_tests = b.addTest(.{
+        .root_module = builder.kwatcher_test,
+        .name = "test",
+    });
+
+    lib_unit_tests.addLibraryPath(.{ .cwd_relative = "." });
+    lib_unit_tests.linkSystemLibrary("rabbitmq");
+
+    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
+
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&run_lib_unit_tests.step);
+
+    const install_docs = b.addInstallDirectory(
+        .{ .source_dir = lib.getEmittedDocs(), .install_dir = .prefix, .install_subdir = "docs" },
+    );
+    const docs_step = b.step("docs", "Generate docs");
+    docs_step.dependOn(&install_docs.step);
+    docs_step.dependOn(&lib.step);
 }
