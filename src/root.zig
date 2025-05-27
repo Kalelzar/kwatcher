@@ -11,3 +11,5 @@ pub const resolver = @import("resolver.zig");
 pub const context = @import("context.zig");
 pub const Timer = @import("timer.zig");
 pub const protocol = @import("protocol/protocol.zig");
+pub const Template = @import("template.zig");
+pub const InternFmtCache = @import("intern_fmt_cache.zig");
