@@ -48,6 +48,14 @@ const Channel = struct {
             .bindings = .{},
         };
     }
+
+    pub fn deinit(self: *Channel, allocator: std.mem.Allocator) void {
+        var it = self.bindings.iterator();
+        while (it.next()) |entry| {
+            allocator.free(entry.key_ptr.*);
+        }
+        self.bindings.deinit(allocator);
+    }
 };
 
 /// Data related to the active connection.
@@ -430,6 +438,7 @@ const Connection = struct {
             channel.value_ptr.this.close(.REPLY_SUCCESS) catch |e| {
                 log.warn("Failed to close channel '{s}' with error {}.", .{ channel.key_ptr.*, e });
             };
+            channel.value_ptr.deinit(allocator);
         }
 
         self.channels.deinit(allocator);
