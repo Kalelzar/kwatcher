@@ -1,5 +1,38 @@
-// This is largely inspired by tokamak's implementation
-// @see https://github.com/cztomsik/tokamak/blob/main/src/injector.zig
+//! This is largely inspired by tokamak's implementation
+//! @see https://github.com/cztomsik/tokamak/blob/main/src/injector.zig
+//! The dependency injector here supports two types of injection
+//! Via plain properties:
+//! ```
+//! context {
+//!   value: *Value
+//! }
+//! injector.require(*Value);
+//! ```
+//! Or via factory functions:
+//! ```
+//! context {
+//! timeout_s: Distinct("timeout", u64) = .{.value = 500},
+//! pub fn timeControlFactor(timeout: Distinct("timeout", u64)) TimeControl {
+//!   return .{ .timeout = timeout.value, .behaviour = .fatal };
+//! }
+//! pub fn request(timeControl: TimeControl, httpClient: HttpClient) !Response {
+//!   try httpClient.get("/api/v1/request", .{.timeControl = timeControl});
+//! }
+//! injector.require(Response);
+//! ```
+//! Plain properties are directly available in the context struct
+//! and must be initialized before being passed to the context
+//! manually or via init AND/OR may be fully or partially contructed automatically by the injector
+//! IF passed together with a parent injector and the context has a `construct` function that will
+//! have it's dependencies injected from the parent.
+//! If the context has a `deconstruct` it will be called automatically on injector deinit.
+//!
+//! Factories are a way for a property to either be lazily initialized until requested
+//! or to have it's value depend on another value(s) in the same/parent contexts
+//! or to implicitly initialize other properties.
+//! Factories are called by injecting their parameters from the context and its parents, transiently calling and injecting
+//! other factories if needed.
+//! For properties that need to be initialized only once, caching them as optional plain properties is a common pattern.
 
 const std = @import("std");
 
@@ -8,9 +41,14 @@ const meta = klib.meta;
 const mem = @import("mem.zig");
 const schema = @import("schema.zig");
 
+/// A type alias for a context
 const Context = *anyopaque;
+
+/// The type of a resolver function
 const Resolver = *const fn (Context, meta.TypeId) ?*anyopaque;
+/// The type of a factory resolver function
 const FactoryResolver = *const fn (meta.TypeId) ?*const fn (*Injector) anyerror!*anyopaque;
+/// The type oof the dispose function.
 const DisposeFn = *const fn (Context) void;
 
 /// A dependency injector with support for parent injectors.
@@ -18,14 +56,19 @@ const DisposeFn = *const fn (Context) void;
 /// to any function called with it, supporting both plain properties
 /// and factory functions.
 pub const Injector = struct {
+    /// The context from which to inject dependencies
     context: Context,
+    /// The resolver function
     resolver: Resolver,
+    /// The factory resolver function
     resolver_factory: FactoryResolver,
+    /// The parent of this injector in which to look up dependencies if they aren't in the context.
     parent: ?*Injector = null,
+    /// The dispose function
     dispose: ?DisposeFn,
 
-    pub const empty: Injector = .{ .context = undefined, .resolver = resolveNull };
-
+    /// Initialize a new injector with a context and optionally a parent
+    /// The context must be passed as a pointer!
     pub fn init(context: anytype, parent: ?*Injector) !Injector {
         if (comptime !meta.isValuePointer(@TypeOf(context))) {
             @compileError("Expected pointer to a context, got " ++ @typeName(@TypeOf(context)));
@@ -35,6 +78,9 @@ pub const Injector = struct {
         const ContextPtrType = @TypeOf(context);
         const ContextType = std.meta.Child(ContextPtrType);
 
+        // Check for the existance of a deconstruct function.
+        // A deconstruct function must only accept a single parameter -> the context.
+        // and it cannot return an error union.
         if (comptime @hasDecl(ContextType, "deconstruct")) blk: {
             const fun = @field(ContextType, "deconstruct");
             if (@typeInfo(@TypeOf(fun)) != .@"fn") break :blk;
@@ -88,7 +134,17 @@ pub const Injector = struct {
             }
         }
 
+        // The internal resolver functions used by the injector.
         const InternalResolver = struct {
+            /// Resolve a plain property from a context via a type id.
+            /// The algorithm is as follows:
+            /// 1. For every field of the context:
+            ///   - Take the value of the field (or a pointer to it if it isn't already a pointer).
+            ///   - If the type id of the field matches the requested type id: Return it
+            ///     Otherwise continue
+            /// 2. If no field was a match
+            ///   - Check if the requested type was the context itself, and if it is return that.
+            /// 3. If no value was returned by this point, the context does not have it. Return null.
             fn resolve(type_erased_context: Context, type_id: meta.TypeId) ?*anyopaque {
                 var typed_context: ContextPtrType = @constCast(@ptrCast(@alignCast(type_erased_context)));
 
@@ -117,6 +173,20 @@ pub const Injector = struct {
                 return null;
             }
 
+            /// Resolve a property via a factory.
+            /// The algorithm is as follows:
+            /// 1. For every public function declaration:
+            ///  - Get the return type of the function (or a const pointer to it if it's not already a pointer.)
+            ///    NOTE: If the return type is not a pointer the factory will expect to find an allocator
+            ///    in the injector when the fatory is called.
+            ///    It will look for the following allocators in the given order:
+            ///    - an `InternalArena`
+            ///    - std.heap.ArenaAllocator
+            ///    - std.mem.Allocator
+            ///    It is the responsibility of the caller to ensure the memory is freed as is appropriate.
+            ///  - If it matches the function we found return a function that can be used to call the factory
+            ///    with an injector to return the value.
+            /// 2. If no function matched, return null.
             fn resolveFactory(type_id: meta.TypeId) ?*const fn (*Injector) anyerror!*anyopaque {
                 inline for (comptime std.meta.declarations(ContextType)) |d| {
                     const fun = @field(ContextType, d.name);
@@ -130,8 +200,19 @@ pub const Injector = struct {
                                 var args: std.meta.ArgsTuple(@TypeOf(fun)) = undefined;
                                 const fields = std.meta.fields(std.meta.ArgsTuple(@TypeOf(fun)));
                                 const n_deps = comptime fields.len;
-                                var arena = try inj.require(mem.InternalArena);
-                                const alloc = arena.allocator();
+                                const alloc = blk: {
+                                    var internal_arena = try inj.get(*mem.InternalArena);
+                                    if (internal_arena) |_| {
+                                        break :blk internal_arena.?.allocator();
+                                    }
+                                    var arena = try inj.get(*std.heap.ArenaAllocator);
+                                    if (arena) |_| {
+                                        break :blk arena.?.allocator();
+                                    }
+
+                                    const alloc = try inj.get(std.mem.Allocator) orelse return error.MissingFactoryAllocator;
+                                    break :blk alloc;
+                                };
                                 inline for (0..n_deps) |i| {
                                     args[i] = try inj.require(@TypeOf(args[i]));
                                 }
@@ -174,6 +255,7 @@ pub const Injector = struct {
         };
     }
 
+    /// Require a dependency of type `T`. Will return an error if a dependency is missing or a factory returns an error.
     pub fn require(self: *Injector, comptime T: type) !T {
         return try self.get(T) orelse {
             std.log.debug("Missing dependency: {s}", .{@typeName(T)});
@@ -181,8 +263,18 @@ pub const Injector = struct {
         };
     }
 
+    /// Optionally require a dependency of type `T`. Will return an error if a factory returns an error.
+    /// Returns null of the type wasn't found.
+    /// This follows the following algorithm:
+    /// 1. If we are requesting an `Injector`, return the current instance.
+    /// 2. If we are NOT requesting a pointer: First try to inject a const pointer to the type instead.
+    ///    (Go to 1. as `*const T`)
+    /// 3. Try to resolve it type as a plain property
+    /// 4. If `T` is a const pointer `*const U`: Try to resolve a plain property of type `U` instead.
+    /// 5. If a factory exists for `T` return the result of calling the factory with the current injector.
+    /// 6. Else try to resolve via the parent if any or return null if no parent exists.
     pub fn get(self: *Injector, comptime T: type) !?T {
-        if (comptime T == Injector) {
+        if (comptime T == *Injector) {
             return self;
         }
 
@@ -206,6 +298,82 @@ pub const Injector = struct {
         return if (self.parent) |p| try p.get(T) else null;
     }
 
+    test "expect `get` to return the injector if requested" {
+        const TestContext = struct {};
+        var value: TestContext = .{};
+        var inj = try Injector.init(&value, null);
+        const maybe_inj = try inj.get(*Injector);
+        try std.testing.expect(maybe_inj != null);
+        try std.testing.expectEqualDeep(&inj, maybe_inj.?);
+    }
+
+    test "expect `get` to resolve a plain property when requested as a *const" {
+        const TestContext = struct {
+            i: u64 = 1,
+        };
+        var value: TestContext = .{};
+        var inj = try Injector.init(&value, null);
+        const maybe_value = try inj.get(*const u64);
+        try std.testing.expect(maybe_value != null);
+        try std.testing.expectEqual(&value.i, maybe_value.?);
+    }
+
+    test "expect `get` to resolve a plain property when requested as a value" {
+        const TestContext = struct {
+            i: u64 = 1,
+        };
+        var value: TestContext = .{};
+        var inj = try Injector.init(&value, null);
+        const maybe_value = try inj.get(u64);
+        try std.testing.expect(maybe_value != null);
+        try std.testing.expectEqual(value.i, maybe_value.?);
+    }
+
+    test "expect `get` to resolve a plain property when requested as a pointer" {
+        const TestContext = struct {
+            i: u64 = 1,
+        };
+        var value: TestContext = .{};
+        var inj = try Injector.init(&value, null);
+        const maybe_value = try inj.get(*u64);
+        try std.testing.expect(maybe_value != null);
+        try std.testing.expectEqual(&value.i, maybe_value.?);
+        maybe_value.?.* = 2;
+        try std.testing.expectEqual(2, value.i);
+    }
+
+    test "expect `get` to resolve a factory with no params" {
+        const alloc = std.testing.allocator;
+        var arena = std.heap.ArenaAllocator.init(alloc);
+        const Value = struct {
+            next: u64,
+        };
+
+        const TestContext = struct {
+            counter: u64 = 0,
+            arena: *std.heap.ArenaAllocator,
+            pub fn next(counter: *u64) Value {
+                const v = Value{ .next = counter.* };
+                counter.* += 1;
+                return v;
+            }
+        };
+
+        var value: TestContext = .{ .arena = &arena };
+        var inj = try Injector.init(&value, null);
+        const maybe_value = try inj.get(Value);
+        try std.testing.expect(maybe_value != null);
+        try std.testing.expectEqual(0, maybe_value.?.next);
+
+        const maybe_value2 = try inj.get(Value);
+        try std.testing.expect(maybe_value2 != null);
+        try std.testing.expectEqual(1, maybe_value2.?.next);
+        try std.testing.expect(arena.reset(.free_all));
+        arena.deinit();
+    }
+
+    /// Calls a function by injecting it's arguments from the injector, optionally passing extra parameters at the end.
+    /// See call_first if you need the extra parameters at the start.
     pub fn call(self: *Injector, comptime fun: anytype, extra_args: anytype) anyerror!meta.Result(fun) {
         if (comptime @typeInfo(@TypeOf(extra_args)) != .@"struct") {
             @compileError("Expected a tuple of arguments");
@@ -227,6 +395,8 @@ pub const Injector = struct {
         return @call(.auto, fun, args);
     }
 
+    /// Calls a function by injecting it's arguments from the injector, optionally passing extra parameters at the start.
+    /// See call if you need the extra parameters at the end.
     pub fn call_first(self: *Injector, comptime fun: anytype, extra_args: anytype) anyerror!meta.Result(fun) {
         if (comptime @typeInfo(@TypeOf(extra_args)) != .@"struct") {
             @compileError("Expected a tuple of arguments");
