@@ -31,8 +31,6 @@ pub fn Route(PathParams: type) type {
             var inj_args: std.meta.Tuple(&.{*injector.Injector}) = undefined;
             inj_args[0] = inj;
 
-            const client = try inj.require(Client);
-
             var _route = try @call(.auto, self.handlers.route, inj_args);
             defer _route.deinit();
             var _exchange = try @call(.auto, self.handlers.exchange, inj_args);
@@ -49,6 +47,7 @@ pub fn Route(PathParams: type) type {
             if (!new) return self.binding.consumer_tag;
 
             if (self.binding.consumer_tag) |ct| {
+                const client = try inj.require(Client);
                 try client.unbind(ct, .{});
                 return self.bind(client);
             }
