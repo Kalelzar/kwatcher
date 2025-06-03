@@ -39,8 +39,7 @@ pub fn Resolver(comptime Container: type) type {
 
                     return Resolver(@TypeOf(value)).resolve(inj, rest, &value);
                 } else {
-                    @compileLog(Container, first);
-                    @compileError("No such field is available within struct.");
+                    @compileError(std.fmt.comptimePrint("'{s}' is not a valid field in '{}'.", .{ first, Container }));
                 }
             } else {
                 if (comptime @hasField(Container, path)) {
@@ -67,8 +66,7 @@ pub fn Resolver(comptime Container: type) type {
                     }
                     return inj.call(@field(Container, path), .{});
                 } else {
-                    @compileLog(Container, path);
-                    @compileError("No such field is available within struct.");
+                    @compileError(std.fmt.comptimePrint("'{s}' is not a valid field in '{}'.", .{ path, Container }));
                 }
             }
         }
@@ -94,8 +92,7 @@ pub fn Resolver(comptime Container: type) type {
                 } else if (comptime @hasDecl(Container, first)) {
                     return Resolver(klib.meta.Return(@field(Container, first))).resolveType(rest);
                 } else {
-                    @compileLog(Container, first);
-                    @compileError("No such field is available within struct.");
+                    @compileError(std.fmt.comptimePrint("'{s}' is not a valid field in '{}'.", .{ first, Container }));
                 }
             } else {
                 if (comptime @hasField(Container, path)) {
@@ -103,8 +100,7 @@ pub fn Resolver(comptime Container: type) type {
                 } else if (comptime @hasDecl(Container, path)) {
                     return klib.meta.Return(@field(Container, path));
                 } else {
-                    @compileLog(Container, path);
-                    @compileError("No such field is available within struct.");
+                    @compileError(std.fmt.comptimePrint("'{s}' is not a valid field in '{}'.", .{ path, Container }));
                 }
             }
         }

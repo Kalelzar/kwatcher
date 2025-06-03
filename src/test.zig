@@ -3,6 +3,7 @@ const kwatcher = struct {
     const Template = @import("template.zig");
     const InternFmtCache = @import("intern_fmt_cache.zig");
     const injector = @import("injector.zig");
+    const handlers = @import("handlers.zig");
 };
 const Self = @This();
 
@@ -11,4 +12,5 @@ comptime {
     r(kwatcher.Template);
     r(kwatcher.InternFmtCache);
     r(kwatcher.injector);
+    r(kwatcher.handlers.HandlerCodeGen(struct {}));
 }

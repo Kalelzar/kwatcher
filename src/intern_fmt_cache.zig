@@ -68,12 +68,17 @@ pub const Lease = struct {
     /// The previous value that was replaced, if any.
     old: ?[]const u8,
     /// The allocator of the cache that can be used to free the old value
-    allocator: std.mem.Allocator,
+    allocator: ?std.mem.Allocator,
 
     /// Frees the leased old value if any.
     pub fn deinit(self: *Lease) void {
-        if (self.old) |old|
-            self.allocator.free(old);
+        if (self.old) |old| {
+            const allocator = self.allocator orelse {
+                std.log.warn("Leaking lease: {s}. Invalid lease.", .{old});
+                return;
+            };
+            allocator.free(old);
+        }
     }
 
     test "expect `deinit` to free the old string when available" {
