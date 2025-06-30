@@ -66,8 +66,8 @@
             .hash = "122061f30077ef518dd435d397598ab3c45daa3d2c25e6b45383fb94d0bd2c3af1af",
         },
         .klib = .{
-            .url = "git+https://github.com/Kalelzar/klib#0f919cdb8abdda80e8b598a3d7c0377e1fa2f2ba",
-            .hash = "klib-0.0.0-vum4ZGViAAD9WjA7o2AHm2w-eavtDAyPyJW4iKyU5vjF",
+            .url = "git+https://github.com/Kalelzar/klib#ef6a00701c4cd1e54d72a5f95f2c4e2b43bd17fb",
+            .hash = "klib-0.0.0-vum4ZBFwAAAdG1htV2o7HBSxjJCKytIxpSgBGVKSZBkK",
         },
     },
 

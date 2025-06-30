@@ -68,11 +68,11 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
             }
         }
 
-        pub fn userInfo(self: *Self, allocator: std.mem.Allocator) schema.UserInfo {
+        pub fn userInfo(self: *Self, allocator: std.mem.Allocator) !schema.UserInfo {
             if (self.user_info) |res| {
                 return res;
             } else {
-                self.user_info = schema.UserInfo.init(allocator, null);
+                self.user_info = try schema.UserInfo.init(allocator, null);
                 return self.user_info.?;
             }
         }
@@ -164,7 +164,7 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
             if (self.timer) |_|
                 self.timer.?.deinit();
 
-            if (self.user_info) |u|
+            if (self.user_info) |*u|
                 u.deinit();
 
             if (self.client_cache) |c| {

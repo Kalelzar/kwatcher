@@ -144,21 +144,28 @@ pub const UserInfo = struct {
     allocator: std.mem.Allocator,
 
     /// Initializes a new user with an id override from the user configuration.
-    pub fn init(allocator: std.mem.Allocator, id_override: ?[]const u8) UserInfo {
-        // FIXME: This should actually retrieve the values instead of ... hard-coding them.
-        // Needs cross-platform code in klib.
+    pub fn init(allocator: std.mem.Allocator, id_override: ?[]const u8) !UserInfo {
+        const hostname = try klib.host.hostname(allocator);
+        const username = try klib.host.username(allocator);
+
+        const id = if (id_override) |id|
+            try allocator.dupe(u8, id)
+        else
+            try std.fmt.allocPrint(allocator, "{s}@{s}", .{ username, hostname });
+
         return .{
-            .hostname = "localhost",
-            .username = "Kalelzar",
-            .id = id_override orelse "kalelzar",
+            .hostname = hostname,
+            .username = username,
+            .id = id,
             .allocator = allocator,
         };
     }
 
     /// Deinitializes the stored user data.
-    pub fn deinit(self: *const UserInfo) void {
-        // TODO: STUB
-        _ = self;
+    pub fn deinit(self: *UserInfo) void {
+        self.allocator.free(self.hostname);
+        self.allocator.free(self.username);
+        self.allocator.free(self.id);
     }
 
     /// Converts a user info to a User.V1 compatible schema.
@@ -171,11 +178,11 @@ pub const UserInfo = struct {
     }
 
     /// Converts from a User.V1 compatible schema.
-    pub fn fromV1(allocator: std.mem.Allocator, sch: *const User.V1) UserInfo {
+    pub fn fromV1(allocator: std.mem.Allocator, sch: *const User.V1) !UserInfo {
         return .{
-            .username = sch.username,
-            .hostname = sch.hostname,
-            .id = sch.id,
+            .username = try allocator.dupe(u8, sch.username),
+            .hostname = try allocator.dupe(u8, sch.hostname),
+            .id = try allocator.dupe(u8, sch.id),
             .allocator = allocator,
         };
     }

@@ -625,6 +625,7 @@ pub fn bind(
 
     const alloc = self.allocator;
     const consumer_tag = try std.fmt.allocPrint(alloc, "{s}-{s}.{s}.{s}-{s}", .{ self.name, declared_queue, route, exchange, opts.channel_name orelse "__consume" });
+    errdefer alloc.free(consumer_tag);
 
     conn.bind(
         alloc,
