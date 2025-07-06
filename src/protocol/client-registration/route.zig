@@ -7,7 +7,7 @@ const InternFmtCache = @import("../../intern_fmt_cache.zig");
 const schema = @import("schema.zig");
 const ClientRegistry = @import("registry.zig");
 
-pub fn @"publish:announce amq.direct/client.announce"(
+pub fn @"publish!:announce amq.direct/client.announce"(
     user_info: base_schema.UserInfo,
     client_info: base_schema.ClientInfo,
     strings: *InternFmtCache,
@@ -69,6 +69,6 @@ pub fn @"reply amq.topic/client.requests.reannounce"(
     };
 }
 
-pub fn @"publish:heartbeat amq.direct/client.heartbeat"(reg: *ClientRegistry, client: Client) schema.Client.Heartbeat.V1 {
+pub fn @"publish!:heartbeat amq.direct/client.heartbeat"(reg: *ClientRegistry, client: Client) schema.Client.Heartbeat.V1 {
     return .{ .id = reg.id(client) };
 }

@@ -10,6 +10,7 @@ const metrics = @import("metrics.zig");
 const mem = @import("mem.zig");
 const Client = @import("client.zig");
 const AmqpClient = @import("amqp_client.zig");
+const DurableCacheClient = @import("durable_cache_client.zig");
 
 const DefaultRoutes = @import("default_routes.zig");
 
@@ -35,6 +36,7 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
         context: *Context,
 
         client_cache: ?*AmqpClient = null,
+        dcc_cache: ?*DurableCacheClient = null,
         timer: ?Timer = null,
         user_info: ?schema.UserInfo = null,
         user_config: ?UserConfig = null,
@@ -132,7 +134,20 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
             }
         }
 
-        pub fn clientProxyFactory(amqp_client: *AmqpClient) Client {
+        pub fn durableCacheClientFactory(self: *Self, allocator: std.mem.Allocator) !*DurableCacheClient {
+            if (self.dcc_cache) |res| {
+                return res;
+            } else {
+                const dcc = try allocator.create(DurableCacheClient);
+                dcc.* = try DurableCacheClient.init(allocator);
+                try DurableCacheClient.connect(dcc);
+                errdefer allocator.destroy(dcc);
+                self.dcc_cache = dcc;
+                return self.dcc_cache.?;
+            }
+        }
+
+        pub fn clientProxyFactory(amqp_client: *DurableCacheClient) Client {
             return amqp_client.client();
         }
 
@@ -168,6 +183,11 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
                 u.deinit();
 
             if (self.client_cache) |c| {
+                c.deinit();
+                self.allocator.destroy(c);
+            }
+
+            if (self.dcc_cache) |c| {
                 c.deinit();
                 self.allocator.destroy(c);
             }
@@ -359,9 +379,9 @@ pub fn Server(
             var total: i32 = 0;
             var handled: i32 = 0;
             main: while (remaining > 0) {
-                const rabbitmq_wait = @divTrunc(remaining, std.time.ns_per_us);
+                const rabbitmq_wait_us = @divTrunc(remaining, std.time.ns_per_us);
                 const start_time = try std.time.Instant.now();
-                var envelope = try cl.consume(rabbitmq_wait);
+                var envelope = try cl.consume(rabbitmq_wait_us);
                 defer internal_arena.reset();
                 if (envelope) |*response| {
                     defer response.deinit();

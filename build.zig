@@ -7,6 +7,7 @@ const Builder = struct {
     check_step: *std.Build.Step,
     kwatcher: *std.Build.Module,
     kwatcher_example: *std.Build.Module,
+    kwatcher_dump: *std.Build.Module,
     kwatcher_test: *std.Build.Module,
 
     fn init(b: *std.Build) Builder {
@@ -49,6 +50,14 @@ const Builder = struct {
         kwatcher_example.link_libc = true;
         kwatcher_example.addImport("kwatcher", kwatcher);
 
+        const kwatcher_dump = b.createModule(.{
+            .root_source_file = b.path("src/dmp.zig"),
+            .target = target,
+            .optimize = opt,
+        });
+        kwatcher_dump.link_libc = true;
+        kwatcher_dump.addImport("kwatcher", kwatcher);
+
         return .{
             .b = b,
             .check_step = check_step,
@@ -57,6 +66,7 @@ const Builder = struct {
             .kwatcher = kwatcher,
             .kwatcher_example = kwatcher_example,
             .kwatcher_test = kwatcher_test,
+            .kwatcher_dump = kwatcher_dump,
         };
     }
 
@@ -109,6 +119,10 @@ pub fn build(b: *std.Build) !void {
     const exe = builder.addExecutable("kwatcher-examples", builder.kwatcher_example);
     builder.addDependencies(exe);
     try builder.installAndCheck(exe);
+
+    const dmp = builder.addExecutable("kwatcher-dmp", builder.kwatcher_dump);
+    builder.addDependencies(dmp);
+    try builder.installAndCheck(dmp);
 
     const run_cmd = b.addRunArtifact(exe);
 

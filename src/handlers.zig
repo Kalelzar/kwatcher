@@ -82,7 +82,7 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
 
             const exchangeHandler = genRouteHandler(name ++ "__exch", expr.exchange);
             const routeHandler = genRouteHandler(name ++ "__rout", expr.route);
-            const pubHandler = publishHandler(metadata, handler);
+            const pubHandler = publishHandler(metadata, handler, expr.norecord);
             const evHandler = eventHandler(event_metadata, event_handler);
 
             return .{
@@ -222,6 +222,7 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
         fn publishHandler(
             comptime metadata: Metadata,
             comptime handler: anytype,
+            comptime norecord: bool,
         ) PublishHandlerFn {
             const n_deps = metadata.deps.len;
 
@@ -261,6 +262,7 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
                         alloc,
                         exchange,
                         route,
+                        norecord,
                     );
                 }
             };
@@ -391,6 +393,7 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
                         allocator,
                         "amq.direct",
                         route,
+                        false,
                     );
                 }
             };
@@ -425,6 +428,7 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
             alloc: std.mem.Allocator,
             exchange: []const u8,
             route: []const u8,
+            comptime norecord: bool,
         ) !schema.SendMessage {
             const ActualResultType =
                 switch (comptime @typeInfo(ResultType)) {
@@ -449,6 +453,7 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
                         .reply_to = opts.reply_to,
                         .correlation_id = opts.correlation_id,
                         .expiration = opts.expiration,
+                        .norecord = norecord,
                     },
                 };
             } else {
@@ -459,6 +464,7 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
                     .options = .{
                         .exchange = exchange,
                         .routing_key = route,
+                        .norecord = norecord,
                     },
                 };
             }

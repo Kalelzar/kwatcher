@@ -3,7 +3,7 @@ const schema = @import("schema.zig");
 const mem = @import("mem.zig");
 const metrics = @import("metrics.zig");
 
-pub fn @"publish:metrics amq.direct/metrics"(
+pub fn @"publish!:metrics amq.direct/metrics"(
     user_info: schema.UserInfo,
     client_info: schema.ClientInfo,
     arena: *mem.InternalArena,
