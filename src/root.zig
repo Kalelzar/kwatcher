@@ -2,6 +2,8 @@ pub const config = @import("config.zig");
 pub const inject = @import("injector.zig");
 pub const Client = @import("client.zig");
 pub const AmqpClient = @import("amqp_client.zig");
+pub const DurableCacheClient = @import("durable_cache_client.zig");
+pub const LoggingClient = @import("logging_client.zig");
 pub const server = @import("server.zig");
 pub const schema = @import("schema.zig");
 pub const route = @import("route.zig");
@@ -13,3 +15,6 @@ pub const Timer = @import("timer.zig");
 pub const protocol = @import("protocol/protocol.zig");
 pub const Template = @import("template.zig");
 pub const InternFmtCache = @import("intern_fmt_cache.zig");
+
+pub const replay = @import("replay.zig");
+pub const record = @import("recorder.zig");

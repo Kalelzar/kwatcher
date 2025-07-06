@@ -6,9 +6,9 @@
 //! RouteString    ::= MethodDeclaration
 //! MethodDeclaration ::= PublishDeclaration | ConsumeDeclaration | ReplyDeclaration
 //!
-//! PublishDeclaration ::= "publish" ":" EventName " " ExchangeName "/" RoutingKey
-//! ConsumeDeclaration ::= "consume" " " ExchangeName "/" BindingKey [ "/" QueueName ]
-//! ReplyDeclaration   ::= "reply" " " ExchangeName "/" BindingKey [ "/" QueueName ]
+//! PublishDeclaration ::= "publish" [ Modifier ] ":" EventName " " ExchangeName "/" RoutingKey
+//! ConsumeDeclaration ::= "consume" [ Modifier ]" " ExchangeName "/" BindingKey [ "/" QueueName ]
+//! ReplyDeclaration   ::= "reply" [ Modifier ] " " ExchangeName "/" BindingKey [ "/" QueueName ]
 //!
 //! EventName      ::= Identifier
 //!
@@ -20,6 +20,8 @@
 //! PathExpression ::= ( Identifier | Parameter )+
 //!
 //! Parameter      ::= "{" Identifier ( "." Identifier )* "}"
+//!
+//! Modifier       ::= "!"
 //!
 //! Identifier     ::= ( Letter | Digit | "_" | "-" | "." )+
 //!
@@ -44,6 +46,8 @@ const TokenType = enum {
     consume,
     /// The 'reply' method
     reply,
+    /// The no record modifier
+    norecord,
     /// Any non-special identifier
     identifier,
     /// A separator: One of ':', ' ', '/'.
@@ -81,6 +85,16 @@ pub fn scan(comptime source: []const u8) []const Token {
 
             const ch = source[point];
             switch (ch) {
+                '!' => {
+                    if (point != mark) {
+                        tokens = tokens ++ .{Token{ .type = .identifier, .lexeme = source[mark..point] }};
+                        mark = point;
+                    }
+                    tokens = tokens ++ .{Token{ .type = .norecord, .lexeme = source[mark..point] }};
+                    point += 1;
+                    mark = point;
+                    continue;
+                },
                 ' ', '/', ':' => |sep| {
                     if (point - mark == 0) {
                         tokens = tokens ++ .{Token{ .type = .separator, .lexeme = source[mark .. point + 1] }};
@@ -389,6 +403,8 @@ pub const PublishExpr = struct {
     /// The binding key of the route. Required.
     /// A binding key MAY contain dynamically bound parameters.
     route: ValueExpr,
+    /// A modifier that describes if the route should be included in recordings.
+    norecord: bool,
 
     /// A debug comptime helper for printing the expression.
     pub fn print(comptime self: PublishExpr, comptime indent: []const u8) void {
@@ -399,6 +415,7 @@ pub const PublishExpr = struct {
         self.exchange.print(indent ++ "  ");
         @compileLog(indent ++ "  route:");
         self.route.print(indent ++ "  ");
+        @compileLog(indent ++ "  norecord:" ++ self.norecord);
     }
 };
 
@@ -473,6 +490,11 @@ pub fn Template(comptime Context: type) type {
                         }
                         @compileError("Found an unexpected separator while parsing value");
                     },
+                    .norecord => {
+                        const id = self.consume(.norecord, "sanity check: No Record(!) was expected.");
+                        fmt = fmt ++ id.lexeme;
+                        raw = raw ++ id.lexeme;
+                    },
                     .identifier => {
                         const id = self.consume(.identifier, "sanity check: Identifier was expected.");
                         fmt = fmt ++ id.lexeme;
@@ -503,7 +525,8 @@ pub fn Template(comptime Context: type) type {
                     .separator => {
                         break;
                     },
-                    .identifier => {
+                    .identifier, .norecord => {
+                        // Modifiers act as normal characters outside of method declarations.
                         raw = raw ++ s.lexeme;
                         _ = self.next();
                     },
@@ -554,6 +577,12 @@ pub fn Template(comptime Context: type) type {
 
         /// Parses a publish expression.
         fn parsePublish(comptime self: *Parser) PublishExpr {
+            const modifier: ?Token =
+                switch (self.peek().type) {
+                    .norecord => self.consume(.norecord, "Sanity check: Expected  a no record(!) modifier."),
+                    else => null,
+                };
+
             const sep = self.consume(.separator, "Expected a separator after a method");
             if (comptime !c(":", sep.lexeme)) {
                 @compileError("Expected the separator after the method to be a colon.");
@@ -581,6 +610,7 @@ pub fn Template(comptime Context: type) type {
                 .event = event,
                 .exchange = exchange,
                 .route = route,
+                .norecord = if (modifier) |m| m.type == .norecord else false,
             };
         }
 

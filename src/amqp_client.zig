@@ -474,6 +474,10 @@ name: []const u8,
 
 /// The current connection or null if disconnected.
 connection: ?*Connection = null,
+
+/// The internal id of the client
+/// NOTE: This should only be used to obtain a proper client id from
+/// a client registry.
 id: []const u8,
 
 /// The client lock.

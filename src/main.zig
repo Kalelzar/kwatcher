@@ -29,6 +29,7 @@ const TestRoutes = struct {
         user_info: kwatcher.schema.UserInfo,
         client_info: kwatcher.schema.ClientInfo,
     ) kwatcher.schema.Heartbeat.V1(P) {
+        std.log.info("{s} {s} {s}", .{ user_info.hostname, user_info.username, user_info.id });
         return .{
             .event = "TEST",
             .user = user_info.v1(),

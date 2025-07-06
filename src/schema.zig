@@ -23,6 +23,9 @@ pub const MessageOptions = meta.MergeStructs(ConfigurableMessageOptions, struct 
 
     /// The exchange to which to publish the message.
     exchange: []const u8,
+
+    /// Whether to include the message in recordings.
+    norecord: bool,
 });
 
 /// A message with configurable options that can be returned from a publishing route.
