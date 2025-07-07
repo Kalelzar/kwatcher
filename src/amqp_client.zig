@@ -484,7 +484,13 @@ id: []const u8,
 mutex: std.Thread.Mutex.Recursive = .init,
 
 /// Ensure that the current state matches the provided state or fail with `StateErrror.InvalidState`
-fn ensureState(self: *AmqpClient, state: State) StateError!void {
+fn ensureState(self: *AmqpClient, state: State) anyerror!void {
+    if (self.state == .invalid) return error.DeadClient;
+    switch (state) {
+        .invalid => return error.Unexpected,
+        .disconnected => if (self.state == .connected) try disconnect(self),
+        .connected => if (self.state == .disconnected) try connect(self),
+    }
     if (self.state != state) return StateError.InvalidState;
 }
 
@@ -526,7 +532,10 @@ pub fn connect(ptr: *anyopaque) !void {
     var self = getSelf(ptr);
     self.mutex.lock();
     defer self.mutex.unlock();
-    try self.ensureState(.disconnected);
+
+    if (self.state == .connected) {
+        try disconnect(self);
+    }
 
     if (self.connection) |existing| {
         log.warn("Cleaning up existing connection! Client '{s}' state is invalid.", .{self.name});
@@ -550,15 +559,20 @@ pub fn connect(ptr: *anyopaque) !void {
     openChannel(self, "__consume") catch |e| try self.handleDisconnect(e, cptr);
 }
 
-fn ensureConnected(self: *AmqpClient) StateError!*Connection {
+fn ensureConnected(self: *AmqpClient) !*Connection {
     try self.ensureState(.connected);
     return self.connection orelse error.StateCorrupted;
 }
 
-pub fn disconnect(ptr: *anyopaque) StateError!void {
+pub fn disconnect(ptr: *anyopaque) !void {
     var self = getSelf(ptr);
     self.mutex.lock();
     defer self.mutex.unlock();
+    switch (self.state) {
+        .connected => {},
+        .invalid => return StateError.InvalidState,
+        .disconnected => return,
+    }
     var conn = try self.ensureConnected();
 
     conn.deinit(self.allocator);
@@ -759,6 +773,7 @@ fn recategorizeError(err: anyerror) anyerror {
         error.HostnameResolutionFailed,
         error.InvalidState,
         error.HeartbeatTimeout,
+        error.Timeout,
         error.UnexpectedState,
         => error.Disconnected,
         else => err,

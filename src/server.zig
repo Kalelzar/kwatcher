@@ -11,6 +11,7 @@ const mem = @import("mem.zig");
 const Client = @import("client.zig");
 const AmqpClient = @import("amqp_client.zig");
 const DurableCacheClient = @import("durable_cache_client.zig");
+const CircuitBreakerClient = @import("circuit_breaker_client.zig");
 
 const DefaultRoutes = @import("default_routes.zig");
 
@@ -37,6 +38,7 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
 
         client_cache: ?*AmqpClient = null,
         dcc_cache: ?*DurableCacheClient = null,
+        cbc_cache: ?*CircuitBreakerClient = null,
         timer: ?Timer = null,
         user_info: ?schema.UserInfo = null,
         user_config: ?UserConfig = null,
@@ -128,7 +130,6 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
             } else {
                 const amqp_client = try allocator.create(AmqpClient);
                 amqp_client.* = try AmqpClient.init(allocator, config_file, client_name);
-                try AmqpClient.connect(amqp_client);
                 self.client_cache = amqp_client;
                 return self.client_cache.?;
             }
@@ -140,15 +141,27 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
             } else {
                 const dcc = try allocator.create(DurableCacheClient);
                 dcc.* = try DurableCacheClient.init(allocator);
-                try DurableCacheClient.connect(dcc);
                 errdefer allocator.destroy(dcc);
                 self.dcc_cache = dcc;
                 return self.dcc_cache.?;
             }
         }
 
-        pub fn clientProxyFactory(amqp_client: *DurableCacheClient) Client {
-            return amqp_client.client();
+        pub fn circuitBreakerClientFactory(self: *Self, allocator: std.mem.Allocator, main: *AmqpClient, fallback: *DurableCacheClient) !*CircuitBreakerClient {
+            if (self.cbc_cache) |res| {
+                return res;
+            } else {
+                const cbc = try allocator.create(CircuitBreakerClient);
+                errdefer allocator.destroy(cbc);
+                cbc.* = try CircuitBreakerClient.init(allocator, main.client(), fallback.client(), .{});
+                try CircuitBreakerClient.connect(cbc);
+                self.cbc_cache = cbc;
+                return self.cbc_cache.?;
+            }
+        }
+
+        pub fn clientProxyFactory(base_client: *CircuitBreakerClient) Client {
+            return base_client.client();
         }
 
         pub fn init(allocator: std.mem.Allocator) !Self {
@@ -532,7 +545,7 @@ pub fn Server(
             const client = try user_injector.require(Client);
 
             client.disconnect() catch |e| switch (e) {
-                .InvalidState => {},
+                .InvalidState, .DeadClient => {},
                 else => return e,
             };
 
@@ -558,8 +571,9 @@ pub fn Server(
                     switch (e) {
                         error.Disconnected,
                         error.HeartbeatTimeout,
+                        error.InvalidState,
                         => {},
-                        error.InvalidState => {
+                        error.DeadClient => {
                             const old_client = self.deps.client_cache;
                             if (old_client) |c| {
                                 c.deinit();
