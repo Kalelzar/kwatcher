@@ -1,6 +1,7 @@
 const std = @import("std");
 const Client = @import("client.zig");
 const AmqpOps = @import("ops.zig").Ops;
+const Header = @import("recorder.zig").RecordingHeader;
 const schema = @import("schema.zig");
 
 pub fn Reader(comptime Ops: type) type {
@@ -36,6 +37,25 @@ pub fn Reader(comptime Ops: type) type {
             const slice = self.buffer[self.point .. self.point + n];
             self.point += n;
             return slice;
+        }
+
+        pub fn checkpoint(self: *Self) u64 {
+            return self.point;
+        }
+
+        pub fn restore(self: *Self, mark: u64) void {
+            self.point = mark;
+        }
+
+        pub fn header(self: *Self) !Header {
+            const hsig = self.readBytes(4);
+            if (!std.mem.eql(u8, hsig, "KWRC")) return error.InvalidRecording;
+            const version = self.byte(u8);
+            const timestamp = self.byte(i64);
+            return Header{
+                .version = version,
+                .timestamp = timestamp,
+            };
         }
 
         pub fn op(self: *Self) Ops {
@@ -87,6 +107,114 @@ pub fn Reader(comptime Ops: type) type {
     };
 }
 
+pub const ReplayManager = struct {
+    replay_dir_path: []const u8,
+    replay_dir: std.fs.Dir,
+    allocator: std.mem.Allocator,
+    client: Client,
+
+    pub fn init(allocator: std.mem.Allocator, replay_dir_path: []const u8, client: Client) !ReplayManager {
+        var dir = try std.fs.cwd().openDir(replay_dir_path, .{ .iterate = true });
+        errdefer dir.close();
+        return .{
+            .replay_dir = dir,
+            .client = client,
+            .replay_dir_path = try allocator.dupe(u8, replay_dir_path),
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *ReplayManager) void {
+        self.replay_dir.close();
+        self.allocator.free(self.replay_dir_path);
+    }
+
+    fn nextRecording(self: *ReplayManager) !?[]const u8 {
+        std.log.debug("Obtaining next recording.", .{});
+        var it = self.replay_dir.iterate();
+        var oldest: ?[]const u8 = null;
+        var oldest_timestamp: ?i64 = null;
+        std.log.debug("Beginning iteration.", .{});
+        while (try it.next()) |entry| {
+            std.log.debug("Trying {s}: {}", .{ entry.name, entry.kind });
+            if (entry.kind != .file) continue; // We might want to follow symlinks here but this is fine for now
+            if (!std.mem.endsWith(u8, entry.name, ".rcd")) continue;
+
+            const name = entry.name[0..(entry.name.len - 4)];
+            const timestamp = std.fmt.parseInt(i64, name, 10) catch continue;
+            const isOlder = if (oldest_timestamp) |ot| ot > timestamp else true;
+            std.log.debug("Oldest: {?}, Current: {} | {}", .{ oldest_timestamp, timestamp, isOlder });
+            if (isOlder) {
+                if (oldest) |o| self.allocator.free(o);
+                oldest = try self.allocator.dupe(u8, entry.name);
+                oldest_timestamp = timestamp;
+            }
+        }
+
+        std.log.debug("Found: {?s}", .{oldest});
+
+        return oldest;
+    }
+
+    fn getResumePoint(self: *ReplayManager, path: []const u8) !u64 {
+        const file = self.replay_dir.openFile(path, .{}) catch |e| switch (e) {
+            std.fs.File.OpenError.FileNotFound => return 0,
+            else => return e,
+        };
+
+        var buf: [8]u8 = undefined;
+        const bytes = try file.read(&buf);
+        if (bytes != 8) return error.InvalidCheckpoint;
+        const slice = buf[0..];
+        const value = std.mem.bytesAsValue(u64, slice);
+        return value.*;
+    }
+
+    pub fn replay(self: *ReplayManager) !void {
+        std.log.info("Replaying from '{s}'", .{self.replay_dir_path});
+        while (try self.nextRecording()) |recording| {
+            defer self.allocator.free(recording);
+
+            const path = try std.fs.path.resolve(self.allocator, &.{ self.replay_dir_path, recording });
+            defer self.allocator.free(path);
+
+            std.log.info("Replaying {s} from '{s}'", .{ recording, path });
+
+            try self.client.connect();
+            defer self.client.disconnect() catch {};
+
+            var player = try Player.init(self.allocator, self.client, path);
+            const prog = try std.mem.concat(self.allocator, u8, &.{ recording, ".checkpoint" });
+            defer self.allocator.free(prog);
+            const resumepoint = try self.getResumePoint(prog);
+
+            std.log.info("Resuming from position: {}", .{resumepoint});
+
+            player.resumeFromCheckpoint(resumepoint) catch |e| switch (e) {
+                error.Disconnected => {
+                    const checkpoint = player.reader.checkpoint();
+                    var file = try self.replay_dir.createFile(prog, .{});
+                    defer file.close();
+                    _ = try file.write(std.mem.toBytes(checkpoint)[0..]);
+                },
+                else => {
+                    std.log.err("Replay failed with: {}", .{e});
+                    return e;
+                },
+            };
+
+            std.log.info("Replay successful. Deleting file...", .{});
+            try self.replay_dir.deleteFile(recording);
+            self.replay_dir.deleteFile(prog) catch |err| switch (err) {
+                // It's okay if the checkpoint file didn't exist (for a perfect run)
+                error.FileNotFound => {},
+                else => return err,
+            };
+        }
+        std.log.info("No more recordings available... Exiting.", .{});
+    }
+};
+
 pub const Player = struct {
     client: *Client,
     reader: *Reader(AmqpOps),
@@ -118,12 +246,24 @@ pub const Player = struct {
     }
 
     pub fn read(self: *Player) !void {
+        try self.resumeFromCheckpoint(0);
+    }
+
+    pub fn resumeFromCheckpoint(self: *Player, checkpoint: u64) !void {
+        var isResuming = self.reader.checkpoint() != checkpoint;
+        const header = try self.reader.header();
+        _ = header;
         while (!self.reader.atEnd()) {
+            const mark = self.reader.checkpoint();
+            errdefer self.reader.restore(mark);
+            if (mark > checkpoint and isResuming) return error.InvalidCheckpoint;
+            isResuming = isResuming and mark != checkpoint;
+
             const op = self.reader.op();
             switch (op) {
                 .bind => try self.readBind(),
                 .unbind => try self.readUnbind(),
-                .publish => try self.readPublish(),
+                .publish => try self.readPublish(isResuming),
                 .open_channel => try self.readOpenChannel(),
                 .close_channel => try self.readCloseChannel(),
                 .declare_ephemeral_queue => try self.readDeclareEphemeralQueue(),
@@ -163,7 +303,7 @@ pub const Player = struct {
         try self.link(consumer_tag, actual_tag);
     }
 
-    fn readPublish(self: *Player) !void {
+    fn readPublish(self: *Player, resuming: bool) !void {
         const channel = self.reader.strOpt();
         const body = self.reader.str();
         const routing_key = self.reader.str();
@@ -171,23 +311,24 @@ pub const Player = struct {
         const reply_to = self.reader.strOpt();
         const correlation_id = self.reader.strOpt();
         const expires_at = self.reader.byteOpt(u64);
+        if (!resuming) {
+            const message: schema.SendMessage = .{
+                .body = body,
+                .options = .{
+                    .routing_key = routing_key,
+                    .exchange = exchange,
+                    .norecord = false,
+                    .reply_to = reply_to,
+                    .correlation_id = correlation_id,
+                    .expiration = expires_at,
+                },
+            };
 
-        const message: schema.SendMessage = .{
-            .body = body,
-            .options = .{
-                .routing_key = routing_key,
-                .exchange = exchange,
-                .norecord = false,
-                .reply_to = reply_to,
-                .correlation_id = correlation_id,
-                .expiration = expires_at,
-            },
-        };
-
-        try self.client.publish(
-            message,
-            .{ .channel_name = channel },
-        );
+            try self.client.publish(
+                message,
+                .{ .channel_name = channel },
+            );
+        }
     }
 
     fn readOpenChannel(self: *Player) !void {

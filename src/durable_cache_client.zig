@@ -30,13 +30,10 @@ pub fn deinit(self: *DurableCacheClient) void {
     self.allocator.free(self.id);
 }
 
-fn nextFile() !std.fs.File {
-    var buf: [512]u8 = undefined;
+fn nextFile(self: *DurableCacheClient) ![]const u8 {
     const file_name =
-        try std.fmt.bufPrint(&buf, ".recording/{}.rcd", .{std.time.timestamp()});
-    return std.fs.cwd().createFile(file_name, .{
-        .exclusive = true,
-    });
+        try std.fmt.allocPrint(self.allocator, ".recording/{}.rcd", .{std.time.timestamp()});
+    return file_name;
 }
 
 fn getSelf(ptr: *anyopaque) *DurableCacheClient {
@@ -57,8 +54,8 @@ pub fn connect(ptr: *anyopaque) anyerror!void {
     if (self.recorder != null) {
         return error.InvalidState;
     }
-    const file = try nextFile();
-    errdefer file.close();
+    const file = try self.nextFile();
+    defer self.allocator.free(file);
     var recorder = try Recorder(Ops).init(self.allocator, file);
     errdefer recorder.deinit();
     self.recorder = try self.allocator.create(Recorder(Ops));
