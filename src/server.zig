@@ -23,6 +23,8 @@ const InternFmtCache = @import("intern_fmt_cache.zig");
 const protocol = @import("protocol/protocol.zig");
 const Timer = @import("timer.zig");
 
+const replay = @import("replay.zig");
+
 fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime client_name: []const u8, comptime client_version: []const u8) type {
     const __ignore = struct {};
 
@@ -379,6 +381,22 @@ pub fn Server(
             try timer.step();
         }
 
+        pub fn handleReplay(self: *Self) !void {
+            var base_injector = try Injector.init(&self.deps, null);
+            var user_injector = try Injector.init(self.user_deps, &base_injector);
+            var amcl = try user_injector.require(*AmqpClient);
+            var cl = amcl.client();
+            if (amcl.state != .connected) return;
+            defer cl.reset();
+            var internal_arena = try user_injector.require(mem.InternalArena);
+            defer internal_arena.reset();
+
+            var manager = try replay.ReplayManager.init(internal_arena.allocator(), ".recording", cl);
+            defer manager.deinit();
+
+            try manager.replay();
+        }
+
         pub fn handleConsume(self: *Self, interval: u64) !void {
             const ConsumeArgs = std.meta.Tuple(&.{ *Injector, []const u8 });
             var base_injector = try Injector.init(&self.deps, null);
@@ -527,6 +545,10 @@ pub fn Server(
 
                 self.handlePublish() catch |e| {
                     log.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
+                    return e;
+                };
+                self.handleReplay() catch |e| {
+                    log.err("Encountered an error while handling replaying events: {}. This is likely a bug in KWatcher.", .{e});
                     return e;
                 };
                 self.handleConsume(interval) catch |e| {
