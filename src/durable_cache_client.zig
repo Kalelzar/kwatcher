@@ -13,11 +13,13 @@ const Ops = @import("ops.zig").Ops;
 id: []const u8,
 allocator: std.mem.Allocator,
 recorder: ?*Recorder(Ops) = null,
+config_file: config.BaseConfig,
 
-pub fn init(allocator: std.mem.Allocator) !DurableCacheClient {
+pub fn init(allocator: std.mem.Allocator, config_file: config.BaseConfig) !DurableCacheClient {
     return .{
         .allocator = allocator,
         .id = try std.fmt.allocPrint(allocator, "dcc_{x}", .{std.crypto.random.int(u128)}),
+        .config_file = config_file,
     };
 }
 
@@ -32,7 +34,11 @@ pub fn deinit(self: *DurableCacheClient) void {
 
 fn nextFile(self: *DurableCacheClient) ![]const u8 {
     const file_name =
-        try std.fmt.allocPrint(self.allocator, ".recording/{}.rcd", .{std.time.timestamp()});
+        try std.fmt.allocPrint(
+            self.allocator,
+            "{s}/{}.rcd",
+            .{ self.config_file.config.recording_dir, std.time.timestamp() },
+        );
     return file_name;
 }
 
