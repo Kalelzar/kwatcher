@@ -32,6 +32,7 @@ pub const BaseConfig = struct {
     } = .{},
     config: struct {
         debug: bool = false,
+        recording_dir: []const u8 = ".recording",
         heartbeat_interval: u64 = std.time.ns_per_s * 5, //nanoseconds. TODO: Update name.
         metrics_interval_ns: u64 = std.time.ns_per_s * 5, //nanoseconds
         polling_interval: u64 = std.time.ns_per_s / 2, //nanoseconds. TODO: Update name.
@@ -74,6 +75,7 @@ pub const _BaseNullable = config.validate(BaseConfig, struct {
     } = .{},
     config: struct {
         debug: ?bool = null,
+        recording_dir: ?[]const u8 = null,
         heartbeat_interval: ?u64 = null, //nanoseconds
         metrics_interval_ns: ?u64 = null, //nanoseconds
         polling_interval: ?u64 = null, //nanoseconds

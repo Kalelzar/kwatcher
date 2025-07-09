@@ -137,12 +137,12 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
             }
         }
 
-        pub fn durableCacheClientFactory(self: *Self, allocator: std.mem.Allocator) !*DurableCacheClient {
+        pub fn durableCacheClientFactory(self: *Self, allocator: std.mem.Allocator, config_file: config.BaseConfig) !*DurableCacheClient {
             if (self.dcc_cache) |res| {
                 return res;
             } else {
                 const dcc = try allocator.create(DurableCacheClient);
-                dcc.* = try DurableCacheClient.init(allocator);
+                dcc.* = try DurableCacheClient.init(allocator, config_file);
                 errdefer allocator.destroy(dcc);
                 self.dcc_cache = dcc;
                 return self.dcc_cache.?;
@@ -384,14 +384,26 @@ pub fn Server(
         pub fn handleReplay(self: *Self) !void {
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(self.user_deps, &base_injector);
-            var amcl = try user_injector.require(*AmqpClient);
-            var cl = amcl.client();
-            if (amcl.state != .connected) return;
-            defer cl.reset();
+            const cb = try user_injector.require(*CircuitBreakerClient);
+            if (cb.state != .closed) return;
+
+            const base_config = try user_injector.require(config.BaseConfig);
             var internal_arena = try user_injector.require(mem.InternalArena);
             defer internal_arena.reset();
+            var amcl = try AmqpClient.init(
+                internal_arena.allocator(),
+                base_config,
+                client_name,
+            );
+            defer amcl.deinit();
+            var cl = amcl.client();
+            defer cl.reset();
 
-            var manager = try replay.ReplayManager.init(internal_arena.allocator(), ".recording", cl);
+            var manager = try replay.ReplayManager.init(
+                internal_arena.allocator(),
+                base_config.config.recording_dir,
+                cl,
+            );
             defer manager.deinit();
 
             try manager.replay();
@@ -543,12 +555,12 @@ pub fn Server(
                     }
                 }
 
-                self.handlePublish() catch |e| {
-                    log.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
-                    return e;
-                };
                 self.handleReplay() catch |e| {
                     log.err("Encountered an error while handling replaying events: {}. This is likely a bug in KWatcher.", .{e});
+                    return e;
+                };
+                self.handlePublish() catch |e| {
+                    log.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
                     return e;
                 };
                 self.handleConsume(interval) catch |e| {

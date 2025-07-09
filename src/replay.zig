@@ -196,6 +196,7 @@ pub const ReplayManager = struct {
                     var file = try self.replay_dir.createFile(prog, .{});
                     defer file.close();
                     _ = try file.write(std.mem.toBytes(checkpoint)[0..]);
+                    return e;
                 },
                 else => {
                     std.log.err("Replay failed with: {}", .{e});
