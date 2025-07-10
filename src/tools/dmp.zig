@@ -22,10 +22,15 @@ pub fn main() !void {
     defer lc.deinit();
     const client = lc.client();
 
-    try client.connect();
+    var manager = try kwatcher.replay.ReplayManager.init(allocator, path, client);
+    defer manager.deinit();
 
-    var player = try Player.init(allocator, client, path);
-    try player.read();
+    try manager.replay();
 
-    try client.disconnect();
+    //    try client.connect();
+
+    //    var player = try Player.init(allocator, client, path);
+    //    try player.read();
+
+    //    try client.disconnect();
 }

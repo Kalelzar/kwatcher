@@ -51,7 +51,7 @@ const Builder = struct {
         kwatcher_example.addImport("kwatcher", kwatcher);
 
         const kwatcher_dump = b.createModule(.{
-            .root_source_file = b.path("src/dmp.zig"),
+            .root_source_file = b.path("src/tools/dmp.zig"),
             .target = target,
             .optimize = opt,
         });

@@ -1,4 +1,4 @@
-const ClientRegistry = @import("protocol/client-registration/registry.zig");
+const ClientRegistry = @import("../protocol/client-registration/registry.zig");
 
 pub fn Context(comptime Custom: type) type {
     return struct {

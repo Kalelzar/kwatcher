@@ -1,8 +1,11 @@
 const std = @import("std");
-const Client = @import("client.zig");
+
+const schema = @import("../schema.zig");
+
+const Client = @import("../client/client.zig");
+
 const AmqpOps = @import("ops.zig").Ops;
 const Header = @import("recorder.zig").RecordingHeader;
-const schema = @import("schema.zig");
 
 pub fn Reader(comptime Ops: type) type {
     return struct {

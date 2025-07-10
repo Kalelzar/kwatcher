@@ -1,9 +1,11 @@
 const std = @import("std");
+const meta = @import("klib").meta;
+
+const schema = @import("../schema.zig");
+
 const Client = @import("client.zig");
-const schema = @import("schema.zig");
 const ChannelOpts = Client.ChannelOpts;
 const Response = Client.Response;
-const meta = @import("klib").meta;
 
 const CircuitBreakingClient = @This();
 
