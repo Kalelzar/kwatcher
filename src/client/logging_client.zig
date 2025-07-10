@@ -1,8 +1,10 @@
 const std = @import("std");
+
+const schema = @import("../schema.zig");
+
 const Client = @import("client.zig");
 const ChannelOpts = Client.ChannelOpts;
 const Response = Client.Response;
-const schema = @import("schema.zig");
 
 const LoggingClient = @This();
 

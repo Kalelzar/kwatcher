@@ -38,8 +38,8 @@ const std = @import("std");
 
 const klib = @import("klib");
 const meta = klib.meta;
-const mem = @import("mem.zig");
-const schema = @import("schema.zig");
+
+const mem = @import("../mem.zig");
 
 /// A type alias for a context
 const Context = *anyopaque;

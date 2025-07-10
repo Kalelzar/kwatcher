@@ -1,8 +1,9 @@
 /// A dynamic dispatch wrapper for a message client that follows
 /// AMQP 0.9.1 semantics and definitions
 const std = @import("std");
-const schema = @import("schema.zig");
 const amqp = @import("zamqp");
+
+const schema = @import("../schema.zig");
 
 /// The client interface
 const Client = @This();

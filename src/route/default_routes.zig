@@ -1,7 +1,9 @@
 const std = @import("std");
-const schema = @import("schema.zig");
-const mem = @import("mem.zig");
-const metrics = @import("metrics.zig");
+
+const schema = @import("../schema.zig");
+const mem = @import("../mem.zig");
+
+const metrics = @import("../utils/metrics.zig");
 
 pub fn @"publish!:metrics amq.direct/metrics"(
     user_info: schema.UserInfo,

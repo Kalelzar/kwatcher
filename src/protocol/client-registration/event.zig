@@ -1,4 +1,4 @@
-const Timer = @import("../../timer.zig");
+const Timer = @import("../../utils/timer.zig");
 const ClientRegistry = @import("registry.zig");
 
 pub fn announce(timer: Timer, cr: *ClientRegistry) !bool {

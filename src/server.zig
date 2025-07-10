@@ -2,28 +2,28 @@ const std = @import("std");
 const log = std.log.scoped(.kwatcher);
 const klib = @import("klib");
 const meta = klib.meta;
-const DisjointSlice = klib.DisjointSlice;
 
 const schema = @import("schema.zig");
-const config = @import("config.zig");
-const metrics = @import("metrics.zig");
 const mem = @import("mem.zig");
-const Client = @import("client.zig");
-const AmqpClient = @import("amqp_client.zig");
-const DurableCacheClient = @import("durable_cache_client.zig");
-const CircuitBreakerClient = @import("circuit_breaker_client.zig");
 
-const DefaultRoutes = @import("default_routes.zig");
+const config = @import("utils/config.zig");
+const metrics = @import("utils/metrics.zig");
+const InternFmtCache = @import("utils/intern_fmt_cache.zig");
+const Injector = @import("utils/injector.zig").Injector;
+const Timer = @import("utils/timer.zig");
 
-const Injector = @import("injector.zig").Injector;
-const Route = @import("route.zig").Route;
-const context = @import("context.zig");
-const InternFmtCache = @import("intern_fmt_cache.zig");
+const Client = @import("client/client.zig");
+const AmqpClient = @import("client/amqp_client.zig");
+const DurableCacheClient = @import("client/durable_cache_client.zig");
+const CircuitBreakerClient = @import("client/circuit_breaker_client.zig");
+
+const DefaultRoutes = @import("route/default_routes.zig");
+const Route = @import("route/route.zig").Route;
+const context = @import("route/context.zig");
 
 const protocol = @import("protocol/protocol.zig");
-const Timer = @import("timer.zig");
 
-const replay = @import("replay.zig");
+const replay = @import("recording/replay.zig");
 
 fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime client_name: []const u8, comptime client_version: []const u8) type {
     const __ignore = struct {};

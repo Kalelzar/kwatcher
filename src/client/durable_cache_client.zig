@@ -1,14 +1,17 @@
 const std = @import("std");
-const config = @import("config.zig");
-const schema = @import("schema.zig");
+
+const schema = @import("../schema.zig");
+
+const config = @import("../utils/config.zig");
+
+const Recorder = @import("../recording/recorder.zig").Recorder;
+const Ops = @import("../recording/ops.zig").Ops;
+
 const Client = @import("client.zig");
 const ChannelOpts = Client.ChannelOpts;
 const Response = Client.Response;
-const Recorder = @import("recorder.zig").Recorder;
 
 const DurableCacheClient = @This();
-
-const Ops = @import("ops.zig").Ops;
 
 id: []const u8,
 allocator: std.mem.Allocator,

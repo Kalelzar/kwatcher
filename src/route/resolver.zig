@@ -1,6 +1,7 @@
 const std = @import("std");
 const klib = @import("klib");
-const injector = @import("injector.zig");
+
+const injector = @import("../utils/injector.zig");
 
 pub fn Resolver(comptime Container: type) type {
     klib.meta.ensureStruct(Container);

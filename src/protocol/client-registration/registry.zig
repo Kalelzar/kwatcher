@@ -1,4 +1,4 @@
-const Client = @import("../../client.zig");
+const Client = @import("../../client/client.zig");
 const ClientRegistry = @This();
 const RegistrationState = @import("schema.zig").RegistrationState;
 

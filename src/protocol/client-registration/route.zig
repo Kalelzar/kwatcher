@@ -1,9 +1,12 @@
 const std = @import("std");
-const BaseConfig = @import("../../config.zig").BaseConfig;
-const Client = @import("../../client.zig");
+
+const BaseConfig = @import("../../utils/config.zig").BaseConfig;
+const InternFmtCache = @import("../../utils/intern_fmt_cache.zig");
+
+const Client = @import("../../client/client.zig");
 
 const base_schema = @import("../../schema.zig");
-const InternFmtCache = @import("../../intern_fmt_cache.zig");
+
 const schema = @import("schema.zig");
 const ClientRegistry = @import("registry.zig");
 

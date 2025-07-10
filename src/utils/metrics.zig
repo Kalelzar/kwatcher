@@ -4,7 +4,7 @@ const klib = @import("klib");
 const meta = klib.meta;
 const mem = klib.mem;
 
-const schema = @import("schema.zig");
+const schema = @import("../schema.zig");
 
 const Metrics = struct {
     total_memory_allocated: MemUsage,

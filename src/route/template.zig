@@ -35,8 +35,9 @@
 
 const std = @import("std");
 const resolver = @import("resolver.zig");
-const injector = @import("injector.zig");
-const InternFmtCache = @import("intern_fmt_cache.zig");
+
+const injector = @import("../utils/injector.zig");
+const InternFmtCache = @import("../utils/intern_fmt_cache.zig");
 
 /// The type of tokens allowed in a route string
 const TokenType = enum {

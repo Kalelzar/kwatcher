@@ -4,9 +4,10 @@ const log = std.log.scoped(.amqp_client);
 const amqp = @import("zamqp");
 const uuid = @import("uuid");
 
-const schema = @import("schema.zig");
-const config = @import("config.zig");
-const metrics = @import("metrics.zig");
+const schema = @import("../schema.zig");
+const config = @import("../utils/config.zig");
+const metrics = @import("../utils/metrics.zig");
+
 const Client = @import("client.zig");
 
 /// A client for receiving and sending messages over the Advanced Message Queue Protocol (0_9_1)

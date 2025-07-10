@@ -2,12 +2,14 @@ const std = @import("std");
 
 const klib = @import("klib");
 const meta = klib.meta;
-const mem = @import("mem.zig");
 
-const schema = @import("schema.zig");
-const injector = @import("injector.zig");
+const mem = @import("../mem.zig");
+const schema = @import("../schema.zig");
+
+const injector = @import("../utils/injector.zig");
+const InternFmtCache = @import("../utils/intern_fmt_cache.zig");
+
 const resolver = @import("resolver.zig");
-const InternFmtCache = @import("intern_fmt_cache.zig");
 const template = @import("template.zig");
 const Template = template.Template;
 const routes = @import("route.zig");
