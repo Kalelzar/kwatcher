@@ -22,6 +22,10 @@ pub fn Reader(comptime Ops: type) type {
         }
 
         pub fn init(allocator: std.mem.Allocator, path: []const u8) !Self {
+            if (std.fs.path.dirname(path)) |d| {
+                try std.fs.cwd().makePath(d);
+            }
+
             const file = try std.fs.cwd().openFile(path, .{});
             defer file.close();
             const buffer = try file.readToEndAlloc(allocator, 128 * 1024 * 1024 * 1024);

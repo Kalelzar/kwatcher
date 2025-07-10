@@ -19,6 +19,11 @@ pub fn Recorder(comptime Ops: type) type {
         pub fn init(allocator: std.mem.Allocator, filepath: []const u8) !Self {
             const path = try std.mem.concat(allocator, u8, &.{ filepath, ".part" });
             errdefer allocator.free(path);
+
+            if (std.fs.path.dirname(filepath)) |d| {
+                try std.fs.cwd().makePath(d);
+            }
+
             var file = try std.fs.cwd().createFile(path, .{ .exclusive = true });
             errdefer file.close();
             var self: Self = .{
