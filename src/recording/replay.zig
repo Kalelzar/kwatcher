@@ -121,6 +121,7 @@ pub const ReplayManager = struct {
     client: Client,
 
     pub fn init(allocator: std.mem.Allocator, replay_dir_path: []const u8, client: Client) !ReplayManager {
+        try std.fs.cwd().makePath(replay_dir_path);
         var dir = try std.fs.cwd().openDir(replay_dir_path, .{ .iterate = true });
         errdefer dir.close();
         return .{
