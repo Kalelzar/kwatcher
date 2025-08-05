@@ -12,9 +12,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup
         run: |
-          apk add --no-cache zig rabbitmq-c-dev libarchive-tools
-          apk del tar
-          ln -s /usr/bin/bsdtar /usr/bin/tar
+          apk add --no-cache zig rabbitmq-c-dev tar
       - name: Zig cache restore
         id: zig-cache
         uses: actions/cache/restore@v4
