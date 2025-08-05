@@ -615,7 +615,7 @@ test "expect `publishHandler` to create a valid publish route handler" {
     };
 
     const metadata: Metadata = comptime Gen.metadataFromHandler(Handler.handle);
-    const handle = Gen.publishHandler(metadata, Handler.handle);
+    const handle = Gen.publishHandler(metadata, Handler.handle, true);
     var ctx: struct { bind: *Binding, arena: *mem.InternalArena } = .{
         .bind = &binding,
         .arena = &arena,
@@ -661,7 +661,7 @@ test "expect `publishHandler` to allow customizing options" {
     };
 
     const metadata: Metadata = comptime Gen.metadataFromHandler(Handler.handle);
-    const handle = Gen.publishHandler(metadata, Handler.handle);
+    const handle = Gen.publishHandler(metadata, Handler.handle, true);
     var ctx: struct { bind: *Binding, arena: *mem.InternalArena } = .{
         .bind = &binding,
         .arena = &arena,
@@ -703,7 +703,7 @@ test "expect `publishHandler` to cancel if handler returns null" {
     };
 
     const metadata: Metadata = comptime Gen.metadataFromHandler(Handler.handle);
-    const handle = Gen.publishHandler(metadata, Handler.handle);
+    const handle = Gen.publishHandler(metadata, Handler.handle, true);
     var ctx: struct { bind: *Binding, arena: *mem.InternalArena } = .{
         .bind = &binding,
         .arena = &arena,
