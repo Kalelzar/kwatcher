@@ -1,0 +1,41 @@
+name: Deploy
+on:
+  push:
+    branches:
+      - 'master'
+jobs:
+  build:
+    runs-on: docker
+    strategy:
+      fail-fast: false
+      matrix:
+        targets:
+          - aarch64-linux-gnu
+          - x86_64-linux-gnu
+          - x86_64-windows
+    container:
+      image: git.kalelzar.xyz/kalelzar/kwatcher-build:0.2-alpine-25.5
+      credentials:
+        username: ${{secrets.USER}}
+        password: ${{secrets.TOKEN}}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          token: ${{secrets.FETCH_TOKEN}}
+      - name: Build
+        run: zig build -Doptimize=ReleaseFast -Dtarget=${{matrix.targets}} --summary all 
+      - name: Publish
+        run: |
+          version="$(cat build.zig.zon | grep "\.version" | sed -E 's/.*"(.*)".*/\1/')"
+          commit="${{forge.sha}}"
+          packageVersion="$version+$commit"
+          tarball="kwatcher-${{ matrix.targets }}.tar"
+          cd zig-out/bin
+          tar -cf "../../$tarball" .
+          cd ../..
+          xz "$tarball"
+          curl --user ${{secrets.USER}}:${{secrets.TOKEN}} \
+               --upload-file "$tarball.xz" \
+               "https://git.kalelzar.xyz/api/packages/${{secrets.USER}}/generic/kwatcher/${packageVersion}/$tarball.xz"

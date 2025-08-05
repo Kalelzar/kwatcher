@@ -17,6 +17,7 @@ const Builder = struct {
         const check_step = b.step("check", "");
 
         const klib = b.dependency("klib", .{ .target = target, .optimize = opt }).module("klib");
+        const rmq = b.dependency("rabbitmq_c", .{ .target = target, .optimize = opt }).artifact("rabbitmq-c-static");
         const zamqp = b.dependency("zamqp", .{ .target = target, .optimize = opt }).module("zamqp");
         const uuid = b.dependency("uuid", .{ .target = target, .optimize = opt }).module("uuid");
         const metrics = b.dependency("metrics", .{ .target = target, .optimize = opt }).module("metrics");
@@ -29,6 +30,7 @@ const Builder = struct {
         kwatcher.addImport("uuid", uuid);
         kwatcher.addImport("metrics", metrics);
         kwatcher.addImport("klib", klib);
+        kwatcher.linkLibrary(rmq);
         kwatcher.link_libc = true;
 
         const kwatcher_test = b.addModule("test", .{
@@ -76,8 +78,6 @@ const Builder = struct {
     ) void {
         _ = self;
         step.linkLibC();
-        step.addLibraryPath(.{ .cwd_relative = "." });
-        step.linkSystemLibrary("rabbitmq");
     }
 
     fn addExecutable(self: *Builder, name: []const u8, root_module: *std.Build.Module) *std.Build.Step.Compile {
@@ -136,9 +136,6 @@ pub fn build(b: *std.Build) !void {
         .root_module = builder.kwatcher_test,
         .name = "test",
     });
-
-    lib_unit_tests.addLibraryPath(.{ .cwd_relative = "." });
-    lib_unit_tests.linkSystemLibrary("rabbitmq");
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
