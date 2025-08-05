@@ -1,0 +1,19 @@
+name: Build and Test
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  build:
+    runs-on: docker
+    container:
+      image: node:24.5-alpine3.22
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        run: apk add --no-cache zig rabbitmq-c-dev
+      - name: Check
+        run: zig build check
+      - name: Test
+        run: zig build test
+
