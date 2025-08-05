@@ -12,8 +12,21 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup
         run: apk add --no-cache zig rabbitmq-c-dev
+      - name: Zig cache restore
+        id: zig-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /root/.cache/zig
+          key: zig-cache
       - name: Check
         run: zig build check
       - name: Test
         run: zig build test
+      - name: Zig cache save
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /root/.cache/zig
+          key: zig-cache
 
