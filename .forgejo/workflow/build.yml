@@ -1,0 +1,12 @@
+name: Build and Test
+on: push
+jobs:
+  build:
+    runs-on: docker
+    strategy:
+      matrix:
+        variant: ['test1', 'test2']
+    container:
+      image: alpine:3.22
+    steps:
+      - run: echo "Test ${{matrix.variant}}"
