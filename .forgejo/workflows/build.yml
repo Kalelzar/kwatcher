@@ -6,13 +6,16 @@ jobs:
   build:
     runs-on: docker
     container:
-      image: node:24.5-alpine3.22
+      image: git.kalelzar.xyz/kalelzar/kwatcher-build:0.2-alpine-25.5
+      credentials:
+        username: ${{secrets.USER}}
+        password: ${{secrets.TOKEN}}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Setup
-        run: |
-          apk add --no-cache zig rabbitmq-c-dev tar
+        with:
+          submodules: true
+          token: ${{secrets.FETCH_TOKEN}}
       - name: Zig cache restore
         id: zig-cache
         uses: actions/cache/restore@v4
@@ -21,13 +24,14 @@ jobs:
             /root/.cache/zig
           key: zig-cache
       - name: Check
-        run: zig build check
+        run: zig build check --summary all
       - name: Test
-        run: zig build test
+        run: zig build test --summary all
       - name: Zig cache save
         uses: actions/cache/save@v4
         with:
           path: |
             /root/.cache/zig
           key: zig-cache
+
 
