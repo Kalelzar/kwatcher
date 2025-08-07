@@ -30,3 +30,7 @@ pub const inject = @import("utils/injector.zig");
 pub const metrics = @import("utils/metrics.zig");
 pub const InternFmtCache = @import("utils/intern_fmt_cache.zig");
 pub const Timer = @import("utils/timer.zig");
+
+comptime {
+    @import("std").testing.refAllDecls(@This());
+}
