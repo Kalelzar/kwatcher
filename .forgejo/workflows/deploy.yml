@@ -24,6 +24,15 @@ jobs:
         with:
           submodules: true
           token: ${{secrets.FETCH_TOKEN}}
+      - name: Cache build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            zig-cache
+            ~/.cache/zig
+          key: ${{ forge.repository }}-zig-${{ matrix.targets }}-${{ hashFiles('build.zig.zon') }}
+          restore-keys: |
+            ${{ forge.repository }}-zig-${{ matrix.targets }}-
       - name: Build
         run: zig build -Ddump -Doptimize=ReleaseFast -Dtarget=${{matrix.targets}} --summary all 
       - name: Publish
