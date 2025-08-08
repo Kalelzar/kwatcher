@@ -3,6 +3,7 @@ const std = @import("std");
 const schema = @import("../schema.zig");
 
 const config = @import("../utils/config.zig");
+const metrics = @import("../utils/metrics.zig");
 
 const Recorder = @import("../recording/recorder.zig").Recorder;
 const Ops = @import("../recording/ops.zig").Ops;
@@ -69,12 +70,19 @@ pub fn connect(ptr: *anyopaque) anyerror!void {
     errdefer recorder.deinit();
     self.recorder = try self.allocator.create(Recorder(Ops));
     self.recorder.?.* = recorder;
+
+    metrics.recordingCreated() catch {};
 }
 
 /// Disconnect from the broker.
 fn disconnect(ptr: *anyopaque) anyerror!void {
     const self = getSelf(ptr);
     if (self.recorder) |r| {
+        // Get file size before closing
+        if (r.file.getPos()) |pos| {
+            metrics.recordingFileSize(pos) catch {};
+        } else |_| {}
+
         r.deinit();
         self.allocator.destroy(r);
         self.recorder = null;
@@ -88,6 +96,7 @@ fn openChannel(ptr: *anyopaque, name: []const u8) anyerror!void {
     var r = self.recorder orelse return error.InvalidState;
     try r.op(.open_channel);
     try r.str(name);
+    metrics.recordedOperation("open_channel") catch {};
 }
 /// Close an open channel.
 fn closeChannel(ptr: *anyopaque, name: []const u8) anyerror!void {
@@ -95,6 +104,7 @@ fn closeChannel(ptr: *anyopaque, name: []const u8) anyerror!void {
     var r = self.recorder orelse return error.InvalidState;
     try r.op(.close_channel);
     try r.str(name);
+    metrics.recordedOperation("close_channel") catch {};
 }
 /// Declare a new ephemeral queue.
 /// Returns the name of the newly generated queue.
@@ -104,6 +114,7 @@ fn declareEphemeralQueue(ptr: *anyopaque) anyerror![]const u8 {
     const anchor = try r.anchor();
     try r.op(.declare_ephemeral_queue);
     try r.str(anchor);
+    metrics.recordedOperation("declare_ephemeral_queue") catch {};
     return anchor;
 }
 /// Declare a new durable queue with the given name.
@@ -113,6 +124,7 @@ fn declareDurableQueue(ptr: *anyopaque, queue: []const u8) anyerror![]const u8 {
     var r = self.recorder orelse return error.InvalidState;
     try r.op(.declare_durable_queue);
     try r.str(queue);
+    metrics.recordedOperation("declare_durable_queue") catch {};
     return queue;
 }
 /// Binds a consumer with a routing key to a given queue over an exchange.
@@ -135,6 +147,7 @@ fn bind(
     try r.strOpt(opts.channel_name);
     const consumer_tag = try r.anchor();
     try r.str(consumer_tag);
+    metrics.recordedOperation("bind") catch {};
     return consumer_tag;
 }
 /// Unbinds a consumer from the broker.
@@ -148,6 +161,7 @@ fn unbind(
     try r.op(.unbind);
     try r.str(consumer_tag);
     try r.strOpt(opts.channel_name);
+    metrics.recordedOperation("unbind") catch {};
 }
 
 /// You can't consume a message while recording
@@ -176,6 +190,7 @@ fn publish(
     try r.strOpt(message.options.reply_to);
     try r.strOpt(message.options.correlation_id);
     try r.byteOpt(u64, message.options.expiration);
+    metrics.recordedOperation("publish") catch {};
 }
 
 /// This is a NOOP.
