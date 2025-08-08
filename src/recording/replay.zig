@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const schema = @import("../schema.zig");
+const metrics = @import("../utils/metrics.zig");
 
 const Client = @import("../client/client.zig");
 
@@ -188,6 +189,8 @@ pub const ReplayManager = struct {
 
             std.log.info("Replaying {s} from '{s}'", .{ recording, path });
 
+            const start_time = std.time.microTimestamp();
+
             try self.client.connect();
             defer self.client.disconnect() catch {};
 
@@ -198,19 +201,30 @@ pub const ReplayManager = struct {
 
             std.log.info("Resuming from position: {}", .{resumepoint});
 
+            if (resumepoint > 0) {
+                metrics.replayResumption() catch {};
+            }
+
             player.resumeFromCheckpoint(resumepoint) catch |e| switch (e) {
                 error.Disconnected => {
                     const checkpoint = player.reader.checkpoint();
                     var file = try self.replay_dir.createFile(prog, .{});
                     defer file.close();
                     _ = try file.write(std.mem.toBytes(checkpoint)[0..]);
+                    metrics.replayFailure() catch {};
                     return e;
                 },
                 else => {
                     std.log.err("Replay failed with: {}", .{e});
+                    metrics.replayFailure() catch {};
                     return e;
                 },
             };
+
+            const end_time = std.time.microTimestamp();
+            const duration = @as(u64, @intCast(end_time - start_time));
+            metrics.replayDuration(duration) catch {};
+            metrics.recordingReplayed() catch {};
 
             std.log.info("Replay successful. Deleting file...", .{});
             try self.replay_dir.deleteFile(recording);

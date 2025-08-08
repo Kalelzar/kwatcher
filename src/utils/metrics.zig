@@ -23,6 +23,14 @@ const Metrics = struct {
     time_per_cycle: Cycle,
     publishing_on: PublishQueue,
     consuming_from: ConsumeQueue,
+    recordings_created: RecordingsCreated,
+    recordings_replayed: RecordingsReplayed,
+    recording_failures: RecordingFailures,
+    replay_failures: ReplayFailures,
+    replay_resumptions: ReplayResumptions,
+    recording_file_size_bytes: RecordingFileSize,
+    replay_duration_us: ReplayDuration,
+    recorded_operations: RecordedOperations,
 
     const ClientLabel = struct { client_name: []const u8, client_version: []const u8 };
     const QueueLabel = struct { queue: []const u8 };
@@ -30,6 +38,8 @@ const Metrics = struct {
     const ExchangeLabel = struct { exchange: []const u8 };
     const TargetLabel = meta.MergeStructs(QueueLabel, ExchangeLabel);
     const FullLabel = meta.MergeStructs(ClientLabel, TargetLabel);
+    const OpLabel = struct { operation: []const u8 };
+    const ClientWithOpLabel = meta.MergeStructs(ClientLabel, OpLabel);
 
     const MemUsage = m.GaugeVec(i64, ClientLabel);
     const Publish = m.CounterVec(u64, FullLabel);
@@ -46,6 +56,14 @@ const Metrics = struct {
     const Cycle = m.GaugeVec(u64, ClientLabel);
     const PublishQueue = m.GaugeVec(u1, FullLabel);
     const ConsumeQueue = m.GaugeVec(u1, ClientWithQueueLabel);
+    const RecordingsCreated = m.CounterVec(u64, ClientLabel);
+    const RecordingsReplayed = m.CounterVec(u64, ClientLabel);
+    const RecordingFailures = m.CounterVec(u64, ClientLabel);
+    const ReplayFailures = m.CounterVec(u64, ClientLabel);
+    const ReplayResumptions = m.CounterVec(u64, ClientLabel);
+    const RecordingFileSize = m.GaugeVec(u64, ClientLabel);
+    const ReplayDuration = m.GaugeVec(u64, ClientLabel);
+    const RecordedOperations = m.CounterVec(u64, ClientWithOpLabel);
 
     pub fn deinit(self: *Metrics) void {
         self.acked_messages.deinit();
@@ -62,6 +80,14 @@ const Metrics = struct {
         self.rejected_messages.deinit();
         self.time_per_cycle.deinit();
         self.total_published_messages.deinit();
+        self.recordings_created.deinit();
+        self.recordings_replayed.deinit();
+        self.recording_failures.deinit();
+        self.replay_failures.deinit();
+        self.replay_resumptions.deinit();
+        self.recording_file_size_bytes.deinit();
+        self.replay_duration_us.deinit();
+        self.recorded_operations.deinit();
     }
 };
 
@@ -175,6 +201,54 @@ pub fn initialize(allocator: std.mem.Allocator, client_name: []const u8, client_
             allocator,
             "kwatcher_queue_consume",
             .{ .help = "The queues from which this watcher consumesx messages." },
+            opts,
+        ),
+        .recordings_created = try Metrics.RecordingsCreated.init(
+            allocator,
+            "kwatcher_recordings_created_total",
+            .{ .help = "The total number of recording files created by this watcher." },
+            opts,
+        ),
+        .recordings_replayed = try Metrics.RecordingsReplayed.init(
+            allocator,
+            "kwatcher_recordings_replayed_total",
+            .{ .help = "The total number of recording files successfully replayed by this watcher." },
+            opts,
+        ),
+        .recording_failures = try Metrics.RecordingFailures.init(
+            allocator,
+            "kwatcher_recording_failures_total",
+            .{ .help = "The total number of recording failures encountered by this watcher." },
+            opts,
+        ),
+        .replay_failures = try Metrics.ReplayFailures.init(
+            allocator,
+            "kwatcher_replay_failures_total",
+            .{ .help = "The total number of replay failures encountered by this watcher." },
+            opts,
+        ),
+        .replay_resumptions = try Metrics.ReplayResumptions.init(
+            allocator,
+            "kwatcher_replay_resumptions_total",
+            .{ .help = "The total number of replay resumptions from checkpoints by this watcher." },
+            opts,
+        ),
+        .recording_file_size_bytes = try Metrics.RecordingFileSize.init(
+            allocator,
+            "kwatcher_recording_file_size_bytes",
+            .{ .help = "The current size in bytes of the active recording file." },
+            opts,
+        ),
+        .replay_duration_us = try Metrics.ReplayDuration.init(
+            allocator,
+            "kwatcher_replay_duration_microseconds",
+            .{ .help = "The duration in microseconds of the last completed replay operation." },
+            opts,
+        ),
+        .recorded_operations = try Metrics.RecordedOperations.init(
+            allocator,
+            "kwatcher_recorded_operations_total",
+            .{ .help = "The total number of operations recorded by type." },
             opts,
         ),
     };
@@ -324,4 +398,41 @@ pub fn instrumentAllocator(allocator: std.mem.Allocator) mem.InstrumentedAllocat
         allocator,
         shim,
     );
+}
+
+pub fn recordingCreated() !void {
+    try metrics.recordings_created.incr(client_label);
+}
+
+pub fn recordingReplayed() !void {
+    try metrics.recordings_replayed.incr(client_label);
+}
+
+pub fn recordingFailure() !void {
+    try metrics.recording_failures.incr(client_label);
+}
+
+pub fn replayFailure() !void {
+    try metrics.replay_failures.incr(client_label);
+}
+
+pub fn replayResumption() !void {
+    try metrics.replay_resumptions.incr(client_label);
+}
+
+pub fn recordingFileSize(size_bytes: u64) !void {
+    try metrics.recording_file_size_bytes.set(client_label, size_bytes);
+}
+
+pub fn replayDuration(duration_us: u64) !void {
+    try metrics.replay_duration_us.set(client_label, duration_us);
+}
+
+pub fn recordedOperation(operation: []const u8) !void {
+    const label: Metrics.ClientWithOpLabel = .{
+        .client_name = client_label.client_name,
+        .client_version = client_label.client_version,
+        .operation = operation,
+    };
+    try metrics.recorded_operations.incr(label);
 }
