@@ -3,6 +3,8 @@ on:
   push:
     branches:
       - 'master'
+    tags:
+      - '*'
 jobs:
   build:
     runs-on: docker
@@ -39,7 +41,11 @@ jobs:
         run: |
           version="$(cat build.zig.zon | grep "\.version" | sed -E 's/.*"(.*)".*/\1/')"
           commit="${{forge.sha}}"
-          packageVersion="$version+$commit"
+          if [ "${{forge.ref_type}}" = "tag" ]; then
+            packageVersion="${{forge.ref_name}}"
+          else
+            packageVersion="$version+$commit"
+          fi
           tarball="kwatcher-${{ matrix.targets }}.tar"
           cd zig-out/bin
           tar -cf "../../$tarball" .
