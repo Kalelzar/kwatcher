@@ -14,7 +14,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
           token: ${{secrets.FETCH_TOKEN}}
       - name: Zig cache restore
         id: zig-cache
