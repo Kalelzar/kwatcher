@@ -26,15 +26,10 @@ jobs:
         with:
           submodules: recursive
           token: ${{secrets.FETCH_TOKEN}}
-      - name: Cache build artifacts
-        uses: actions/cache@v4
+      - name: Get Zig
+        uses: https://github.com/mlugg/setup-zig@v2
         with:
-          path: |
-            zig-cache
-            ~/.cache/zig
-          key: ${{ forge.repository }}-zig-${{ matrix.targets }}-${{ hashFiles('build.zig.zon') }}
-          restore-keys: |
-            ${{ forge.repository }}-zig-${{ matrix.targets }}-
+          cache-key: ${{ matrix.targets }}
       - name: Build
         run: zig build -Ddump -Doptimize=ReleaseFast -Dtarget=${{matrix.targets}} --summary all 
       - name: Publish
