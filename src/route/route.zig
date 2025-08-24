@@ -83,7 +83,7 @@ pub fn Route(PathParams: type) type {
             meta.ensureStruct(ContainerType);
 
             const routes = comptime blk: {
-                @setEvalBranchQuota(@typeInfo(ContainerType).@"struct".decls.len * 100);
+                @setEvalBranchQuota(20000);
                 var res: []const Self = &.{};
 
                 for (std.meta.declarations(ContainerType)) |d| {

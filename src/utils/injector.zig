@@ -97,7 +97,7 @@ pub const Injector = struct {
 
             const F = struct {
                 fn dispose_handler(ptr: *anyopaque) void {
-                    const ctx: *ContextType = @constCast(@ptrCast(@alignCast(ptr)));
+                    const ctx: *ContextType = @ptrCast(@alignCast(@constCast(ptr)));
                     @field(ContextType, "deconstruct")(ctx);
                 }
             };
@@ -146,7 +146,7 @@ pub const Injector = struct {
             ///   - Check if the requested type was the context itself, and if it is return that.
             /// 3. If no value was returned by this point, the context does not have it. Return null.
             fn resolve(type_erased_context: Context, type_id: meta.TypeId) ?*anyopaque {
-                var typed_context: ContextPtrType = @constCast(@ptrCast(@alignCast(type_erased_context)));
+                var typed_context: ContextPtrType = @ptrCast(@alignCast(@constCast(type_erased_context)));
 
                 inline for (std.meta.fields(ContextType)) |f| {
                     // What do we do if a context has two fields of the same type?
@@ -247,7 +247,7 @@ pub const Injector = struct {
         };
 
         return .{
-            .context = @constCast(@ptrCast(context)),
+            .context = @ptrCast(@constCast(context)),
             .resolver = &InternalResolver.resolve,
             .resolver_factory = &InternalResolver.resolveFactory,
             .dispose = dispose,
@@ -283,16 +283,16 @@ pub const Injector = struct {
         }
 
         if (self.resolver(self.context, meta.typeId(T))) |ptr| {
-            return @ptrCast(@constCast(@alignCast(ptr)));
+            return @ptrCast(@alignCast(@constCast(ptr)));
         }
 
         if (comptime @typeInfo(T).pointer.is_const) {
             if (self.resolver(self.context, meta.typeId(*@typeInfo(T).pointer.child))) |ptr| {
-                return @ptrCast(@constCast(@alignCast(ptr)));
+                return @ptrCast(@alignCast(@constCast(ptr)));
             }
         }
         if (self.resolver_factory(meta.typeId(T))) |factory| {
-            return @ptrCast(@constCast(@alignCast(try factory(self))));
+            return @ptrCast(@alignCast(@constCast(try factory(self))));
         }
 
         return if (self.parent) |p| try p.get(T) else null;

@@ -29,8 +29,6 @@ pub fn build(b: *std.Build) !void {
 
     const tests = b.addTest(.{
         .root_module = kwatcher_library,
-        .target = target,
-        .optimize = optimize,
     });
 
     // Artifacts:
@@ -50,9 +48,10 @@ pub fn build(b: *std.Build) !void {
         b.installArtifact(dump);
     }
 
-    const lib = b.addStaticLibrary(.{
+    const lib = b.addLibrary(.{
         .name = "kwatcher",
         .root_module = kwatcher_library,
+        .linkage = .static,
     });
     if (build_static_library) {
         b.installArtifact(lib);
@@ -99,7 +98,6 @@ pub fn build(b: *std.Build) !void {
     // 1st Party:
     const klib = b.dependency("klib", .{ .target = target, .optimize = optimize }).module("klib");
     // 3rd Party:
-    const rmq = b.dependency("rabbitmq_c", .{ .target = target, .optimize = optimize }).artifact("rabbitmq-c-static");
     const zamqp = b.dependency("zamqp", .{ .target = target, .optimize = optimize }).module("zamqp");
     const uuid = b.dependency("uuid", .{ .target = target, .optimize = optimize }).module("uuid");
     const metrics = b.dependency("metrics", .{ .target = target, .optimize = optimize }).module("metrics");
@@ -113,5 +111,4 @@ pub fn build(b: *std.Build) !void {
     kwatcher_library.addImport("zamqp", zamqp);
     kwatcher_library.addImport("uuid", uuid);
     kwatcher_library.addImport("metrics", metrics);
-    kwatcher_library.linkLibrary(rmq);
 }

@@ -8,16 +8,16 @@ const Response = Client.Response;
 
 const LoggingClient = @This();
 
-file: std.fs.File,
+writer: *std.io.Writer,
 
-pub fn init(file: std.fs.File) LoggingClient {
+pub fn init(writer: *std.io.Writer) LoggingClient {
     return .{
-        .file = file,
+        .writer = writer,
     };
 }
 
 pub fn deinit(self: *LoggingClient) void {
-    self.file.close();
+    self.writer.flush() catch {};
 }
 
 pub fn client(self: *LoggingClient) Client {
@@ -55,36 +55,33 @@ fn getId(ptr: *anyopaque) []const u8 {
 
 pub fn connect(ptr: *anyopaque) anyerror!void {
     const self = getSelf(ptr);
-    _ = try self.file.write("connect()\n");
+    _ = try self.writer.write("connect()\n");
 }
 
 fn disconnect(ptr: *anyopaque) anyerror!void {
     const self = getSelf(ptr);
-    _ = try self.file.write("disconnect()\n");
+    _ = try self.writer.write("disconnect()\n");
 }
 
 fn openChannel(ptr: *anyopaque, name: []const u8) anyerror!void {
     const self = getSelf(ptr);
-    var buf: [256]u8 = undefined;
-    _ = try self.file.write(try std.fmt.bufPrint(&buf, "openChannel({s})\n", .{name}));
+    _ = try self.writer.print("openChannel({s})\n", .{name});
 }
 
 fn closeChannel(ptr: *anyopaque, name: []const u8) anyerror!void {
     const self = getSelf(ptr);
-    var buf: [256]u8 = undefined;
-    _ = try self.file.write(try std.fmt.bufPrint(&buf, "closeChannel({s})\n", .{name}));
+    _ = try self.writer.print("closeChannel({s})\n", .{name});
 }
 
 fn declareEphemeralQueue(ptr: *anyopaque) anyerror![]const u8 {
     const self = getSelf(ptr);
-    _ = try self.file.write("declareEphemeralQueue()\n");
+    _ = try self.writer.write("declareEphemeralQueue()\n");
     return "ephemeral";
 }
 
 fn declareDurableQueue(ptr: *anyopaque, queue: []const u8) anyerror![]const u8 {
     const self = getSelf(ptr);
-    var buf: [256]u8 = undefined;
-    _ = try self.file.write(try std.fmt.bufPrint(&buf, "declareDurableQueue({s})\n", .{queue}));
+    _ = try self.writer.print("declareDurableQueue({s})\n", .{queue});
     return queue;
 }
 
@@ -96,9 +93,7 @@ fn bind(
     opts: ChannelOpts,
 ) anyerror![]const u8 {
     const self = getSelf(ptr);
-    var buf: [256]u8 = undefined;
-    _ = try self.file.write(try std.fmt.bufPrint(
-        &buf,
+    _ = try self.writer.print(
         "bind({s}): queue({s}) exchange({s}) opts.channel({s})\n",
         .{
             route,
@@ -106,7 +101,7 @@ fn bind(
             exchange,
             opts.channel_name orelse "default",
         },
-    ));
+    );
     return "consumer_tag";
 }
 
@@ -117,21 +112,17 @@ fn unbind(
     opts: ChannelOpts,
 ) anyerror!void {
     const self = getSelf(ptr);
-    var buf: [256]u8 = undefined;
-    _ = try self.file.write(try std.fmt.bufPrint(&buf, "unbind({s}): opts.channel({s})\n", .{
+    _ = try self.writer.print("unbind({s}): opts.channel({s})\n", .{
         consumer_tag,
         opts.channel_name orelse "default",
-    }));
+    });
 }
 
 /// You can't consume a message while recording
 // This is a noop and always returns null
 fn consume(ptr: *anyopaque, timeout_ns: i64) anyerror!?Response {
     const self = getSelf(ptr);
-    var buf: [256]u8 = undefined;
-    _ = try self.file.write(
-        try std.fmt.bufPrint(&buf, "consume({})\n", .{timeout_ns}),
-    );
+    _ = try self.writer.print("consume({})\n", .{timeout_ns});
     return null;
 }
 
@@ -142,22 +133,18 @@ fn publish(
     opts: ChannelOpts,
 ) anyerror!void {
     const self = getSelf(ptr);
-    var buf: [4096]u8 = undefined;
-    _ = try self.file.write(
-        try std.fmt.bufPrint(
-            &buf,
-            "publish({s}): exchange({s}) reply_to({s}) correlation_id({s}) expiration({}) norecord({}) opts.channel({s})\n\t{s}\n",
-            .{
-                message.options.routing_key,
-                message.options.exchange,
-                message.options.reply_to orelse "none",
-                message.options.correlation_id orelse "default",
-                message.options.expiration orelse 0,
-                message.options.norecord,
-                opts.channel_name orelse "default",
-                message.body,
-            },
-        ),
+    _ = try self.writer.print(
+        "publish({s}): exchange({s}) reply_to({s}) correlation_id({s}) expiration({}) norecord({}) opts.channel({s})\n\t{s}\n",
+        .{
+            message.options.routing_key,
+            message.options.exchange,
+            message.options.reply_to orelse "none",
+            message.options.correlation_id orelse "default",
+            message.options.expiration orelse 0,
+            message.options.norecord,
+            opts.channel_name orelse "default",
+            message.body,
+        },
     );
 }
 
@@ -188,5 +175,5 @@ fn reject(
 /// Frees any non-essential internal buffers.
 fn reset(ptr: *anyopaque) void {
     const self = getSelf(ptr);
-    _ = self;
+    self.writer.flush() catch {};
 }

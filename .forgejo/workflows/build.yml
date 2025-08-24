@@ -14,24 +14,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
           token: ${{secrets.FETCH_TOKEN}}
-      - name: Zig cache restore
-        id: zig-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            /root/.cache/zig
-          key: zig-cache
+      - name: Get Zig
+        uses: https://github.com/mlugg/setup-zig@v2
       - name: Check
         run: zig build check --summary all
       - name: Test
         run: zig build test --summary all
-      - name: Zig cache save
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            /root/.cache/zig
-          key: zig-cache
 
 

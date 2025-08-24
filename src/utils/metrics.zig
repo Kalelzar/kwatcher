@@ -371,20 +371,21 @@ pub fn free(size: usize) void {
     metrics.total_memory_allocated.incrBy(client_label, -@as(i64, @intCast(size))) catch unreachable;
 }
 
-pub fn write(writer: anytype) !void {
+pub fn write(writer: *std.io.Writer) !void {
     return m.write(&metrics, writer);
 }
 
 pub fn v1(arena_allocator: std.mem.Allocator, client_info: schema.Client.V1, user_info: schema.User.V1) !schema.Metrics.V1() {
-    var arr = std.ArrayListUnmanaged(u8){};
+    var writer = std.io.Writer.Allocating.init(arena_allocator);
+    defer writer.deinit();
+    // NOTE: It feels like we are copying the buffer one too many times here... I am sure that can be improved.
 
-    const writer = arr.writer(arena_allocator);
-    try write(writer);
+    try write(&writer.writer);
     return .{
         .timestamp = std.time.microTimestamp(),
         .client = client_info,
         .user = user_info,
-        .metrics = arr.items,
+        .metrics = try writer.toOwnedSlice(),
     };
 }
 

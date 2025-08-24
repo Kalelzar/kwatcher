@@ -583,7 +583,7 @@ pub fn Server(
                 else => return e,
             };
 
-            std.time.sleep(self.backoff * std.time.ns_per_s);
+            std.Thread.sleep(self.backoff * std.time.ns_per_s);
             try client.connect();
             try self.configure(); // if this fails we let it abort.
         }
@@ -627,7 +627,7 @@ pub fn Server(
                             "Got disconnected with: {}. Retrying ({}) after {} seconds.",
                             .{ last_error, self.retries, self.backoff },
                         );
-                        std.time.sleep(self.backoff * std.time.ns_per_s);
+                        std.Thread.sleep(self.backoff * std.time.ns_per_s);
 
                         self.backoff *= 2;
                         self.retries += 1;
