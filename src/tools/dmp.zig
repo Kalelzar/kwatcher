@@ -14,10 +14,10 @@ pub fn main() !void {
     _ = args.skip();
 
     const path = args.next() orelse return error.MissingFile;
-
-    std.log.info("Dumping: {s}", .{path});
-
-    const stdout = std.io.getStdOut();
+    var stdout_f = std.fs.File.stdin();
+    var buf: [1024 * 64]u8 = undefined;
+    var stdout_writer = stdout_f.writer(&buf);
+    const stdout = &stdout_writer.interface;
     var lc = kwatcher.LoggingClient.init(stdout);
     defer lc.deinit();
     const client = lc.client();
@@ -26,6 +26,7 @@ pub fn main() !void {
     defer manager.deinit();
 
     try manager.replay();
+    try stdout.flush();
 
     //    try client.connect();
 

@@ -1,4 +1,3 @@
-[submodule "vendor/rabbitmq-c"]
-	path = vendor/rabbitmq-c
-	url = https://git.kalelzar.xyz/kalelzar/rabbitmq-c.git
-	branch = zig-build
+[submodule "vendor/zamqp"]
+	path = vendor/zamqp
+	url = https://github.com/Kalelzar/zamqp.git

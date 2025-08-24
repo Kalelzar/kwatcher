@@ -446,9 +446,13 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
 
             if (comptime @hasField(ActualResultType, "schema") and @hasField(ActualResultType, "options") and @FieldType(ActualResultType, "options") == schema.ConfigurableMessageOptions) {
                 const opts: schema.ConfigurableMessageOptions = actual_result.options;
-                const body = try std.json.stringifyAlloc(alloc, actual_result.schema, .{});
+                const fmt = std.json.fmt(actual_result.schema, .{});
+                var writer = std.io.Writer.Allocating.init(alloc);
+                defer writer.deinit();
+                const interface = &writer.writer;
+                try fmt.format(interface);
                 return .{
-                    .body = body,
+                    .body = try writer.toOwnedSlice(),
                     .options = .{
                         .exchange = exchange,
                         .routing_key = route,
@@ -459,10 +463,14 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
                     },
                 };
             } else {
-                const body = try std.json.stringifyAlloc(alloc, actual_result, .{});
+                const fmt = std.json.fmt(actual_result, .{});
+                var writer = std.io.Writer.Allocating.init(alloc);
+                defer writer.deinit();
+                const interface = &writer.writer;
+                try fmt.format(interface);
 
                 return .{
-                    .body = body,
+                    .body = try writer.toOwnedSlice(),
                     .options = .{
                         .exchange = exchange,
                         .routing_key = route,
@@ -505,7 +513,7 @@ test "expect `gen` to generate the correct route from string" {
     var ctx: struct {} = .{};
     var inj = try injector.Injector.init(&ctx, null);
     {
-        @setEvalBranchQuota(10000);
+        @setEvalBranchQuota(20000);
         var publish_route = comptime Gen.gen(Route, Events, "publish:event exchange/route");
         const p_consumer_tag = try publish_route.updateBindings(&inj);
         try std.testing.expectEqual(null, p_consumer_tag);
@@ -535,7 +543,7 @@ test "expect `genRouteHandler` to create a static handler for a string with no p
     var ctx: struct {} = .{};
     var inj = try injector.Injector.init(&ctx, null);
     const route = comptime blk: {
-        @setEvalBranchQuota(10000);
+        @setEvalBranchQuota(20000);
         var tmpl = template.Template(Context).init("consume $/test");
         break :blk tmpl.parseTokens().route;
     };
@@ -565,7 +573,7 @@ test "expect `genRouteHandler` to create a dynamic handler for a string with one
     };
     var inj = try injector.Injector.init(&ctx, null);
     const route = comptime blk: {
-        @setEvalBranchQuota(10000);
+        @setEvalBranchQuota(20000);
         var tmpl = template.Template(Context).init("consume $/{arg}");
         break :blk tmpl.parseTokens().route;
     };
