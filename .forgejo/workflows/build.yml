@@ -6,7 +6,7 @@ jobs:
   build:
     runs-on: docker
     container:
-      image: git.kalelzar.xyz/kalelzar/kwatcher-build:0.2-alpine-25.5
+      image: git.kalelzar.xyz/kalelzar/kwatcher-build:0.3-alpine-25.5
       credentials:
         username: ${{secrets.USER}}
         password: ${{secrets.TOKEN}}

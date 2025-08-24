@@ -16,7 +16,7 @@ jobs:
           - x86_64-linux-gnu
           - x86_64-windows
     container:
-      image: git.kalelzar.xyz/kalelzar/kwatcher-build:0.2-alpine-25.5
+      image: git.kalelzar.xyz/kalelzar/kwatcher-build:0.3-alpine-25.5
       credentials:
         username: ${{secrets.USER}}
         password: ${{secrets.TOKEN}}
@@ -45,7 +45,7 @@ jobs:
           cd zig-out/bin
           tar -cf "../../$tarball" .
           cd ../..
-          xz "$tarball"
+          zstd "$tarball"
           curl --user ${{secrets.USER}}:${{secrets.TOKEN}} \
-               --upload-file "$tarball.xz" \
-               "https://git.kalelzar.xyz/api/packages/${{secrets.USER}}/generic/kwatcher/${packageVersion}/$tarball.xz"
+               --upload-file "$tarball.zst" \
+               "https://git.kalelzar.xyz/api/packages/${{secrets.USER}}/generic/kwatcher/${packageVersion}/$tarball.zst"
