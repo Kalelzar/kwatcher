@@ -45,7 +45,7 @@ jobs:
           cd zig-out/bin
           tar -cf "../../$tarball" .
           cd ../..
-          zstd "$tarball"
+          xz -9 -e "$tarball"
           curl --user ${{secrets.USER}}:${{secrets.TOKEN}} \
-               --upload-file "$tarball.zst" \
-               "https://git.kalelzar.xyz/api/packages/${{secrets.USER}}/generic/kwatcher/${packageVersion}/$tarball.zst"
+               --upload-file "$tarball.xz" \
+               "https://git.kalelzar.xyz/api/packages/${{secrets.USER}}/generic/kwatcher/${packageVersion}/$tarball.xz"
