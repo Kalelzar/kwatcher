@@ -1,6 +1,8 @@
 const std = @import("std");
 const kwatcher = @import("kwatcher");
 
+const log = std.log.scoped(.example);
+
 const P = struct {};
 
 pub const AfkStatus = enum {
@@ -24,12 +26,26 @@ pub const AfkStatusChangeProperties = kwatcher.schema.Schema(
 
 pub const AfkStatusChange = kwatcher.schema.Heartbeat.V1(AfkStatusChangeProperties);
 
+pub const std_options = std.Options{
+    .log_scope_levels = &[_]std.log.ScopeLevel{
+        .{ .scope = .dependency, .level = .info },
+        .{ .scope = .server, .level = .info },
+        .{ .scope = .example, .level = .info },
+        .{ .scope = .amqp_client, .level = .info },
+        .{ .scope = .circuit_breaker_client, .level = .warn },
+        .{ .scope = .intern_fmt_cache, .level = .warn },
+        .{ .scope = .replay, .level = .info },
+        .{ .scope = .client, .level = .info },
+    },
+};
+
 const TestRoutes = struct {
     pub fn @"PUBLISH:heartbeat amq.direct/heartbeat"(
         user_info: kwatcher.schema.UserInfo,
         client_info: kwatcher.schema.ClientInfo,
     ) kwatcher.schema.Heartbeat.V1(P) {
-        std.log.info("{s} {s} {s}", .{ user_info.hostname, user_info.username, user_info.id });
+        //log.info("{s} {s} {s}", .{ user_info.hostname, user_info.username, user_info.id });
+        //log.info("{s} {s} {s}", .{ client_info.name, client_info.version, client_info.id });
         return .{
             .event = "TEST",
             .user = user_info.v1(),
@@ -40,7 +56,7 @@ const TestRoutes = struct {
     }
 
     pub fn @"CONSUME amq.direct/afk-status/afk-status"(change: AfkStatusChange, deps: *SingletonDeps) void {
-        std.log.debug(
+        log.debug(
             "[{}]: Status changed {} -> {}",
             .{ change.timestamp, change.properties.diff.prev, change.properties.diff.current },
         );
@@ -48,7 +64,7 @@ const TestRoutes = struct {
     }
 
     pub fn @"PUBLISH:heartbeat amq.direct/inc.{custom.i}"() kwatcher.schema.Message(kwatcher.schema.Schema(1, "test", struct {})) {
-        std.log.debug(
+        log.debug(
             "Sending message for reply.",
             .{},
         );
@@ -62,7 +78,7 @@ const TestRoutes = struct {
 
     pub fn @"REPLY amq.direct/inc.{custom.i}/test-replies"(msg: kwatcher.schema.Schema(1, "test", struct {})) kwatcher.schema.Schema(1, "test-response", struct {}) {
         _ = msg;
-        std.log.debug(
+        log.debug(
             "Sending reply.",
             .{},
         );
@@ -72,7 +88,7 @@ const TestRoutes = struct {
     pub fn @"CONSUME amq.direct/test.reply-to"(msg: kwatcher.schema.Schema(1, "test-response", struct {}), ctx: *UserContext) void {
         _ = msg;
         ctx.i += 1;
-        std.log.debug(
+        log.debug(
             "Reply received",
             .{},
         );
@@ -110,7 +126,7 @@ pub fn main() !void {
     var deps = SingletonDeps{};
     var server = try kwatcher.server.Server(
         "test",
-        "0.1.0",
+        "0.1.2",
         SingletonDeps,
         ScopedDeps,
         ExtraConfig,

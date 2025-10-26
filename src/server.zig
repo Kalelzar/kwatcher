@@ -1,5 +1,6 @@
 const std = @import("std");
-const log = std.log.scoped(.kwatcher);
+const log_server = std.log.scoped(.server);
+const log_deps = std.log.scoped(.dependency);
 const klib = @import("klib");
 const meta = klib.meta;
 
@@ -47,23 +48,31 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
         base_config: ?config.BaseConfig = null,
         merged_config: ?config.Config(UserConfig) = null,
 
-        clientInfo: schema.ClientInfo = .{
-            .version = client_version,
-            .name = client_name,
-        },
+        pub fn clientInfoFactory(client_registry: *protocol.client_registration.registry, client: Client) schema.ClientInfo {
+            log_deps.debug("Factory(ClientInfo)", .{});
+            return .{
+                .version = client_version,
+                .name = client_name,
+                .id = client_registry.id(client),
+            };
+        }
 
         pub fn userContextFactory(ctx: *Context) *UserContext {
+            log_deps.debug("Factory(UserContext)", .{});
             return &ctx.custom;
         }
 
         pub fn clientRegistryFactory(ctx: *Context) *protocol.client_registration.registry {
+            log_deps.debug("Factory(protocol.client_registration.registry)", .{});
             return &ctx.client;
         }
 
         pub fn timerFactory(self: *Self, allocator: std.mem.Allocator, base_config: config.BaseConfig) !Timer {
             if (self.timer) |res| {
+                log_deps.debug("Factory(Timer): cache_hit", .{});
                 return res;
             } else {
+                log_deps.debug("Factory(Timer): create", .{});
                 var timer = Timer.init(allocator);
                 try timer.register("heartbeat", base_config.config.heartbeat_interval);
                 try timer.register("metrics", base_config.config.metrics_interval_ns);
@@ -76,8 +85,10 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
 
         pub fn userInfo(self: *Self, allocator: std.mem.Allocator) !schema.UserInfo {
             if (self.user_info) |res| {
+                log_deps.debug("Factory(UserInfo): cache_hit", .{});
                 return res;
             } else {
+                log_deps.debug("Factory(UserInfo): fresh", .{});
                 self.user_info = try schema.UserInfo.init(allocator, null);
                 return self.user_info.?;
             }
@@ -85,8 +96,10 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
 
         pub fn mergedConfig(self: *Self, arena: *std.heap.ArenaAllocator) !config.Config(UserConfig) {
             if (self.merged_config) |m| {
+                log_deps.debug("Factory(config.Config(UserConfig)): cache_hit", .{});
                 return m;
             } else {
+                log_deps.debug("Factory(config.Config(UserConfig)): fresh", .{});
                 const merged_config = try config.findConfigFileWithDefaults(
                     UserConfig,
                     client_name,
@@ -99,8 +112,10 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
 
         pub fn userConfig(self: *Self, merged_config: config.Config(UserConfig)) UserConfig {
             if (self.user_config) |res| {
+                log_deps.debug("Factory(UserConfig): cache_hit", .{});
                 return res;
             } else {
+                log_deps.debug("Factory(UserConfig): fresh", .{});
                 const user_config = meta.copy(
                     @TypeOf(merged_config.value),
                     UserConfig,
@@ -114,8 +129,10 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
 
         pub fn baseConfig(self: *Self, merged_config: config.Config(UserConfig)) !config.BaseConfig {
             if (self.base_config) |res| {
+                log_deps.debug("Factory(BaseConfig): cache_hit", .{});
                 return res;
             } else {
+                log_deps.debug("Factory(BaseConfig): fresh", .{});
                 const base_config = meta.copy(
                     @TypeOf(merged_config.value),
                     config.BaseConfig,
@@ -128,8 +145,10 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
 
         pub fn clientFactory(self: *Self, allocator: std.mem.Allocator, config_file: config.BaseConfig) !*AmqpClient {
             if (self.client_cache) |res| {
+                log_deps.debug("Factory(AmqpClient): cache_hit", .{});
                 return res;
             } else {
+                log_deps.debug("Factory(AmqpClient): fresh", .{});
                 const amqp_client = try allocator.create(AmqpClient);
                 amqp_client.* = try AmqpClient.init(allocator, config_file, client_name);
                 self.client_cache = amqp_client;
@@ -139,8 +158,10 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
 
         pub fn durableCacheClientFactory(self: *Self, allocator: std.mem.Allocator, config_file: config.BaseConfig) !*DurableCacheClient {
             if (self.dcc_cache) |res| {
+                log_deps.debug("Factory(DurableCacheClient): cache_hit", .{});
                 return res;
             } else {
+                log_deps.debug("Factory(DurableCacheClient): fresh", .{});
                 const dcc = try allocator.create(DurableCacheClient);
                 dcc.* = try DurableCacheClient.init(allocator, config_file);
                 errdefer allocator.destroy(dcc);
@@ -151,8 +172,10 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
 
         pub fn circuitBreakerClientFactory(self: *Self, allocator: std.mem.Allocator, main: *AmqpClient, fallback: *DurableCacheClient) !*CircuitBreakerClient {
             if (self.cbc_cache) |res| {
+                log_deps.debug("Factory(CircuitBreakerClient): cache_hit", .{});
                 return res;
             } else {
+                log_deps.debug("Factory(CircuitBreakerClient): fresh", .{});
                 const cbc = try allocator.create(CircuitBreakerClient);
                 errdefer allocator.destroy(cbc);
                 cbc.* = try CircuitBreakerClient.init(allocator, main.client(), fallback.client(), .{});
@@ -163,10 +186,12 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
         }
 
         pub fn clientProxyFactory(base_client: *CircuitBreakerClient) Client {
+            log_deps.debug("Factory(Client)", .{});
             return base_client.client();
         }
 
         pub fn init(allocator: std.mem.Allocator) !Self {
+            log_deps.debug("SingletonDependency DI: INIT", .{});
             const arr_ptr = try allocator.create(std.heap.ArenaAllocator);
             const instr_ptr = try allocator.create(klib.mem.InstrumentedAllocator);
             errdefer allocator.destroy(arr_ptr);
@@ -191,6 +216,7 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
         }
 
         pub fn deinit(self: *Self) __ignore {
+            log_deps.debug("SingletonDependency DI: END", .{});
             if (self.timer) |_|
                 self.timer.?.deinit();
 
@@ -289,14 +315,14 @@ pub fn Server(
         }
 
         pub fn deinit(self: *Self) void {
-            log.info("Shutting server down...", .{});
+            log_server.info("Shutting server down...", .{});
             metrics.deinitialize();
             _ = self.deps.deinit();
             self.instrumented_allocator.*.child_allocator.destroy(self.instrumented_allocator);
         }
 
         pub fn configure(self: *Self) !void {
-            log.debug("Configuring server", .{});
+            log_server.info("Configuring server", .{});
             var base_injector = try Injector.init(&self.deps, null);
             var user_injector = try Injector.init(self.user_deps, &base_injector);
 
@@ -310,6 +336,7 @@ pub fn Server(
             }
             self.consumers.clearRetainingCapacity();
 
+            log_server.info("Found {d} routes: ", .{self.routes.items.len});
             for (self.routes.items) |*route_ptr| {
                 var route = route_ptr.*;
                 const existing = try (&route).updateBindings(&user_injector);
@@ -317,8 +344,17 @@ pub fn Server(
                     @panic("A consumer tag shouldn't exist yet. Something is very wrong. Server state corrupted... Aborting");
                 }
                 const ct = try (&route).bind(client);
+                log_server.info(
+                    "  {t} {s}/{s}/{s}",
+                    .{
+                        route.method,
+                        route.binding.exchange,
+                        route.binding.route,
+                        route.binding.queue orelse "[transient]",
+                    },
+                );
                 if (ct) |consumer_tag| {
-                    log.debug(
+                    log_server.debug(
                         "Assigning '{} {s}/{s}/{?s}' to {s}",
                         .{
                             route.method,
@@ -358,7 +394,7 @@ pub fn Server(
 
                 // Readiness check
                 const ready = @call(.auto, event_handler, args) catch |e| {
-                    log.err(
+                    log_server.err(
                         "Encountered an error while querying the event provider for '{s}/{s}': {}",
                         .{ route.binding.exchange, route.binding.route, e },
                     );
@@ -369,7 +405,7 @@ pub fn Server(
                 // Publish message to the client.
                 const msg = @call(.auto, route.handlers.publish.?, args) catch |e| {
                     try metrics.publishError(route.binding.route, route.binding.exchange);
-                    log.err(
+                    log_server.err(
                         "Encountered an error while publishing an event on '{s}/{s}': {}",
                         .{ route.binding.exchange, route.binding.route, e },
                     );
@@ -445,7 +481,7 @@ pub fn Server(
                             {
                                 const args = ConsumeArgs{ &binding_injector, response.message.body };
                                 @call(.auto, route.handlers.consume.?, args) catch |e| {
-                                    log.err(
+                                    log_server.err(
                                         "Encountered an error while consuming a message on '{s}/{s}': {}\n\t{s}\n",
                                         .{ route.binding.exchange, route.binding.route, e, response.message.body },
                                     );
@@ -463,14 +499,14 @@ pub fn Server(
                             handled += 1;
                             {
                                 const reply_to = (response.message.basic_properties.get(.reply_to) orelse {
-                                    log.err("Reply handler didn't receive a reply queue. Not acknowledging invalid request", .{});
+                                    log_server.err("Reply handler didn't receive a reply queue. Not acknowledging invalid request", .{});
                                     continue;
                                 }).slice() orelse unreachable;
 
                                 const args = ConsumeArgs{ &binding_injector, response.message.body };
-                                log.info("Replying to {s}/{s}", .{ route.binding.exchange, reply_to });
+                                log_server.debug("Replying to {s}/{s}", .{ route.binding.exchange, reply_to });
                                 var msg: schema.SendMessage = @call(.auto, route.handlers.reply.?, args) catch |e| {
-                                    log.err(
+                                    log_server.err(
                                         "Encountered an error while replying a message on '{s}/{s}': {}\n\t{s}\n",
                                         .{ route.binding.exchange, route.binding.route, e, response.message.body },
                                     );
@@ -519,7 +555,7 @@ pub fn Server(
             const base_conf = try user_injector.require(config.BaseConfig);
             var rem_cycles = extra.cycles;
             self.configure() catch |e| {
-                log.err("Encountered an error while configuring the client: {}", .{e});
+                log_server.err("Encountered an error while configuring the client: {}", .{e});
                 return e;
             };
             const interval: u64 = base_conf.config.polling_interval;
@@ -550,21 +586,21 @@ pub fn Server(
                         self.consumers.removeByPtr(entry.key_ptr);
                         alloc.free(k);
                         try self.consumers.put(alloc, try alloc.dupe(u8, new), v);
-                        log.debug("--------------- NEW {s}     -----------", .{new});
+                        log_server.debug("--------------- NEW {s}     -----------", .{new});
                         continue;
                     }
                 }
 
                 self.handleReplay() catch |e| {
-                    log.err("Encountered an error while handling replaying events: {}. This is likely a bug in KWatcher.", .{e});
+                    log_server.err("Encountered an error while handling replaying events: {}. This is likely a bug in KWatcher.", .{e});
                     return e;
                 };
                 self.handlePublish() catch |e| {
-                    log.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
+                    log_server.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
                     return e;
                 };
                 self.handleConsume(interval) catch |e| {
-                    log.err("Encountered an error while handling consuming events: {}. This is likely a bug in KWatcher.", .{e});
+                    log_server.err("Encountered an error while handling consuming events: {}. This is likely a bug in KWatcher.", .{e});
                     return e;
                 };
                 const end_time = try std.time.Instant.now();
@@ -615,7 +651,7 @@ pub fn Server(
                             self.deps.client_cache = null;
                         },
                         else => {
-                            log.err("Cannot recover from error: {}. Aborting..", .{e});
+                            log_server.err("Cannot recover from error: {}. Aborting..", .{e});
                             return error.ReconnectionFailure;
                         },
                     }
@@ -623,7 +659,7 @@ pub fn Server(
                     var last_error: anyerror = e;
 
                     while (self.retries <= 10) {
-                        log.err(
+                        log_server.err(
                             "Got disconnected with: {}. Retrying ({}) after {} seconds.",
                             .{ last_error, self.retries, self.backoff },
                         );
@@ -642,7 +678,7 @@ pub fn Server(
                         continue :main_loop;
                     }
 
-                    log.err("Failed to reconnect after {} retries. Aborting...", .{self.retries});
+                    log_server.err("Failed to reconnect after {} retries. Aborting...", .{self.retries});
                     return error.ReconnectionFailure;
                 };
             }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.client);
 
 const BaseConfig = @import("../../utils/config.zig").BaseConfig;
 const InternFmtCache = @import("../../utils/intern_fmt_cache.zig");
@@ -16,15 +17,23 @@ pub fn @"publish!:announce amq.direct/client.announce"(
     strings: *InternFmtCache,
     config: BaseConfig,
     reg: *ClientRegistry,
-    client: Client,
 ) !base_schema.Message(schema.Client.Announce.V1) {
     reg.state = .announcing;
 
-    const reply_to = try strings.internFmt("client_ack_id", "client.ack.{s}", .{reg.id(client)});
+    const reply_to = try strings.internFmt(
+        "client_ack_id",
+        "client.ack.{s}",
+        .{client_info.id},
+    );
+
+    log.info(
+        "Announcing client [{s}:{s}:{s}] to registry.",
+        .{ client_info.name, client_info.version, client_info.id },
+    );
 
     return .{
         .schema = .{
-            .id = reg.id(client),
+            .id = client_info.id,
             .client = client_info.v1(),
             .host = user_info.hostname,
         },
@@ -39,10 +48,21 @@ pub fn @"consume amq.direct/client.ack.{client.id}"(
     ack: schema.Client.Ack.V1,
     arena: *std.heap.ArenaAllocator,
     reg: *ClientRegistry,
+    client_info: base_schema.ClientInfo,
 ) !void {
     const alloc = arena.allocator();
     reg.assigned_id = try alloc.dupe(u8, ack.id);
     reg.state = .registered;
+    log.info(
+        "Client [{s}:{s}] was assigned id '{s}' by [{s}:{s}].",
+        .{
+            client_info.name,
+            client_info.version,
+            ack.id,
+            ack.client.name,
+            ack.client.version,
+        },
+    );
 }
 
 pub fn @"reply amq.topic/client.requests.reannounce"(
@@ -59,6 +79,12 @@ pub fn @"reply amq.topic/client.requests.reannounce"(
 
     const reply_to = try strings.internFmt("client_ack_id", "client.ack.{s}", .{reg.id(client)});
 
+    // TODO: Include registry client in the client.reannounce.request
+    log.info(
+        "Reannouncing client [{s}:{s}:{s}] to registry.",
+        .{ client_info.name, client_info.version, client_info.id },
+    );
+
     return .{
         .schema = .{
             .client = client_info.v1(),
@@ -72,6 +98,7 @@ pub fn @"reply amq.topic/client.requests.reannounce"(
     };
 }
 
-pub fn @"publish!:heartbeat amq.direct/client.heartbeat"(reg: *ClientRegistry, client: Client) schema.Client.Heartbeat.V1 {
-    return .{ .id = reg.id(client) };
+pub fn @"publish!:heartbeat amq.direct/client.heartbeat"(client_info: base_schema.ClientInfo) schema.Client.Heartbeat.V1 {
+    log.debug("Heartbeat", .{});
+    return .{ .id = client_info.id };
 }

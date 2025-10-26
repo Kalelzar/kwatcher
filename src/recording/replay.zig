@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.replay);
 
 const schema = @import("../schema.zig");
 const metrics = @import("../utils/metrics.zig");
@@ -139,20 +140,20 @@ pub const ReplayManager = struct {
     }
 
     fn nextRecording(self: *ReplayManager) !?[]const u8 {
-        std.log.debug("Obtaining next recording.", .{});
+        log.debug("Obtaining next recording.", .{});
         var it = self.replay_dir.iterate();
         var oldest: ?[]const u8 = null;
         var oldest_timestamp: ?i64 = null;
-        std.log.debug("Beginning iteration.", .{});
+        log.debug("Beginning iteration.", .{});
         while (try it.next()) |entry| {
-            std.log.debug("Trying {s}: {}", .{ entry.name, entry.kind });
+            log.debug("Trying {s}: {}", .{ entry.name, entry.kind });
             if (entry.kind != .file) continue; // We might want to follow symlinks here but this is fine for now
             if (!std.mem.endsWith(u8, entry.name, ".rcd")) continue;
 
             const name = entry.name[0..(entry.name.len - 4)];
             const timestamp = std.fmt.parseInt(i64, name, 10) catch continue;
             const isOlder = if (oldest_timestamp) |ot| ot > timestamp else true;
-            std.log.debug("Oldest: {?}, Current: {} | {}", .{ oldest_timestamp, timestamp, isOlder });
+            log.debug("Oldest: {?}, Current: {} | {}", .{ oldest_timestamp, timestamp, isOlder });
             if (isOlder) {
                 if (oldest) |o| self.allocator.free(o);
                 oldest = try self.allocator.dupe(u8, entry.name);
@@ -160,7 +161,7 @@ pub const ReplayManager = struct {
             }
         }
 
-        std.log.debug("Found: {?s}", .{oldest});
+        log.debug("Found: {?s}", .{oldest});
 
         return oldest;
     }
@@ -180,14 +181,14 @@ pub const ReplayManager = struct {
     }
 
     pub fn replay(self: *ReplayManager) !void {
-        std.log.info("Replaying from '{s}'", .{self.replay_dir_path});
+        log.debug("Replaying from '{s}'", .{self.replay_dir_path});
         while (try self.nextRecording()) |recording| {
             defer self.allocator.free(recording);
 
             const path = try std.fs.path.resolve(self.allocator, &.{ self.replay_dir_path, recording });
             defer self.allocator.free(path);
 
-            std.log.info("Replaying {s} from '{s}'", .{ recording, path });
+            log.info("Replaying {s} from '{s}'", .{ recording, path });
 
             const start_time = std.time.microTimestamp();
 
@@ -199,7 +200,7 @@ pub const ReplayManager = struct {
             defer self.allocator.free(prog);
             const resumepoint = try self.getResumePoint(prog);
 
-            std.log.info("Resuming from position: {}", .{resumepoint});
+            log.info("Resuming from position: {}", .{resumepoint});
 
             if (resumepoint > 0) {
                 metrics.replayResumption() catch {};
@@ -215,7 +216,7 @@ pub const ReplayManager = struct {
                     return e;
                 },
                 else => {
-                    std.log.err("Replay failed with: {}", .{e});
+                    log.err("Replay failed with: {}", .{e});
                     metrics.replayFailure() catch {};
                     return e;
                 },
@@ -226,7 +227,7 @@ pub const ReplayManager = struct {
             metrics.replayDuration(duration) catch {};
             metrics.recordingReplayed() catch {};
 
-            std.log.info("Replay successful. Deleting file...", .{});
+            log.info("Replay successful. Deleting file...", .{});
             try self.replay_dir.deleteFile(recording);
             self.replay_dir.deleteFile(prog) catch |err| switch (err) {
                 // It's okay if the checkpoint file didn't exist (for a perfect run)
@@ -234,7 +235,7 @@ pub const ReplayManager = struct {
                 else => return err,
             };
         }
-        std.log.info("No more recordings available... Exiting.", .{});
+        log.debug("No more recordings available... Exiting.", .{});
     }
 };
 
@@ -292,7 +293,7 @@ pub const Player = struct {
                 .declare_ephemeral_queue => try self.readDeclareEphemeralQueue(),
                 .declare_durable_queue => try self.readDeclareDurableQueue(),
                 else => |other| {
-                    std.log.err("Op '{s}' is not supported yet.", .{@tagName(other)});
+                    log.err("Op '{s}' is not supported yet.", .{@tagName(other)});
                     return error.UnsupportedOp;
                 },
             }

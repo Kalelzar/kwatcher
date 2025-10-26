@@ -3,6 +3,8 @@ const meta = @import("klib").meta;
 
 const schema = @import("../schema.zig");
 
+const log = std.log.scoped(.circuit_breaker_client);
+
 const Client = @import("client.zig");
 const ChannelOpts = Client.ChannelOpts;
 const Response = Client.Response;
@@ -63,7 +65,7 @@ fn getCurrentClient(self: *CircuitBreakingClient) Client {
             if (now - self.last_failure_time > self.config.recovery_timeout_ms) {
                 self.state = .half_open;
                 self.half_open_successes = 0;
-                std.log.info("Circuit breaker entering half-open state", .{});
+                log.debug("=> half-open", .{});
                 return self.main_client;
             }
             return self.fallback_client;
@@ -85,7 +87,7 @@ fn recordSuccess(self: *CircuitBreakingClient) !void {
                 self.state = .closed;
                 try self.fallback_client.disconnect();
                 self.failure_count = 0;
-                std.log.info("Circuit breaker closed - main client recovered", .{});
+                log.info("Client recovered", .{});
             }
         },
         .open => {}, // Success on fallback doesn't change state
@@ -95,7 +97,7 @@ fn recordSuccess(self: *CircuitBreakingClient) !void {
 fn recordFailure(self: *CircuitBreakingClient, err: anyerror) !void {
     self.mutex.lock();
     defer self.mutex.unlock();
-    std.log.warn("Circuit breaker: recording failure: {}", .{err});
+    log.err("Error {t}", .{err});
     // Only count specific errors as failures
     switch (err) {
         error.Disconnected,
@@ -110,14 +112,14 @@ fn recordFailure(self: *CircuitBreakingClient, err: anyerror) !void {
             self.failure_count += 1;
             if (self.failure_count >= self.config.failure_threshold) {
                 self.state = .open;
-                std.log.warn("Circuit breaker opened - switching to fallback", .{});
+                log.warn("Switching to fallback.", .{});
                 try self.fallback_client.connect();
             }
         },
         .half_open => {
             self.state = .open;
             self.failure_count = self.config.failure_threshold;
-            std.log.warn("Circuit breaker reopened - main client still failing", .{});
+            log.debug("Client is still failing.", .{});
         },
         .open => {}, // Already open
     }
@@ -143,7 +145,7 @@ fn executeWithCircuitBreaker(
 
             // If we failed on main and are now open, retry on fallback
             if (self.state == .open and client_instance.ptr == self.main_client.ptr) {
-                std.log.info("Retrying operation on fallback client", .{});
+                log.debug("Retrying operation on fallback client", .{});
                 return @call(.auto, op, .{self.fallback_client} ++ args);
             }
 
@@ -170,7 +172,7 @@ pub fn connect(ptr: *anyopaque) anyerror!void {
     // Try main first
     self.main_client.connect() catch |err| {
         try self.recordFailure(err);
-        std.log.warn("Main client connection failed, using fallback", .{});
+        log.warn("Connection failed, using fallback", .{});
         return self.fallback_client.connect();
     };
     try self.recordSuccess();
