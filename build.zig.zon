@@ -16,8 +16,8 @@
             .hash = "metrics-0.0.0-W7G4eP2_AQBKsaql3dhLJ-pkf-RdP-zV3vflJy4N34jC",
         },
         .klib = .{
-            .url = "git+https://github.com/Kalelzar/klib.git#c2a837371fae06ea1441d659752fe5c60d7b47aa",
-            .hash = "klib-0.0.0-vum4ZIiRAAC0P2LoSWaDOEDi7kqqN0vZU9V6l_gvmnWT",
+            .url = "git+https://github.com/Kalelzar/klib.git#51430bd00166bb978c051407bde782c6971cf418",
+            .hash = "klib-0.0.0-vum4ZAOSAAD8kGT4ubC0jOnwNzkILajPi4S-BrRVdTTk",
         },
     },
     .paths = .{
