@@ -76,7 +76,7 @@ const Connection = struct {
     /// @borrow configuration
     /// @borrow allocator
     pub fn init(allocator: std.mem.Allocator, configuration: config.BaseConfig, name: []const u8) (MemError || AuthError || AmqpError)!Connection {
-        log.info("Initializing client .{s}", .{name});
+        log.debug("Initializing client .{s}", .{name});
         const channel_map = std.StringHashMapUnmanaged(Channel){};
 
         // Setup
@@ -175,7 +175,7 @@ const Connection = struct {
         };
 
         _ = try amqp_channel.open();
-        log.info("Opened channel: {s} = {}", .{ channel_name, self.counter });
+        log.debug("Opened channel: {s} = {}", .{ channel_name, self.counter });
         self.counter += 1;
 
         try amqp_channel.basic_qos(0, 200, false);
@@ -332,7 +332,7 @@ const Connection = struct {
             .usec = @truncate(timeout),
         };
 
-        std.log.debug("Attempting to consume", .{});
+        log.debug("Attempting to consume", .{});
 
         var envelope = self.this.consume_message(&timeval, 0) catch |e| switch (e) {
             error.Timeout => return null,
@@ -388,7 +388,7 @@ const Connection = struct {
             .envelope = envelope,
         };
 
-        log.info(
+        log.debug(
             "[{}] Consumed a message on {s} from {s}/{s}:\n\t{s}",
             .{
                 response.delivery_tag,
@@ -655,7 +655,7 @@ pub fn bind(
         opts,
     ) catch |e| try self.handleDisconnect(e, conn);
 
-    log.info("[{s}] Binding {s}/{s} to queue {s} on channel {s}.", .{
+    log.debug("[{s}] Binding {s}/{s} to queue {s} on channel {s}.", .{
         consumer_tag,
         exchange,
         route,
@@ -675,7 +675,7 @@ pub fn unbind(
     var conn = try self.ensureConnected();
     const alloc = self.allocator;
 
-    log.info("[{s}] Unbinding from channel {s}.", .{
+    log.debug("[{s}] Unbinding from channel {s}.", .{
         consumer_tag,
         opts.channel_name orelse "__consume",
     });
@@ -705,7 +705,7 @@ pub fn ack(
     var self = getSelf(ptr);
     var conn = try self.ensureConnected();
     conn.ack(delivery_tag, opts) catch |e| try self.handleDisconnect(e, conn);
-    log.info("[{}] Acknowledging message", .{delivery_tag});
+    log.debug("[{}] Acknowledging message", .{delivery_tag});
 }
 
 pub fn reject(
@@ -721,7 +721,7 @@ pub fn reject(
         requeue,
         opts,
     ) catch |e| try self.handleDisconnect(e, conn);
-    log.info("[{}] Rejecting message", .{delivery_tag});
+    log.debug("[{}] Rejecting message", .{delivery_tag});
 }
 
 pub fn publish(
@@ -755,7 +755,7 @@ pub fn publish(
         opts,
     ) catch |e| try self.handleDisconnect(e, conn);
 
-    log.info(
+    log.debug(
         "[{s}] Publishing to {s}/{s}:\n\t{s}",
         .{
             correlation_id.slice().?,

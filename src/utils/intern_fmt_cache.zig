@@ -3,6 +3,7 @@
 //! and replacing the cached string when the parameters change.
 
 const std = @import("std");
+const log = std.log.scoped(.intern_fmt_cache);
 
 const InternFmtCache = @This();
 
@@ -74,7 +75,7 @@ pub const Lease = struct {
     pub fn deinit(self: *Lease) void {
         if (self.old) |old| {
             const allocator = self.allocator orelse {
-                std.log.warn("Leaking lease: {s}. Invalid lease.", .{old});
+                log.warn("Leaking lease: {s}. Invalid lease.", .{old});
                 return;
             };
             allocator.free(old);
@@ -226,7 +227,7 @@ pub fn internFmtWithLease(self: *InternFmtCache, comptime key: []const u8, compt
                 .allocator = self.allocator,
             };
         } else {
-            std.log.debug("++ Replacing {s}: {s} [{}]", .{ key, fmt, hash });
+            log.debug("Replacing {s}: {s} [{}]", .{ key, fmt, hash });
             const new = try std.fmt.allocPrint(self.allocator, fmt, args);
             const old = entry.string;
             entry.id = hash;
@@ -238,7 +239,7 @@ pub fn internFmtWithLease(self: *InternFmtCache, comptime key: []const u8, compt
             };
         }
     } else {
-        std.log.debug("++ Interning {s}: {s} [{}]", .{ key, fmt, hash });
+        log.debug("Interning {s}: {s} [{}]", .{ key, fmt, hash });
         const out = try std.fmt.allocPrint(self.allocator, fmt, args);
         errdefer self.allocator.free(out);
 

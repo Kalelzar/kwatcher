@@ -104,12 +104,30 @@ pub const Client = struct {
             name: []const u8,
         },
     );
+
+    pub const V2 = Schema(
+        2,
+        "client",
+        struct {
+            /// The id of the client.
+            id: []const u8,
+
+            /// The version of the client.
+            version: []const u8,
+
+            /// The name of the client.
+            name: []const u8,
+        },
+    );
 };
 
 /// A client-side model for the Client-schema namespace.
 /// It follows the latest schema version and has helpers
 /// to convert to any other known schema version.
 pub const ClientInfo = struct {
+    /// The id of the client.
+    id: []const u8,
+
     /// The name of the client.
     name: []const u8,
     /// The version of the client.
@@ -123,9 +141,28 @@ pub const ClientInfo = struct {
         };
     }
 
-    /// Construct from a Client.V1 compatible schema object.
-    pub fn fromV1(sch: *const Client.V1) ClientInfo {
+    /// Convert to a Client.V2 compatible schema object.
+    pub fn v2(self: *const ClientInfo) Client.V2 {
         return .{
+            .id = self.id,
+            .version = self.version,
+            .name = self.name,
+        };
+    }
+
+    /// Construct from a Client.V1 compatible schema object.
+    pub fn fromV1(sch: *const Client.V1, id: []const u8) ClientInfo {
+        return .{
+            .version = sch.version,
+            .name = sch.name,
+            .id = id,
+        };
+    }
+
+    /// Construct from a Client.V2 compatible schema object.
+    pub fn fromV2(sch: *const Client.V2) ClientInfo {
+        return .{
+            .id = sch.id,
             .version = sch.version,
             .name = sch.name,
         };
