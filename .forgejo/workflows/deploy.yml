@@ -20,6 +20,8 @@ jobs:
       credentials:
         username: ${{secrets.USER}}
         password: ${{secrets.TOKEN}}
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,6 +32,12 @@ jobs:
         uses: https://github.com/mlugg/setup-zig@v2
         with:
           cache-key: ${{ matrix.targets }}
+      - name: Set Version
+        id: set-version
+        run: |
+          version="$(cat build.zig.zon | grep "\.version" | sed -E 's/.*"(.*)".*/\1/')"
+          echo "Version: $version"
+          echo "version=$version" >> $FORGEJO_OUTPUT
       - name: Build
         run: zig build -Ddump -Doptimize=ReleaseFast -Dtarget=${{matrix.targets}} --summary all 
       - name: Publish
@@ -49,3 +57,60 @@ jobs:
           curl --user ${{secrets.USER}}:${{secrets.TOKEN}} \
                --upload-file "$tarball.xz" \
                "https://git.kalelzar.xyz/api/packages/${{secrets.USER}}/generic/kwatcher/${packageVersion}/$tarball.xz"
+
+
+  push:
+    needs: build
+    runs-on: docker
+    container:
+      image: git.kalelzar.xyz/kalelzar/kwatcher-build:0.3-alpine-25.5
+      credentials:
+        username: ${{secrets.USER}}
+        password: ${{secrets.TOKEN}}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: kalelzar/kwatcher-repository
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{secrets.PUSH_TOKEN}}
+      - name: Download kalpack
+        run: |
+          version="0.1.4+6ebdba88eddae559331ff246cfbb60e6f3ce8518"
+          curl \
+             -u kalelzar:${{secrets.TOKEN}} \
+             -OJ "https://git.kalelzar.xyz/api/packages/kalelzar/generic/kalpack/$version/kalpack-aarch64-linux-musl.tar.xz"
+          tar -xf kalpack-aarch64-linux-musl.tar.xz
+          chmod +x ./kalpack
+          echo '{"repository_dir": "", "index_db": "", "bin_dir": ""}' > config.json
+      - name: Update index
+        id: update-index
+        run: |
+          version="${{ needs.build.outputs.version }}"
+          commit="${{forge.sha}}"
+          package_name="$(echo "${{ forge.repository }}" | cut -d'/' -f2-)"
+          pkg_type=dev
+          pkg_version="$version"
+          if [ "${{forge.ref_type}}" = "tag" ]; then
+            pkg_version="${{forge.ref_name}}"
+            pkg_type=stable
+          else
+            pkg_version="$version+$commit"
+          fi
+
+          echo "Version $version: $pkg_version"
+
+          file="$pkg_type/$package_name.yml"
+          sed -E -i "s/version: .*/version: $pkg_version/" "$file"
+          echo "Updated '$package_name@$pkg_type' to $pkg_version"
+          echo "commit=[ci] Bump package '$package_name' in repo '$pkg_type' to '$pkg_version'" >> $FORGEJO_OUTPUT
+      - name: Push to repo
+        run: |
+          git config user.name "forgekal-actions[bot]"
+          git config user.email "forgekal-actions[bot]@kalelzar.xyz"
+          ./kalpack lock dev.yaml
+          ./kalpack lock stable.yaml
+          git add dev stable stable.kpkg.lock dev.kpkg.lock
+          git commit -m "${{ steps.update-index.outputs.commit }}"
+          git push origin master

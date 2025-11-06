@@ -2,6 +2,7 @@
 pub const schema = @import("schema.zig");
 pub const mem = @import("mem.zig");
 pub const server = @import("server.zig");
+pub const cache = @import("cache/cache.zig");
 
 // client
 pub const Client = @import("client/client.zig");
