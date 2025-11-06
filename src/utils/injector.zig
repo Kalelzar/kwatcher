@@ -402,7 +402,7 @@ pub const Injector = struct {
             @compileError("Expected a tuple of arguments");
         }
 
-        const params = @typeInfo(@TypeOf(fun)).@"fn".params;
+        const params = @typeInfo(klib.meta.Fn(@TypeOf(fun))).@"fn".params;
 
         const types = comptime brk: {
             var types: [params.len]type = undefined;
