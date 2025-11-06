@@ -31,6 +31,9 @@ const Metrics = struct {
     recording_file_size_bytes: RecordingFileSize,
     replay_duration_us: ReplayDuration,
     recorded_operations: RecordedOperations,
+    cache_size: CacheSize,
+    cache_hits: CacheHits,
+    cache_misses: CacheMisses,
 
     const ClientLabel = struct { client_name: []const u8, client_version: []const u8 };
     const QueueLabel = struct { queue: []const u8 };
@@ -40,6 +43,8 @@ const Metrics = struct {
     const FullLabel = meta.MergeStructs(ClientLabel, TargetLabel);
     const OpLabel = struct { operation: []const u8 };
     const ClientWithOpLabel = meta.MergeStructs(ClientLabel, OpLabel);
+    const CacheLabel = struct { cache_key: []const u8, cache_type: []const u8 };
+    const ClientCacheLabel = meta.MergeStructs(CacheLabel, ClientLabel);
 
     const MemUsage = m.GaugeVec(i64, ClientLabel);
     const Publish = m.CounterVec(u64, FullLabel);
@@ -64,6 +69,9 @@ const Metrics = struct {
     const RecordingFileSize = m.GaugeVec(u64, ClientLabel);
     const ReplayDuration = m.GaugeVec(u64, ClientLabel);
     const RecordedOperations = m.CounterVec(u64, ClientWithOpLabel);
+    const CacheSize = m.GaugeVec(i64, ClientCacheLabel);
+    const CacheHits = m.CounterVec(u64, ClientCacheLabel);
+    const CacheMisses = m.CounterVec(u64, ClientCacheLabel);
 
     pub fn deinit(self: *Metrics) void {
         self.acked_messages.deinit();
@@ -88,6 +96,9 @@ const Metrics = struct {
         self.recording_file_size_bytes.deinit();
         self.replay_duration_us.deinit();
         self.recorded_operations.deinit();
+        self.cache_hits.deinit();
+        self.cache_misses.deinit();
+        self.cache_size.deinit();
     }
 };
 
@@ -251,6 +262,24 @@ pub fn initialize(allocator: std.mem.Allocator, client_name: []const u8, client_
             .{ .help = "The total number of operations recorded by type." },
             opts,
         ),
+        .cache_hits = try .init(
+            allocator,
+            "kwatcher_cache_hits",
+            .{ .help = "The total amount of cache hits" },
+            opts,
+        ),
+        .cache_misses = try .init(
+            allocator,
+            "kwatcher_cache_misses",
+            .{ .help = "The total amount of cache misses" },
+            opts,
+        ),
+        .cache_size = try .init(
+            allocator,
+            "kwatcher_cache_size",
+            .{ .help = "The total amount of elements in the cache" },
+            opts,
+        ),
     };
 }
 
@@ -369,6 +398,50 @@ pub fn alloc(size: usize) void {
 
 pub fn free(size: usize) void {
     metrics.total_memory_allocated.incrBy(client_label, -@as(i64, @intCast(size))) catch unreachable;
+}
+
+pub fn cacheHit(cache: []const u8, cache_type: []const u8) !void {
+    const label: Metrics.ClientCacheLabel = .{
+        .client_name = client_label.client_name,
+        .client_version = client_label.client_version,
+        .cache_key = cache,
+        .cache_type = cache_type,
+    };
+
+    try metrics.cache_hits.incr(label);
+}
+
+pub fn cacheMiss(cache: []const u8, cache_type: []const u8) !void {
+    const label: Metrics.ClientCacheLabel = .{
+        .client_name = client_label.client_name,
+        .client_version = client_label.client_version,
+        .cache_key = cache,
+        .cache_type = cache_type,
+    };
+
+    try metrics.cache_misses.incr(label);
+}
+
+pub fn cacheGrow(cache: []const u8, cache_type: []const u8) !void {
+    const label: Metrics.ClientCacheLabel = .{
+        .client_name = client_label.client_name,
+        .client_version = client_label.client_version,
+        .cache_key = cache,
+        .cache_type = cache_type,
+    };
+
+    try metrics.cache_size.incr(label);
+}
+
+pub fn cacheShrink(cache: []const u8, cache_type: []const u8) !void {
+    const label: Metrics.ClientCacheLabel = .{
+        .client_name = client_label.client_name,
+        .client_version = client_label.client_version,
+        .cache_key = cache,
+        .cache_type = cache_type,
+    };
+
+    try metrics.cache_size.incrBy(label, -1);
 }
 
 pub fn write(writer: *std.io.Writer) !void {
