@@ -93,6 +93,7 @@ pub fn SetBuilder(comptime Data: type, comptime Invariant: anytype) type {
             inline for (self.opts) |o| {
                 @field(cache_config, @tagName(std.meta.activeTag(o))) = @field(o, @tagName(std.meta.activeTag(o)));
             }
+            cache_config.action_name = "cache " ++ cache_config.key;
             return cache_config;
         }
     };

@@ -4,6 +4,7 @@ const Injector = @import("../utils/injector.zig").Injector;
 /// and automatically cache it.
 pub fn HotCold(comptime Data: type) type {
     return struct {
+        action_name: []const u8,
         key: []const u8,
         hot: ?*const fn (*Injector, *anyopaque) anyerror!Data = null,
         cold: ?*const fn (*Injector, *anyopaque) anyerror!Data = null,

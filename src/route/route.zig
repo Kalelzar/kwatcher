@@ -24,6 +24,7 @@ pub const Method = enum {
 
 pub fn Route(PathParams: type) type {
     return struct {
+        name: []const u8,
         method: Method,
         handlers: handlers.HandlerCodeGen(PathParams).Handlers,
         metadata: *const handlers.Metadata,
