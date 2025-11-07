@@ -34,6 +34,7 @@ const Metrics = struct {
     cache_size: CacheSize,
     cache_hits: CacheHits,
     cache_misses: CacheMisses,
+    action_latency: ActionLatency,
 
     const ClientLabel = struct { client_name: []const u8, client_version: []const u8 };
     const QueueLabel = struct { queue: []const u8 };
@@ -45,6 +46,11 @@ const Metrics = struct {
     const ClientWithOpLabel = meta.MergeStructs(ClientLabel, OpLabel);
     const CacheLabel = struct { cache_key: []const u8, cache_type: []const u8 };
     const ClientCacheLabel = meta.MergeStructs(CacheLabel, ClientLabel);
+    const ActionLatencyLabel = struct { name: []const u8 };
+    const ClientActionLatencyLabel = meta.MergeStructs(
+        ActionLatencyLabel,
+        ClientLabel,
+    );
 
     const MemUsage = m.GaugeVec(i64, ClientLabel);
     const Publish = m.CounterVec(u64, FullLabel);
@@ -72,6 +78,11 @@ const Metrics = struct {
     const CacheSize = m.GaugeVec(i64, ClientCacheLabel);
     const CacheHits = m.CounterVec(u64, ClientCacheLabel);
     const CacheMisses = m.CounterVec(u64, ClientCacheLabel);
+    const ActionLatency = m.HistogramVec(
+        u64,
+        ClientActionLatencyLabel,
+        &.{ 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 20000 },
+    );
 
     pub fn deinit(self: *Metrics) void {
         self.acked_messages.deinit();
@@ -99,6 +110,7 @@ const Metrics = struct {
         self.cache_hits.deinit();
         self.cache_misses.deinit();
         self.cache_size.deinit();
+        self.action_latency.deinit();
     }
 };
 
@@ -280,6 +292,12 @@ pub fn initialize(allocator: std.mem.Allocator, client_name: []const u8, client_
             .{ .help = "The total amount of elements in the cache" },
             opts,
         ),
+        .action_latency = try .init(
+            allocator,
+            "kwatcher_action_latency",
+            .{ .help = "The latency in us of an action." },
+            opts,
+        ),
     };
 }
 
@@ -315,6 +333,14 @@ pub fn resetCycle() !void {
     while (consume_iter.next()) |label_ptr| {
         try metrics.consumed_cycle.set(label_ptr.*, 0);
     }
+}
+
+pub fn latency(action: []const u8, value: i64) !void {
+    try metrics.action_latency.observe(Metrics.ClientActionLatencyLabel{
+        .client_name = client_label.client_name,
+        .client_version = client_label.client_version,
+        .name = action,
+    }, @intCast(value));
 }
 
 pub fn ack(queue: []const u8) !void {

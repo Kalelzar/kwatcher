@@ -16,6 +16,11 @@ pub fn Cache(comptime Data: type) type {
         inj: *Injector,
 
         pub fn get(self: @This(), invariant: anytype) !Data {
+            const start = std.time.microTimestamp();
+            defer {
+                const time = std.time.microTimestamp() - start;
+                metrics.latency(self.config.action_name, time) catch {};
+            }
             const arg: *anyopaque = @constCast(&invariant);
             if (self.config.hot) |h| {
                 @branchHint(.likely);

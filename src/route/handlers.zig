@@ -88,6 +88,7 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
             const evHandler = eventHandler(event_metadata, event_handler);
 
             return .{
+                .name = name,
                 .method = .publish,
                 .binding = .{},
                 .handlers = .{
@@ -116,6 +117,7 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
             const consHandler = consumeHandler(metadata, handler);
 
             return .{
+                .name = name,
                 .method = .consume,
                 .binding = .{},
                 .handlers = .{
@@ -144,6 +146,7 @@ pub fn HandlerCodeGen(comptime PathParams: type) type {
             const repHandler = replyHandler(metadata, handler);
 
             return .{
+                .name = name,
                 .method = .reply,
                 .binding = .{},
                 .handlers = .{

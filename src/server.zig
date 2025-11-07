@@ -381,9 +381,9 @@ pub fn Server(
             defer internal_arena.reset();
             var timer = try base_injector.require(Timer);
             for (self.publishers.items) |*route| {
+                const act_start = std.time.microTimestamp();
                 defer internal_arena.reset();
                 const event_handler = route.handlers.event.?;
-
                 // Prepare dependency injection
                 var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
                 var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
@@ -401,6 +401,11 @@ pub fn Server(
                     continue;
                 };
                 if (!ready) continue;
+
+                defer {
+                    const time = std.time.microTimestamp() - act_start;
+                    metrics.latency(route.name, time) catch {};
+                }
 
                 // Publish message to the client.
                 const msg = @call(.auto, route.handlers.publish.?, args) catch |e| {
@@ -458,6 +463,7 @@ pub fn Server(
             var total: i32 = 0;
             var handled: i32 = 0;
             main: while (remaining > 0) {
+                const act_start = std.time.microTimestamp();
                 const rabbitmq_wait_us = @divTrunc(remaining, std.time.ns_per_us);
                 const start_time = try std.time.Instant.now();
                 var envelope = try cl.consume(rabbitmq_wait_us);
@@ -469,6 +475,10 @@ pub fn Server(
                     const maybe_route = self.consumers.getPtr(response.consumer_tag);
                     if (maybe_route == null) return error.InvalidConsumer;
                     const route = maybe_route.?;
+                    defer {
+                        const time = std.time.microTimestamp() - act_start;
+                        metrics.latency(route.name, time) catch {};
+                    }
 
                     var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
                     var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
