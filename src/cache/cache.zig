@@ -3,9 +3,18 @@ const Injector = @import("../utils/injector.zig").Injector;
 const metrics = @import("../utils/metrics.zig");
 
 pub const SetBuilder = @import("set_builder.zig").SetBuilder;
+pub const EvictionStrategy = @import("set_builder.zig").EvictionStrategy;
+pub const Residency = @import("set_builder.zig").Residency;
 pub const HotCold = @import("hotcold.zig").HotCold;
+pub const HotColdLru = @import("hotcold.zig").HotColdLru;
+pub const cacheInterfaceTypeMap = @import("hotcold.zig").cacheInterfaceTypeMap;
 pub const Memory = @import("memory_cache.zig").Memory;
 pub const MemoryContext = @import("memory_cache.zig").MemoryContext;
+pub const LRUContext = @import("memory_cache.zig").LRUContext;
+pub fn LRUMemoryContext(comptime Data: type) type {
+    return LRUContext(Data, MemoryContext, .{ .count = 256 });
+}
+pub const MemoryContextResolver = @import("memory_cache.zig").MemoryContextResolver;
 pub const File = @import("file_cache.zig").File;
 pub const FileContext = @import("file_cache.zig").FileContext;
 pub const Tiered = @import("tiered_cache.zig").TieredCache;
@@ -31,6 +40,17 @@ pub fn Cache(comptime Data: type) type {
             } else {
                 @branchHint(.cold);
                 return error.NullCacheCalled;
+            }
+        }
+
+        pub fn push(self: @This(), data: Data, invariant: anytype) !?Data {
+            const arg: *anyopaque = @constCast(&invariant);
+            if (self.config.push) |h| {
+                @branchHint(.likely);
+                return @call(.auto, h, .{ self.inj, data, arg });
+            } else {
+                @branchHint(.cold);
+                return error.ReadOnly;
             }
         }
     };
@@ -82,4 +102,34 @@ pub fn autoCacheWithContexts(
     };
 
     return &H.get;
+}
+
+pub fn autoPushWithContexts(
+    comptime Data: type,
+    comptime Invariant: anytype,
+    comptime Context: anytype,
+) *const fn (*Injector, Data, *anyopaque) anyerror!?Data {
+    const H = struct {
+        pub fn push(inj: *Injector, data: Data, invariant: *anyopaque) anyerror!?Data {
+            var hasher = std.crypto.hash.Blake3.init(.{ .key = null });
+            const in: *std.meta.Tuple(&Invariant) = @ptrCast(@alignCast(invariant));
+            std.hash.autoHashStrat(&hasher, in.*, .DeepRecursive);
+            var hashBytes: [32]u8 = undefined;
+            hasher.final(&hashBytes);
+            const hash = std.fmt.bytesToHex(&hashBytes, .upper);
+
+            const config = try inj.require(HotCold(Data));
+            inline for (0..Context.len) |i| {
+                var context = try inj.require(*(Context[i]));
+                try context.put(&hash, data);
+                try metrics.cacheGrow(config.key, Context[i].id);
+            }
+
+            // NOTE: Reserved for future expansion.
+            // `Put' may return any evicted members in a future implementation.
+            return null;
+        }
+    };
+
+    return &H.push;
 }
