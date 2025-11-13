@@ -151,6 +151,7 @@ fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime clie
                 log_deps.debug("Factory(AmqpClient): fresh", .{});
                 const amqp_client = try allocator.create(AmqpClient);
                 amqp_client.* = try AmqpClient.init(allocator, config_file, client_name);
+                metrics.setClientId(amqp_client.id);
                 self.client_cache = amqp_client;
                 return self.client_cache.?;
             }
@@ -281,7 +282,13 @@ pub fn Server(
             var instrumented_allocator = try allocator.create(klib.mem.InstrumentedAllocator);
             instrumented_allocator.* = metrics.instrumentAllocator(allocator);
             const alloc = instrumented_allocator.allocator();
-            try metrics.initialize(alloc, client_name, client_version, .{});
+            try metrics.initialize(
+                alloc,
+                client_name,
+                client_version,
+                try klib.host.hostname(allocator),
+                .{},
+            );
             const default_deps = try Dependencies(
                 Context,
                 UserConfig,

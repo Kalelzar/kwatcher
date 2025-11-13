@@ -36,7 +36,12 @@ const Metrics = struct {
     cache_misses: CacheMisses,
     action_latency: ActionLatency,
 
-    const ClientLabel = struct { client_name: []const u8, client_version: []const u8 };
+    const ClientLabel = struct {
+        client_name: []const u8,
+        client_version: []const u8,
+        client_id: []const u8,
+        client_host: []const u8,
+    };
     const QueueLabel = struct { queue: []const u8 };
     const ClientWithQueueLabel = meta.MergeStructs(ClientLabel, QueueLabel);
     const ExchangeLabel = struct { exchange: []const u8 };
@@ -81,7 +86,25 @@ const Metrics = struct {
     const ActionLatency = m.HistogramVec(
         u64,
         ClientActionLatencyLabel,
-        &.{ 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 20000 },
+        &.{
+            1,
+            5,
+            10,
+            25,
+            50,
+            100,
+            250,
+            500,
+            1000,
+            2500,
+            5000,
+            10000,
+            20000,
+            50000,
+            100000,
+            250000,
+            500000,
+        },
     );
 
     pub fn deinit(self: *Metrics) void {
@@ -123,11 +146,23 @@ pub fn deinitialize() void {
     metrics.deinit();
 }
 
-pub fn initialize(allocator: std.mem.Allocator, client_name: []const u8, client_version: []const u8, comptime opts: m.RegistryOpts) !void {
+pub fn setClientId(id: []const u8) void {
+    client_label.client_id = id;
+}
+
+pub fn initialize(
+    allocator: std.mem.Allocator,
+    client_name: []const u8,
+    client_version: []const u8,
+    client_host: []const u8,
+    comptime opts: m.RegistryOpts,
+) !void {
     buf_alloc = std.heap.FixedBufferAllocator.init(&memsafe_buffer);
     client_label = .{
         .client_name = client_name,
         .client_version = client_version,
+        .client_host = client_host,
+        .client_id = "",
     };
     metrics = .{
         .total_memory_allocated = try Metrics.MemUsage.init(
@@ -305,6 +340,8 @@ pub fn publish(queue: []const u8, exchange: []const u8) !void {
     const label: Metrics.FullLabel = .{
         .client_name = client_label.client_name,
         .client_version = client_label.client_version,
+        .client_host = client_label.client_host,
+        .client_id = client_label.client_id,
         .queue = queue,
         .exchange = exchange,
     };
@@ -317,6 +354,8 @@ pub fn consume(queue: []const u8) !void {
     const label: Metrics.ClientWithQueueLabel = .{
         .client_name = client_label.client_name,
         .client_version = client_label.client_version,
+        .client_host = client_label.client_host,
+        .client_id = client_label.client_id,
         .queue = queue,
     };
     try metrics.consumed_messages.incr(label);
@@ -339,6 +378,8 @@ pub fn latency(action: []const u8, value: i64) !void {
     try metrics.action_latency.observe(Metrics.ClientActionLatencyLabel{
         .client_name = client_label.client_name,
         .client_version = client_label.client_version,
+        .client_host = client_label.client_host,
+        .client_id = client_label.client_id,
         .name = action,
     }, @intCast(value));
 }
@@ -347,6 +388,8 @@ pub fn ack(queue: []const u8) !void {
     const label: Metrics.ClientWithQueueLabel = .{
         .client_name = client_label.client_name,
         .client_version = client_label.client_version,
+        .client_host = client_label.client_host,
+        .client_id = client_label.client_id,
         .queue = queue,
     };
     try metrics.acked_messages.incr(label);
@@ -356,6 +399,8 @@ pub fn reject(queue: []const u8) !void {
     const label: Metrics.ClientWithQueueLabel = .{
         .client_name = client_label.client_name,
         .client_version = client_label.client_version,
+        .client_host = client_label.client_host,
+        .client_id = client_label.client_id,
         .queue = queue,
     };
     try metrics.rejected_messages.incr(label);
@@ -373,6 +418,8 @@ pub fn publishError(queue: []const u8, exchange: []const u8) !void {
     const label: Metrics.FullLabel = .{
         .client_name = client_label.client_name,
         .client_version = client_label.client_version,
+        .client_host = client_label.client_host,
+        .client_id = client_label.client_id,
         .queue = queue,
         .exchange = exchange,
     };
@@ -383,6 +430,8 @@ pub fn consumeError(queue: []const u8) !void {
     const label: Metrics.ClientWithQueueLabel = .{
         .client_name = client_label.client_name,
         .client_version = client_label.client_version,
+        .client_host = client_label.client_host,
+        .client_id = client_label.client_id,
         .queue = queue,
     };
     try metrics.consume_errors.incr(label);
@@ -396,6 +445,8 @@ pub fn publishQueue(queue: []const u8, exchange: []const u8) !void {
     const label: Metrics.FullLabel = .{
         .client_name = client_label.client_name,
         .client_version = client_label.client_version,
+        .client_host = client_label.client_host,
+        .client_id = client_label.client_id,
         .queue = queue,
         .exchange = exchange,
     };
@@ -406,6 +457,8 @@ pub fn consumeQueue(queue: []const u8) !void {
     const label: Metrics.ClientWithQueueLabel = .{
         .client_name = client_label.client_name,
         .client_version = client_label.client_version,
+        .client_host = client_label.client_host,
+        .client_id = client_label.client_id,
         .queue = queue,
     };
     try metrics.consuming_from.set(label, 1);
@@ -432,6 +485,8 @@ pub fn cacheHit(cache: []const u8, cache_type: []const u8) !void {
         .client_version = client_label.client_version,
         .cache_key = cache,
         .cache_type = cache_type,
+        .client_host = client_label.client_host,
+        .client_id = client_label.client_id,
     };
 
     try metrics.cache_hits.incr(label);
@@ -441,6 +496,8 @@ pub fn cacheMiss(cache: []const u8, cache_type: []const u8) !void {
     const label: Metrics.ClientCacheLabel = .{
         .client_name = client_label.client_name,
         .client_version = client_label.client_version,
+        .client_host = client_label.client_host,
+        .client_id = client_label.client_id,
         .cache_key = cache,
         .cache_type = cache_type,
     };
@@ -452,6 +509,8 @@ pub fn cacheGrow(cache: []const u8, cache_type: []const u8) !void {
     const label: Metrics.ClientCacheLabel = .{
         .client_name = client_label.client_name,
         .client_version = client_label.client_version,
+        .client_host = client_label.client_host,
+        .client_id = client_label.client_id,
         .cache_key = cache,
         .cache_type = cache_type,
     };
@@ -463,6 +522,8 @@ pub fn cacheShrink(cache: []const u8, cache_type: []const u8) !void {
     const label: Metrics.ClientCacheLabel = .{
         .client_name = client_label.client_name,
         .client_version = client_label.client_version,
+        .client_host = client_label.client_host,
+        .client_id = client_label.client_id,
         .cache_key = cache,
         .cache_type = cache_type,
     };
@@ -532,6 +593,8 @@ pub fn recordedOperation(operation: []const u8) !void {
     const label: Metrics.ClientWithOpLabel = .{
         .client_name = client_label.client_name,
         .client_version = client_label.client_version,
+        .client_host = client_label.client_host,
+        .client_id = client_label.client_id,
         .operation = operation,
     };
     try metrics.recorded_operations.incr(label);

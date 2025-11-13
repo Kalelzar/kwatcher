@@ -1,5 +1,6 @@
 const std = @import("std");
 const log = std.log.scoped(.client);
+const metrics = @import("../../utils/metrics.zig");
 
 const BaseConfig = @import("../../utils/config.zig").BaseConfig;
 const InternFmtCache = @import("../../utils/intern_fmt_cache.zig");
@@ -53,6 +54,7 @@ pub fn @"consume amq.direct/client.ack.{client.id}"(
     const alloc = arena.allocator();
     reg.assigned_id = try alloc.dupe(u8, ack.id);
     reg.state = .registered;
+    metrics.setClientId(reg.assigned_id.?);
     log.info(
         "Client [{s}:{s}] was assigned id '{s}' by [{s}:{s}].",
         .{
