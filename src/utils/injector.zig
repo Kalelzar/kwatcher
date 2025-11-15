@@ -48,7 +48,7 @@ const Context = *anyopaque;
 const Resolver = *const fn (Context, meta.TypeId) ?*anyopaque;
 /// The type of a factory resolver function
 const FactoryResolver = *const fn (meta.TypeId) ?*const fn (*Injector) anyerror!*anyopaque;
-/// The type oof the dispose function.
+/// The type of the dispose function.
 const DisposeFn = *const fn (Context) void;
 
 /// A dependency injector with support for parent injectors.
@@ -103,12 +103,28 @@ pub const Injector = struct {
             };
 
             switch (comptime @typeInfo(meta.Return(fun))) {
-                .error_union => @compileError("Doconstruct must not return an error."),
+                .error_union => @compileError("Deconstruct must not return an error."),
                 else => dispose = F.dispose_handler,
             }
         }
 
-        if (parent) |p| blk: {
+        const configured_parent: ?*Injector = if (comptime @hasDecl(ContextType, "preconfigure")) blk: {
+            const fun = @field(ContextType, "preconfigure");
+            const ti = @typeInfo(@TypeOf(fun));
+            if (comptime ti != .@"fn") {
+                break :blk parent;
+            } else {
+                if (parent) |p| {
+                    break :blk try p.call_first(ContextType.preconfigure, .{p});
+                } else {
+                    var bogus = struct {}{};
+                    var p = try Injector.init(&bogus, null);
+                    break :blk try p.call_first(ContextType.preconfigure, .{parent});
+                }
+            }
+        } else parent;
+
+        if (configured_parent) |p| blk: {
             // If we have a parent and a construct function on the context we might as well try to call it by injecting it's dependencies via
             // our parent.
             // This still lets us init contexts manually as users but we open the door to allow the framework to handle some of it for us
@@ -251,7 +267,7 @@ pub const Injector = struct {
             .resolver = &InternalResolver.resolve,
             .resolver_factory = &InternalResolver.resolveFactory,
             .dispose = dispose,
-            .parent = parent,
+            .parent = configured_parent,
         };
     }
 
@@ -428,6 +444,7 @@ pub const Injector = struct {
             const args = Args{self.context};
             @call(.auto, destructor, args);
         }
+        // FIXME: we need to deconstruct any interdicted parents here.
     }
 };
 
