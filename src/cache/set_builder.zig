@@ -13,6 +13,12 @@ pub const Residency = union(enum) {
     unlimited: void,
 };
 
+pub const Expiration = union(enum) {
+    absolute: i64,
+    sliding: i64,
+    unlimited: void,
+};
+
 pub fn SetOptions(comptime Data: type) type {
     return union(enum) {
         key: []const u8,
@@ -21,6 +27,7 @@ pub fn SetOptions(comptime Data: type) type {
         push: *const fn (*Injector, Data, *anyopaque) anyerror!?Data,
         eviction: EvictionStrategy,
         residency: Residency,
+        expiration: Expiration,
     };
 }
 
@@ -139,6 +146,10 @@ pub fn SetBuilder(comptime Data: type, comptime Invariant: anytype) type {
             return self.extend(.{ .residency = r });
         }
 
+        pub fn expiration(comptime self: Self, comptime e: Expiration) Self {
+            return self.extend(.{ .expiration = e });
+        }
+
         pub fn TypeFor(comptime self: Self) type {
             var has_cold = false;
             var has_hot = false;
@@ -146,6 +157,7 @@ pub fn SetBuilder(comptime Data: type, comptime Invariant: anytype) type {
             var has_push = false;
             var eviction = EvictionStrategy.none;
             var resident = Residency{ .unlimited = {} };
+            var exp = Expiration{ .unlimited = {} };
 
             comptime {
                 for (self.opts) |opts| {
@@ -156,6 +168,7 @@ pub fn SetBuilder(comptime Data: type, comptime Invariant: anytype) type {
                         .push => has_push = true,
                         .eviction => |e| eviction = e,
                         .residency => |r| resident = r,
+                        .expiration => |e| exp = e,
                     }
                 }
 
@@ -163,10 +176,7 @@ pub fn SetBuilder(comptime Data: type, comptime Invariant: anytype) type {
                     @compileError("A cache always needs a key!");
                 }
 
-                return switch (eviction) {
-                    .none => cache.HotCold(Data),
-                    .lru => cache.HotColdLru(Data),
-                };
+                return cache.HotCold(Data);
             }
         }
 

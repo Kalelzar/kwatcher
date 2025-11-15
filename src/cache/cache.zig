@@ -5,18 +5,10 @@ const metrics = @import("../utils/metrics.zig");
 pub const SetBuilder = @import("set_builder.zig").SetBuilder;
 pub const EvictionStrategy = @import("set_builder.zig").EvictionStrategy;
 pub const Residency = @import("set_builder.zig").Residency;
+pub const Expiration = @import("set_builder.zig").Expiration;
 pub const HotCold = @import("hotcold.zig").HotCold;
-pub const HotColdLru = @import("hotcold.zig").HotColdLru;
-pub const cacheInterfaceTypeMap = @import("hotcold.zig").cacheInterfaceTypeMap;
-pub const Memory = @import("memory_cache.zig").Memory;
-pub const MemoryContext = @import("memory_cache.zig").MemoryContext;
-pub const LRUContext = @import("memory_cache.zig").LRUContext;
-pub fn LRUMemoryContext(comptime Data: type) type {
-    return LRUContext(Data, MemoryContext, .{ .count = 256 });
-}
-pub const MemoryContextResolver = @import("memory_cache.zig").MemoryContextResolver;
-pub const File = @import("file_cache.zig").File;
-pub const FileContext = @import("file_cache.zig").FileContext;
+pub const context = @import("context.zig");
+pub const eviction = @import("eviction.zig");
 pub const Tiered = @import("tiered_cache.zig").TieredCache;
 
 pub fn Cache(comptime Data: type) type {
@@ -71,14 +63,23 @@ pub fn autoCacheWithContexts(
             const hash = std.fmt.bytesToHex(&hashBytes, .upper);
 
             const config = try inj.require(HotCold(Data));
-            // FIXME: Do ot reguire the contexts twice.
+            // FIXME: Do not require the contexts twice.
             inline for (0..Context.len) |i| {
-                var context = try inj.require(*(Context[i]));
-                if (try context.get(&hash)) |r| {
+                var ctx = try inj.require(*(Context[i]));
+                if (try ctx.get(&hash)) |r| {
                     try metrics.cacheHit(config.key, Context[i].id);
                     inline for (0..i) |j| {
                         var other_context = try inj.require(*(Context[j]));
-                        try other_context.put(&hash, try Data.dupe(other_context.allocator, &r));
+                        switch (@typeInfo(Data)) {
+                            inline .@"struct" => {
+                                if (comptime @hasDecl(Data, "dupe")) {
+                                    try other_context.put(&hash, try Data.dupe(other_context.allocator, &r));
+                                } else {
+                                    try other_context.put(&hash, r);
+                                }
+                            },
+                            else => try other_context.put(&hash, r),
+                        }
                         try metrics.cacheGrow(config.key, Context[j].id);
                     }
                     return r;
@@ -89,8 +90,8 @@ pub fn autoCacheWithContexts(
             if (config.cold) |c| {
                 const data = try @call(.auto, c, .{ inj, invariant });
                 inline for (0..Context.len) |i| {
-                    var context = try inj.require(*(Context[i]));
-                    try context.put(&hash, data);
+                    var ctx = try inj.require(*(Context[i]));
+                    try ctx.put(&hash, data);
                     try metrics.cacheGrow(config.key, Context[i].id);
                 }
 
@@ -120,8 +121,8 @@ pub fn autoPushWithContexts(
 
             const config = try inj.require(HotCold(Data));
             inline for (0..Context.len) |i| {
-                var context = try inj.require(*(Context[i]));
-                try context.put(&hash, data);
+                var ctx = try inj.require(*(Context[i]));
+                try ctx.put(&hash, data);
                 try metrics.cacheGrow(config.key, Context[i].id);
             }
 
