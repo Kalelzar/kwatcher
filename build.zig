@@ -1,11 +1,59 @@
 const std = @import("std");
 
+pub fn benchmarks(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    lib_mod: *std.Build.Module,
+) !*std.Build.Step {
+    const name: []const []const u8 = &.{
+        "memCacheN",
+        "memCacheNWithLRU",
+        "memCacheNWithTTL",
+        "memCacheNWithLRUThenTTL",
+        "memGetNLinear",
+        "memGetNLinearWithLRU",
+        "memGetNRandom",
+        "memGetNRandomWithLRU",
+        "fileCacheN",
+        "fileCacheNWithLRU",
+        "tierCacheN",
+    };
+    const step = b.step("benchmark", "Builds various benchmarks.");
+    const global_install = b.getInstallStep();
+
+    inline for (name) |n| {
+        const file = "src/benchmark/cache/" ++ n ++ ".zig";
+        const bench_mod = b.createModule(.{
+            .root_source_file = b.path(file),
+            .target = target,
+            .optimize = optimize,
+        });
+
+        bench_mod.addImport("kwatcher", lib_mod);
+
+        const bench_exe = b.addExecutable(.{
+            .name = n,
+            .root_module = bench_mod,
+        });
+
+        const install = b.addInstallArtifact(bench_exe, .{});
+
+        global_install.dependOn(&install.step);
+
+        step.dependOn(&install.step);
+    }
+
+    return step;
+}
+
 pub fn build(b: *std.Build) !void {
     // Options
     const build_all = b.option(bool, "all", "Build all components. You can still disable individual components") orelse false;
     const build_example = b.option(bool, "example", "Build the example application") orelse build_all;
     const build_static_library = b.option(bool, "lib", "Build a static library object") orelse build_all;
     const build_dump_tool = b.option(bool, "dump", "Build the dump tool") orelse build_all;
+
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -93,6 +141,9 @@ pub fn build(b: *std.Build) !void {
     const docs_step = b.step("docs", "Generate docs");
     docs_step.dependOn(&install_docs.step);
     docs_step.dependOn(&lib.step);
+
+    const bench_step = try benchmarks(b, target, optimize, kwatcher_library);
+    bench_step.dependOn(&lib.step);
 
     // Dependencies:
     // 1st Party:
