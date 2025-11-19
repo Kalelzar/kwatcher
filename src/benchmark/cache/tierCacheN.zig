@@ -8,10 +8,14 @@ pub fn main() !void {
     defer args.deinit();
     _ = args.skip();
 
-    const cacheConfig = comptime kwatcher.cache.context.tiered.Cache(usize, .{usize}, .{
-        .mem = kwatcher.cache.context.memory.Resolver,
-        .file = kwatcher.cache.context.file.Resolver,
-    }).key(.bench)
+    const cacheConfig = comptime kwatcher.cache.context.tiered.Cache(
+        usize,
+        .{usize},
+        .{
+            .mem = kwatcher.cache.context.memory.Resolver,
+            .file = kwatcher.cache.context.file.Resolver,
+        },
+    ).key(.bench)
         .evict(.{
             .mem = .none,
             .file = .none,
@@ -24,7 +28,7 @@ pub fn main() !void {
             .mem = kwatcher.cache.Expiration{ .unlimited = {} },
             .file = kwatcher.cache.Expiration{ .unlimited = {} },
         })
-        .intern();
+        .intern(0);
 
     const nstr = args.next() orelse "256";
     const n = try std.fmt.parseUnsigned(usize, nstr, 10);

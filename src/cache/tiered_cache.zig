@@ -1,6 +1,7 @@
 const std = @import("std");
 const klib = @import("klib");
 const cache = @import("cache.zig");
+const inject = @import("../utils/injector.zig");
 
 pub fn SetBuilder(
     comptime Data: type,
@@ -35,6 +36,7 @@ pub fn SetBuilder(
         const Self = @This();
         const DataType = Data;
         const InvariantType = Invariant;
+        const ResolversStruct = Resolvers;
 
         builder: BuilderMap,
 
@@ -51,9 +53,9 @@ pub fn SetBuilder(
 
         pub fn cold(comptime self: Self, comptime f: anytype) Self {
             var new_builder: BuilderMap = undefined;
-            const flds = @typeInfo(@TypeOf(f)).@"struct".fields;
+            const flds = @typeInfo(BuilderMap).@"struct".fields;
             for (flds) |fld| {
-                @field(new_builder, fld.name) = @field(self.builder, fld.name).cold(@field(f, fld.name));
+                @field(new_builder, fld.name) = @field(self.builder, fld.name).cold(f);
             }
 
             return .{
@@ -115,8 +117,8 @@ pub fn SetBuilder(
             }
         }
 
-        pub fn intern(comptime self: Self) struct {
-            pub const Context = self.resolve();
+        pub fn intern(comptime self: Self, comptime index: comptime_int) struct {
+            pub const Context = self.resolve()[index];
             pub const Interface = self.interface();
             interface: Interface,
         } {
@@ -162,6 +164,72 @@ pub fn SetBuilder(
             }
         }
     };
+}
+
+pub fn Dependencies(
+    comptime Data: type,
+    comptime Invariant: anytype,
+    comptime Resolvers: anytype,
+    comptime config: SetBuilder(Data, Invariant, Resolvers),
+    comptime index: comptime_int,
+) type {
+    const __interned = config.intern(index);
+    const Interface = @TypeOf(__interned).Interface;
+    const ContextType = @TypeOf(__interned).Context;
+    return struct {
+        interface: Interface = __interned.interface,
+        context: ?*ContextType = null,
+
+        pub fn contextFactory(self: *@This(), persistent: std.mem.Allocator) !*ContextType {
+            if (self.context) |c| {
+                return c;
+            }
+
+            const ptr = try persistent.create(ContextType);
+            const key = self.interface.key;
+            if (comptime klib.meta.canBeError(ContextType.init)) {
+                ptr.* = try .init(persistent, key);
+            } else {
+                ptr.* = .init(persistent, key);
+            }
+            self.context = ptr;
+
+            return ptr;
+        }
+
+        pub fn cacheFactory(inj: *inject.Injector, intf: Interface) cache.Cache(Data) {
+            return .{ .config = intf.interface(), .inj = inj };
+        }
+    };
+}
+
+pub fn interdict(
+    comptime config: anytype,
+    parent: ?*inject.Injector,
+    persistent: std.mem.Allocator,
+) !*inject.Injector {
+    const Data = @TypeOf(config).DataType;
+    const Invariant = @TypeOf(config).InvariantType;
+    const Resolvers = @TypeOf(config).ResolversStruct;
+    var res: ?*inject.Injector = parent;
+    inline for (@typeInfo(@TypeOf(Resolvers)).@"struct".fields, 0..) |_, i| {
+        const inj = try persistent.create(inject.Injector);
+        errdefer persistent.destroy(inj);
+        const deps = Dependencies(
+            Data,
+            Invariant,
+            Resolvers,
+            config,
+            i,
+        ){};
+        const ctx = try persistent.create(@TypeOf(deps));
+
+        ctx.* = deps;
+        inj.* = try .init(ctx, res);
+        res = inj;
+    }
+
+    return res orelse error.EmptyInjector;
 }
 
 pub fn Cache(

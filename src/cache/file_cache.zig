@@ -3,6 +3,7 @@ const klib = @import("klib");
 const cache = @import("cache.zig");
 const serializer = @import("byte_serializer.zig");
 const eviction = @import("eviction.zig");
+const inject = @import("../utils/injector.zig");
 
 pub fn Resolver(
     comptime Data: type,
@@ -21,6 +22,60 @@ pub fn Resolver(
     };
 
     return WithEviction(Data);
+}
+
+pub fn Dependencies(
+    comptime Data: type,
+    comptime Invariant: anytype,
+    comptime config: SetBuilder(Data, Invariant),
+) type {
+    const __interned = config.intern();
+    const Interface = @TypeOf(__interned).Interface;
+    const ContextType = @TypeOf(__interned).Context;
+    return struct {
+        interface: Interface = __interned.interface,
+        context: ?*ContextType = null,
+
+        pub fn contextFactory(self: *@This(), persistent: std.mem.Allocator) !*ContextType {
+            if (self.context) |c| {
+                return c;
+            }
+
+            const ptr = try persistent.create(ContextType);
+            const key = self.interface.key;
+            if (comptime klib.meta.canBeError(ContextType.init)) {
+                ptr.* = try .init(persistent, key);
+            } else {
+                ptr.* = .init(persistent, key);
+            }
+            self.context = ptr;
+
+            return ptr;
+        }
+
+        pub fn cacheFactory(inj: *inject.Injector, intf: Interface) cache.Cache(Data) {
+            return .{ .config = intf.interface(), .inj = inj };
+        }
+    };
+}
+
+pub fn interdict(
+    comptime config: anytype,
+    parent: ?*inject.Injector,
+    persistent: std.mem.Allocator,
+) !*inject.Injector {
+    const Data = @TypeOf(config).DataType;
+    const Invariant = @TypeOf(config).InvariantType;
+
+    const inj = try persistent.create(inject.Injector);
+    errdefer persistent.destroy(inj);
+    const deps = Dependencies(Data, Invariant, config){};
+    const ctx = try persistent.create(@TypeOf(deps));
+
+    ctx.* = deps;
+    inj.* = try .init(ctx, parent);
+
+    return inj;
 }
 
 pub fn SetBuilder(comptime Data: type, comptime Invariant: anytype) type {
