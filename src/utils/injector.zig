@@ -35,6 +35,7 @@
 //! For properties that need to be initialized only once, caching them as optional plain properties is a common pattern.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 const klib = @import("klib");
 const meta = klib.meta;
@@ -56,6 +57,8 @@ const DisposeFn = *const fn (Context) void;
 /// to any function called with it, supporting both plain properties
 /// and factory functions.
 pub const Injector = struct {
+    /// Dependency graph
+    graph: Analyser.Graph,
     /// The context from which to inject dependencies
     context: Context,
     /// The resolver function
@@ -124,7 +127,14 @@ pub const Injector = struct {
             }
         } else parent;
 
+        var graph = comptime Analyser.analyse(ContextType);
+        // for (0..graph.len) |i| {
+        //     std.debug.print("vvv\n", .{});
+        //     graph.nodes[i].print(graph, 0);
+        // }
+
         if (configured_parent) |p| blk: {
+            graph.fulfill(p.graph);
             // If we have a parent and a construct function on the context we might as well try to call it by injecting it's dependencies via
             // our parent.
             // This still lets us init contexts manually as users but we open the door to allow the framework to handle some of it for us
@@ -148,6 +158,11 @@ pub const Injector = struct {
                     else => @call(.auto, fun, args),
                 }
             }
+        }
+
+        if (!graph.isFulfilled()) {
+            graph.blame();
+            return error.Unfulfilled;
         }
 
         // The internal resolver functions used by the injector.
@@ -263,6 +278,7 @@ pub const Injector = struct {
         };
 
         return .{
+            .graph = graph,
             .context = @ptrCast(@constCast(context)),
             .resolver = &InternalResolver.resolve,
             .resolver_factory = &InternalResolver.resolveFactory,
@@ -273,8 +289,19 @@ pub const Injector = struct {
 
     /// Require a dependency of type `T`. Will return an error if a dependency is missing or a factory returns an error.
     pub fn require(self: *Injector, comptime T: type) !T {
+        if (self.graph.indexOf(T)) |i| blk: {
+            const n = self.graph.nodes[i];
+            if (n.isFulfilled(&self.graph)) break :blk;
+            n.blame(&self.graph);
+            std.log.err("Unfulfilled dependency: {s}", .{@typeName(T)});
+            return error.UnfulfilledDependency;
+        } else {
+            std.log.err("Missing dependency: {s}", .{@typeName(T)});
+            return error.MissingDependency;
+        }
+
         return try self.get(T) orelse {
-            std.log.debug("Missing dependency: {s}", .{@typeName(T)});
+            std.log.err("Missing dependency: {s}", .{@typeName(T)});
             return error.MissingDependency;
         };
     }
@@ -290,6 +317,16 @@ pub const Injector = struct {
     /// 5. If a factory exists for `T` return the result of calling the factory with the current injector.
     /// 6. Else try to resolve via the parent if any or return null if no parent exists.
     pub fn get(self: *Injector, comptime T: type) !?T {
+        if (self.graph.indexOf(T)) |i| blk: {
+            const n = self.graph.nodes[i];
+            if (n.isFulfilled(&self.graph)) break :blk;
+            n.blame(&self.graph);
+            std.log.warn("Unfulfilled dependency: {s}", .{@typeName(T)});
+            return null;
+        } else {
+            return null;
+        }
+
         if (comptime T == *Injector) {
             return self;
         }
@@ -447,6 +484,322 @@ pub const Injector = struct {
         // FIXME: we need to deconstruct any interdicted parents here.
     }
 };
+
+const Analyser = struct {
+    const Node = struct {
+        name: []const u8,
+        source: []const u8,
+        id: klib.meta.TypeId,
+        to: [256]u8 = undefined,
+        len: u8 = 0,
+        provided: bool = false,
+
+        pub fn isFulfilled(self: *const Node, g: *const Graph) bool {
+            if (self.len == 0) return self.provided;
+            for (0..self.len) |i| {
+                const dep = self.to[i];
+                const nod = g.nodes[dep];
+                if (!nod.isFulfilled(g)) return false;
+            }
+            return true;
+        }
+
+        pub fn blame(self: *const Node, g: *const Graph) void {
+            if (self.len == 0) {
+                if (!self.provided) {
+                    std.debug.print("Unresolved static of type '{s}'\n", .{self.name});
+                }
+            }
+            for (0..self.len) |i| {
+                const dep = self.to[i];
+                const nod = g.nodes[dep];
+                if (!nod.isFulfilled(g)) {
+                    std.debug.print("Unresolved factory {s} of type '{s}'\n", .{ self.source, self.name });
+                    nod.blame(g);
+                }
+            }
+        }
+    };
+
+    const Graph = struct {
+        nodes: [256]Node = undefined,
+        len: u8 = 0,
+
+        pub fn isAvailable(self: *Graph, comptime T: type) bool {
+            const tid = klib.meta.typeId(T);
+            for (0..self.len) |i| {
+                if (self.nodes[i].id == tid) return self.nodes[i].isFulfilled(self);
+            }
+            return false;
+        }
+
+        pub fn indexOf(self: *Graph, comptime T: type) ?u8 {
+            const tid = klib.meta.typeId(T);
+            for (0..self.len) |i| {
+                if (self.nodes[i].id == tid) {
+                    return @intCast(i);
+                }
+            }
+            return null;
+        }
+
+        pub fn fulfill(self: *Graph, other: Graph) void {
+            outer: for (0..other.len) |i| {
+                const theirs = other.nodes[i];
+                const og = self.len;
+                for (0..og) |j| {
+                    const ours = self.nodes[j];
+                    if (ours.isFulfilled(self)) continue;
+                    if (theirs.id == ours.id) {
+                        self.nodes[j] = theirs;
+                        continue :outer;
+                    }
+                }
+                self.cloneInto(other, theirs);
+            }
+        }
+
+        pub fn cloneInto(self: *Graph, other: Graph, node: Node) void {
+            if (self.len == 255) @panic("Oveflow on dependency graph buffer!");
+            const target = self.len;
+            self.nodes[self.len] = node;
+            self.len += 1;
+            deps: for (0..node.len) |j| {
+                const their_dep = other.nodes[node.to[j]];
+                for (0..self.len) |k| {
+                    const ours = self.nodes[k];
+                    if (ours.id == their_dep.id) {
+                        self.nodes[target].to[j] = @intCast(k);
+                        continue :deps;
+                    }
+                }
+                const dtarget = self.len;
+                self.cloneInto(other, their_dep);
+                self.nodes[target].to[j] = dtarget;
+            }
+        }
+
+        pub fn blame(self: *const Graph) void {
+            for (0..self.len) |i| {
+                const n = self.nodes[i];
+                if (!n.isFulfilled(self)) {
+                    n.blame(self);
+                }
+            }
+        }
+
+        pub fn isFulfilled(self: *const Graph) bool {
+            for (0..self.len) |i| {
+                const n = self.nodes[i];
+                if (!n.isFulfilled(self)) {
+                    if (@inComptime()) {
+                        @compileError(std.fmt.comptimePrint(
+                            "Factory {s} cannot be fulfilled.",
+                            .{n.name},
+                        ));
+                    } else {
+                        std.log.err("Factory {s} cannot be fulfilled.", .{n.name});
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        pub fn provides(comptime self: *Graph, n: Node) void {
+            for (0..self.len) |i| {
+                if (self.nodes[i].id == n.id) {
+                    self.nodes[i].provided = true;
+                    return;
+                }
+            }
+            if (comptime self.len == 255) @compileError("Exceeded maximum dependency graph size.");
+            self.nodes[self.len] = n;
+            self.nodes[self.len].provided = true;
+            self.len += 1;
+        }
+
+        pub fn depends(comptime self: *Graph, of: klib.meta.TypeId, n: Node) void {
+            var idx: ?u8 = null;
+            for (0..self.len) |i| {
+                if (self.nodes[i].id == n.id) {
+                    if (idx) |j| {
+                        self.nodes[j].to[self.nodes[j].len] = i;
+                        self.nodes[j].len += 1;
+                        return;
+                    } else {
+                        idx = i;
+                    }
+                }
+                if (self.nodes[i].id == of) {
+                    if (idx) |j| {
+                        self.nodes[i].to[self.nodes[i].len] = j;
+                        self.nodes[i].len += 1;
+                        return;
+                    } else {
+                        idx = i;
+                    }
+                }
+            }
+            if (idx) |i| {
+                if (comptime self.len == 255) @compileError("Exceeded maximum dependency graph size.");
+                self.nodes[self.len] = n;
+                self.nodes[i].to[self.nodes[i].len] = self.len;
+                self.nodes[i].len += 1;
+                self.len += 1;
+            } else {
+                @compileError("Invalid depend call. Expected dependant type to already be in the graph");
+            }
+        }
+    };
+
+    pub fn analyse(comptime Ctx: type) Graph {
+        comptime {
+            @setEvalBranchQuota(1_000_000);
+            const ti = @typeInfo(Ctx);
+            var g: Graph = .{};
+
+            if (ti != .@"struct") @compileError("You can only analyze the dependencies of structs");
+
+            const sti = ti.@"struct";
+
+            g.provides(.{
+                .name = @typeName(*Ctx),
+                .source = "self",
+                .id = klib.meta.typeId(*Ctx),
+            });
+
+            g.provides(.{
+                .name = @typeName(*Injector),
+                .source = "injector",
+                .id = klib.meta.typeId(*Injector),
+            });
+
+            for (sti.fields) |f| {
+                const fti = @typeInfo(f.type);
+                switch (fti) {
+                    .optional => continue,
+                    .pointer => |p| {
+                        const isConst = p.is_const;
+                        const t = if (isConst) *p.child else f.type;
+                        const ct = if (isConst) f.type else *const p.child;
+                        g.provides(.{
+                            .name = @typeName(t),
+                            .source = f.name,
+                            .id = klib.meta.typeId(t),
+                        });
+                        g.provides(.{
+                            .name = @typeName(ct),
+                            .source = f.name,
+                            .id = klib.meta.typeId(ct),
+                        });
+                        g.provides(.{
+                            .name = @typeName(p.child),
+                            .source = f.name,
+                            .id = klib.meta.typeId(p.child),
+                        });
+                    },
+                    else => {
+                        g.provides(.{
+                            .name = @typeName(f.type),
+                            .source = f.name,
+                            .id = klib.meta.typeId(f.type),
+                        });
+                        g.provides(.{
+                            .name = @typeName(*f.type),
+                            .source = f.name,
+                            .id = klib.meta.typeId(*f.type),
+                        });
+                        g.provides(.{
+                            .name = @typeName(*const f.type),
+                            .source = f.name,
+                            .id = klib.meta.typeId(*const f.type),
+                        });
+                    },
+                }
+            }
+            for (std.meta.declarations(Ctx)) |d| {
+                if (reserved_declarations_map.has(d.name)) continue;
+                const fun = @field(Ctx, d.name);
+                const dsti = @typeInfo(@TypeOf(fun));
+                switch (dsti) {
+                    .@"fn" => |_| {
+                        const rid = @typeInfo(klib.meta.Result(fun));
+                        const fid = klib.meta.typeId(klib.meta.Result(fun));
+                        switch (rid) {
+                            .pointer => |p| {
+                                const isConst = p.is_const;
+                                const other = if (isConst) *p.child else *const p.child;
+                                g.provides(.{
+                                    .name = @typeName(p.child),
+                                    .source = d.name,
+                                    .id = klib.meta.typeId(p.child),
+                                });
+                                g.provides(.{
+                                    .name = @typeName(other),
+                                    .source = d.name,
+                                    .id = klib.meta.typeId(other),
+                                });
+                            },
+                            else => {
+                                g.provides(.{
+                                    .name = @typeName(*const klib.meta.Result(fun)),
+                                    .source = d.name,
+                                    .id = klib.meta.typeId(*const klib.meta.Result(fun)),
+                                });
+                            },
+                        }
+                        g.provides(.{
+                            .name = @typeName(klib.meta.Result(fun)),
+                            .source = d.name,
+                            .id = fid,
+                        });
+                        const args = std.meta.ArgsTuple(@TypeOf(fun));
+                        for (std.meta.fields(args)) |a| {
+                            switch (rid) {
+                                .pointer => |p| {
+                                    const isConst = p.is_const;
+                                    const other = if (isConst) *p.child else *const p.child;
+                                    g.depends(klib.meta.typeId(p.child), .{
+                                        .name = @typeName(a.type),
+                                        .source = a.name,
+                                        .id = klib.meta.typeId(a.type),
+                                    });
+                                    g.depends(klib.meta.typeId(other), .{
+                                        .name = @typeName(a.type),
+                                        .source = a.name,
+                                        .id = klib.meta.typeId(a.type),
+                                    });
+                                },
+                                else => {
+                                    g.depends(klib.meta.typeId(*const klib.meta.Result(fun)), .{
+                                        .name = @typeName(a.type),
+                                        .source = a.name,
+                                        .id = klib.meta.typeId(a.type),
+                                    });
+                                },
+                            }
+                            g.depends(fid, .{
+                                .name = @typeName(a.type),
+                                .source = a.name,
+                                .id = klib.meta.typeId(a.type),
+                            });
+                        }
+                    },
+                    else => {},
+                }
+            }
+            return g;
+        }
+    }
+};
+
+const reserved_declarations_map = std.StaticStringMap(void).initComptime(.{
+    .{"deconstruct"},
+    .{"deinit"},
+    .{"init"},
+    .{"preconfigure"}, //FIXME: This does need to be checked
+});
 
 fn resolveNull(_: Context, _: meta.TypeId) ?*anyopaque {
     return null;
