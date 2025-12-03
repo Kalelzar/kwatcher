@@ -267,12 +267,15 @@ pub fn Server(
         const Self = @This();
         const Context = context.Context(UserContext);
         instrumented_allocator: *klib.mem.InstrumentedAllocator,
-        deps: Dependencies(Context, UserConfig, client_name, client_version),
+        deps: *Dependencies(Context, UserConfig, client_name, client_version),
         user_deps: *UserSingletonDependencies,
         routes: std.ArrayListUnmanaged(Route(Context)),
 
         consumers: std.StringHashMapUnmanaged(Route(Context)),
         publishers: std.ArrayListUnmanaged(Route(Context)),
+
+        base_injector: *Injector,
+        user_injector: *Injector,
 
         retries: i8 = 0,
         backoff: u64 = 5,
@@ -311,14 +314,26 @@ pub fn Server(
             routes.appendSliceAssumeCapacity(default_routes);
             routes.appendSliceAssumeCapacity(client_registration_routes);
 
-            return .{
+            const deps_ptr = try allocator.create(@TypeOf(default_deps));
+            deps_ptr.* = default_deps;
+
+            const res = Self{
+                .base_injector = try alloc.create(Injector),
+                .user_injector = try alloc.create(Injector),
                 .instrumented_allocator = instrumented_allocator,
                 .user_deps = deps,
-                .deps = default_deps,
+                .deps = deps_ptr,
                 .routes = routes,
                 .consumers = .{},
                 .publishers = .{},
             };
+
+            const base_injector = try Injector.init(res.deps, null);
+            res.base_injector.* = base_injector;
+            const user_injector = try Injector.init(res.user_deps, res.base_injector);
+            res.user_injector.* = user_injector;
+
+            return res;
         }
 
         pub fn deinit(self: *Self) void {
@@ -330,10 +345,8 @@ pub fn Server(
 
         pub fn configure(self: *Self) !void {
             log_server.info("Configuring server", .{});
-            var base_injector = try Injector.init(&self.deps, null);
-            var user_injector = try Injector.init(self.user_deps, &base_injector);
 
-            const client = try user_injector.require(Client);
+            const client = try self.user_injector.require(Client);
 
             const alloc = self.instrumented_allocator.allocator();
             self.publishers.clearRetainingCapacity();
@@ -346,7 +359,7 @@ pub fn Server(
             log_server.info("Found {d} routes: ", .{self.routes.items.len});
             for (self.routes.items) |*route_ptr| {
                 var route = route_ptr.*;
-                const existing = try (&route).updateBindings(&user_injector);
+                const existing = try (&route).updateBindings(self.user_injector);
                 if (existing) |_| {
                     @panic("A consumer tag shouldn't exist yet. Something is very wrong. Server state corrupted... Aborting");
                 }
@@ -379,21 +392,19 @@ pub fn Server(
         }
 
         pub fn handlePublish(self: *Self) !void {
-            var base_injector = try Injector.init(&self.deps, null);
-            var user_injector = try Injector.init(self.user_deps, &base_injector);
             const PublishArgs = std.meta.Tuple(&.{*Injector});
-            var cl = try user_injector.require(Client);
+            var cl = try self.user_injector.require(Client);
             defer cl.reset();
-            var internal_arena = try user_injector.require(mem.InternalArena);
+            var internal_arena = try self.user_injector.require(mem.InternalArena);
             defer internal_arena.reset();
-            var timer = try base_injector.require(Timer);
+            var timer = try self.base_injector.require(Timer);
             for (self.publishers.items) |*route| {
                 const act_start = std.time.microTimestamp();
                 defer internal_arena.reset();
                 const event_handler = route.handlers.event.?;
                 // Prepare dependency injection
                 var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
-                var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
+                var scoped_injector = try Injector.init(&scoped_deps, self.user_injector);
                 defer scoped_injector.maybeDeconstruct();
                 var binding_injector = try Injector.init(@constCast(&.{ .binding = @constCast(&route.binding) }), &scoped_injector);
                 defer binding_injector.maybeDeconstruct();
@@ -430,13 +441,11 @@ pub fn Server(
         }
 
         pub fn handleReplay(self: *Self) !void {
-            var base_injector = try Injector.init(&self.deps, null);
-            var user_injector = try Injector.init(self.user_deps, &base_injector);
-            const cb = try user_injector.require(*CircuitBreakerClient);
+            const cb = try self.user_injector.require(*CircuitBreakerClient);
             if (cb.state != .closed) return;
 
-            const base_config = try user_injector.require(config.BaseConfig);
-            var internal_arena = try user_injector.require(mem.InternalArena);
+            const base_config = try self.user_injector.require(config.BaseConfig);
+            var internal_arena = try self.user_injector.require(mem.InternalArena);
             defer internal_arena.reset();
             var amcl = try AmqpClient.init(
                 internal_arena.allocator(),
@@ -459,11 +468,9 @@ pub fn Server(
 
         pub fn handleConsume(self: *Self, interval: u64) !void {
             const ConsumeArgs = std.meta.Tuple(&.{ *Injector, []const u8 });
-            var base_injector = try Injector.init(&self.deps, null);
-            var user_injector = try Injector.init(self.user_deps, &base_injector);
-            var cl = try user_injector.require(Client);
+            var cl = try self.user_injector.require(Client);
             defer cl.reset();
-            var internal_arena = try user_injector.require(mem.InternalArena);
+            var internal_arena = try self.user_injector.require(mem.InternalArena);
             defer internal_arena.reset();
 
             var remaining: i64 = @intCast(interval);
@@ -488,7 +495,7 @@ pub fn Server(
                     }
 
                     var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
-                    var scoped_injector = try Injector.init(&scoped_deps, &user_injector);
+                    var scoped_injector = try Injector.init(&scoped_deps, self.user_injector);
                     defer scoped_injector.maybeDeconstruct();
                     var binding_injector = try Injector.init(@constCast(&.{ .binding = &route.binding }), &scoped_injector);
                     defer binding_injector.maybeDeconstruct();
@@ -567,9 +574,7 @@ pub fn Server(
 
         pub fn run(self: *Self, extra: struct { cycles: u64 }) !void {
             const alloc = self.instrumented_allocator.allocator();
-            var base_injector = try Injector.init(&self.deps, null);
-            var user_injector = try Injector.init(self.user_deps, &base_injector);
-            const base_conf = try user_injector.require(config.BaseConfig);
+            const base_conf = try self.user_injector.require(config.BaseConfig);
             var rem_cycles = extra.cycles;
             self.configure() catch |e| {
                 log_server.err("Encountered an error while configuring the client: {}", .{e});
@@ -586,7 +591,7 @@ pub fn Server(
                 try metrics.resetCycle();
                 const start_time = try std.time.Instant.now();
                 for (self.publishers.items) |*route| {
-                    const ct = try route.updateBindings(&user_injector);
+                    const ct = try route.updateBindings(self.user_injector);
                     if (ct) |_| {
                         return error.UnexpectedConsumerTag;
                     }
@@ -594,7 +599,7 @@ pub fn Server(
 
                 var it = self.consumers.iterator();
                 while (it.next()) |entry| {
-                    const maybe_new = try entry.value_ptr.updateBindings(&user_injector);
+                    const maybe_new = try entry.value_ptr.updateBindings(self.user_injector);
                     if (maybe_new == null) return error.ExpectedConsumerTag;
                     const new = maybe_new.?;
                     if (!std.mem.eql(u8, new, entry.key_ptr.*)) {
@@ -627,9 +632,7 @@ pub fn Server(
         }
 
         pub fn reset(self: *Self) !void {
-            var base_injector = try Injector.init(&self.deps, null);
-            var user_injector = try Injector.init(self.user_deps, &base_injector);
-            const client = try user_injector.require(Client);
+            const client = try self.user_injector.require(Client);
 
             client.disconnect() catch |e| switch (e) {
                 .InvalidState, .DeadClient => {},
@@ -647,8 +650,6 @@ pub fn Server(
 
         pub fn start(self: *Self) !void {
             // In contrast to run, start will try to connect again in case a disconnection occurs.
-            var base_injector = try Injector.init(&self.deps, null);
-            var user_injector = try Injector.init(self.user_deps, &base_injector);
             main_loop: while (self.should_run.raw) {
                 self.run(.{ .cycles = 0 }) catch |e| {
                     if (e == error.AuthFailure) {
@@ -685,7 +686,7 @@ pub fn Server(
                         self.backoff *= 2;
                         self.retries += 1;
 
-                        _ = user_injector.require(Client) catch |ce| {
+                        _ = self.user_injector.require(Client) catch |ce| {
                             last_error = ce;
                             continue;
                         };
