@@ -6,29 +6,23 @@ const Root = struct {
 };
 
 const Ctx = struct {
-    const Config = kwatcher.cache.context.tiered.Cache(
+    const H = struct {
+        pub fn getCold(key: usize) usize {
+            return key;
+        }
+    };
+
+    const Config = kwatcher.cache.context.memory.Cache(
         usize,
         .{usize},
-        .{
-            .mem = kwatcher.cache.context.memory.Resolver,
-            .file = kwatcher.cache.context.file.Resolver,
-        },
     ).key(.bench)
-        .evict(.{
-            .mem = .none,
-            .file = .none,
-        })
-        .residency(.{
-            .mem = kwatcher.cache.Residency{ .unlimited = {} },
-            .file = kwatcher.cache.Residency{ .unlimited = {} },
-        })
-        .expiration(.{
-        .mem = kwatcher.cache.Expiration{ .unlimited = {} },
-        .file = kwatcher.cache.Expiration{ .unlimited = {} },
-    });
+        .evict(.lru)
+        .residency(.{ .count = 256 })
+        .expiration(.{ .absolute = 5 })
+        .cold(&H.getCold);
 
     pub fn preconfigure(injector: ?*kwatcher.inject.Injector, persistent: std.mem.Allocator) !*kwatcher.inject.Injector {
-        const withCache = try kwatcher.cache.context.tiered.interdict(Config, injector, persistent);
+        const withCache = try kwatcher.cache.context.memory.interdict(Config, injector, persistent);
         return withCache;
     }
 };
@@ -43,13 +37,20 @@ pub fn main() !void {
     const nstr = args.next() orelse "256";
     const n = try std.fmt.parseUnsigned(usize, nstr, 10);
 
+    const nstr2 = args.next() orelse "256";
+    const n2 = try std.fmt.parseUnsigned(usize, nstr2, 10);
+
     var root = Root{ .allocator = allocator };
     var ctx = Ctx{};
     var root_inj = try kwatcher.inject.Injector.init(&root, null);
     var injector = try kwatcher.inject.Injector.init(&ctx, &root_inj);
     const cache = try injector.require(kwatcher.cache.Cache(usize));
 
-    for (0..n) |i| {
-        _ = try cache.push(i, .{i});
+    var prng = std.Random.DefaultPrng.init(420);
+
+    for (0..n2) |_| {
+        const i = prng.next() % n;
+        const v = try cache.get(.{i});
+        std.mem.doNotOptimizeAway(v);
     }
 }

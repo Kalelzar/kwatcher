@@ -22,11 +22,6 @@ pub fn main() !void {
     defer ctx.deinit();
 
     for (0..n) |i| {
-        var hasher = std.crypto.hash.Blake3.init(.{ .key = null });
-        std.hash.autoHashStrat(&hasher, i, .Shallow);
-        var hashBytes: [32]u8 = undefined;
-        hasher.final(&hashBytes);
-        const hash = std.fmt.bytesToHex(&hashBytes, .upper);
-        try ctx.put(&hash, i);
+        try ctx.put(i, i);
     }
 }

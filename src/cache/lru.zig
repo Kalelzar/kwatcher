@@ -8,7 +8,7 @@ fn Node(comptime Data: type) type {
         prev: ?*Node(Data),
         next: ?*Node(Data),
         data: Data,
-        key: []const u8,
+        key: u64,
         pub fn underlying(self: @This()) Data {
             return self;
         }
@@ -39,6 +39,7 @@ pub fn IndexedContext(
 ) type {
     return struct {
         pub const id = StorageContext.id ++ ":lru_indexed";
+        pub const key_type = StorageContext.key_type; // We have to pay a double hashing penalty if this is .hash but it is what it is. This could be optimized by having the hash map not hash at all.
         const StorageContext = StorageContextType(Data);
         const Priority = struct { front: ?*Node(void) = null, back: ?*Node(void) = null };
         const max_size = switch (Residency) {
@@ -52,7 +53,7 @@ pub fn IndexedContext(
 
         name: []const u8,
         buf: StorageContext,
-        metadata: std.StringArrayHashMapUnmanaged(*Node(void)),
+        metadata: std.AutoArrayHashMapUnmanaged(u64, *Node(void)),
         allocator: std.mem.Allocator,
         prio: Priority,
 
@@ -111,40 +112,44 @@ pub fn IndexedContext(
             self.prio.front = node;
         }
 
-        pub fn get(self: *@This(), key: []const u8) !?Data {
+        pub fn get(self: *@This(), key: u64) !?Data {
             const cached = try self.buf.get(key);
             if (cached == null) return null;
 
             const v = cached.?;
 
-            const node = self.metadata.get(key) orelse return error.MetadataOutOfSync;
-            self.touch(node);
+            if (self.metadata.get(key)) |node| {
+                self.touch(node);
+            } else {
+                _ = try self.putMeta(key);
+            }
 
             return v;
         }
 
-        pub fn getPtr(self: *@This(), key: []const u8) !?*Data {
+        pub fn getPtr(self: *@This(), key: u64) !?*Data {
             const cached = try self.buf.getPtr(key);
             if (cached == null) return null;
 
             const v = cached.?;
 
-            const node = self.metadata.get(key) orelse return error.MetadataOutOfSync;
-            self.touch(node);
+            if (self.metadata.get(key)) |node| {
+                self.touch(node);
+            } else {
+                _ = try self.putMeta(key);
+            }
 
             return v;
         }
 
-        pub fn put(self: *@This(), key: []const u8, data: Data) !void {
+        fn putMeta(self: *@This(), key: u64) !u64 {
             const old = try self.evict();
-
-            const owned_key = try self.allocator.dupe(u8, key);
 
             const ptr = old orelse try self.allocator.create(Node(void));
             ptr.* = .{
                 .next = self.prio.front,
                 .prev = null,
-                .key = owned_key,
+                .key = key,
                 .data = {},
             };
 
@@ -159,12 +164,21 @@ pub fn IndexedContext(
 
             self.prio.front = ptr;
 
-            try self.metadata.put(self.allocator, owned_key, ptr);
+            try self.metadata.put(self.allocator, key, ptr);
 
+            return key;
+        }
+
+        pub fn put(self: *@This(), key: u64, data: Data) !void {
+            const owned_key = try self.putMeta(key);
             return self.buf.putBorrowed(
                 owned_key,
                 data,
             );
+        }
+
+        pub inline fn len(self: *@This()) usize {
+            return self.metadata.entries.len;
         }
 
         fn evict(self: *@This()) !?*Node(void) {
@@ -173,7 +187,6 @@ pub fn IndexedContext(
                 last = self.prio.back;
                 if (last) |l| {
                     defer if (self.metadata.entries.len > max_size) self.allocator.destroy(l);
-                    defer self.allocator.free(l.key);
                     const p = l.prev;
                     if (p) |lp| {
                         if (lp != self.recent().?) {
@@ -220,7 +233,6 @@ pub fn IndexedContext(
             var n = self.recent();
             while (n) |e| {
                 const next = e.next;
-                self.allocator.free(e.key);
                 self.allocator.destroy(e);
                 n = next;
             }
@@ -237,6 +249,7 @@ pub fn DirectContext(
 ) type {
     return struct {
         pub const id = StorageContext.id ++ ":lru";
+        pub const key_type = StorageContext.key_type; // We don't really care here.
         const StorageContext = StorageContextType(DataType);
         const DataType = *Node(Data);
         const Priority = struct { front: ?DataType = null, back: ?DataType = null };
@@ -309,7 +322,7 @@ pub fn DirectContext(
             self.prio.front = node;
         }
 
-        pub fn get(self: *@This(), key: []const u8) !?Data {
+        pub fn get(self: *@This(), key: u64) !?Data {
             const cached = try self.buf.get(key);
             if (cached == null) return null;
 
@@ -320,7 +333,7 @@ pub fn DirectContext(
             return v.data;
         }
 
-        pub fn getPtr(self: *@This(), key: []const u8) !?*Data {
+        pub fn getPtr(self: *@This(), key: u64) !?*Data {
             const cached = try self.buf.getPtr(key);
             if (cached == null) return null;
 
@@ -331,16 +344,14 @@ pub fn DirectContext(
             return &v.data;
         }
 
-        pub fn put(self: *@This(), key: []const u8, data: Data) !void {
+        pub fn put(self: *@This(), key: u64, data: Data) !void {
             const old = try self.evict();
-
-            const owned_key = try self.allocator.dupe(u8, key);
 
             const ptr = old orelse try self.allocator.create(Node(Data));
             ptr.* = .{
                 .next = self.prio.front,
                 .prev = null,
-                .key = owned_key,
+                .key = key,
                 .data = data,
             };
 
@@ -356,9 +367,13 @@ pub fn DirectContext(
             self.prio.front = ptr;
 
             return self.buf.putBorrowed(
-                owned_key,
+                key,
                 ptr,
             );
+        }
+
+        pub inline fn len(self: *@This()) usize {
+            return self.buf.len();
         }
 
         fn evict(self: *@This()) !?*Node(Data) {

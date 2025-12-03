@@ -25,16 +25,12 @@ pub fn main() !void {
     defer ctx.deinit();
 
     for (0..n) |i| {
-        var buf: [16]u8 = undefined;
-        const key = try std.fmt.bufPrint(&buf, "{d}", .{i});
-        try ctx.put(key, i);
+        try ctx.put(i, i);
     }
 
     for (0..n2) |j| {
         const i = j % n;
-        var buf: [16]u8 = undefined;
-        const key = try std.fmt.bufPrint(&buf, "{d}", .{i});
-        const v = try ctx.get(key);
+        const v = try ctx.get(i);
         std.mem.doNotOptimizeAway(v);
     }
 }

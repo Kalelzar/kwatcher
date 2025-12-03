@@ -5,7 +5,7 @@ const cache = @import("cache.zig");
 fn Node(comptime Data: type) type {
     return struct {
         data: Data,
-        expires_at: i64,
+        expires_at: u64,
         pub fn underlying(self: @This()) Data {
             return self;
         }
@@ -21,18 +21,20 @@ pub fn Context(
             return struct {
                 pub const id = StorageContext.id ++ ":ttl";
                 pub const data_ownership = StorageContext.data_ownership;
+                pub const key_type = StorageContext.key_type;
                 const StorageContext = StorageContextType(DataType);
                 const DataType = Node(Data);
 
                 name: []const u8,
                 buf: StorageContext,
+                timer: std.time.Timer,
                 allocator: std.mem.Allocator,
 
-                inline fn touch(self: *@This(), node: *DataType) void {
+                inline fn touch(self: *@This(), node: *DataType, time: u64) void {
                     _ = self;
                     switch (Exp) {
                         .absolute, .unlimited => {},
-                        .sliding => |r| node.expires_at = std.time.timestamp() + r,
+                        .sliding => |r| node.expires_at = time + r,
                     }
                 }
 
@@ -44,57 +46,59 @@ pub fn Context(
                     return self.buf.len();
                 }
 
-                pub inline fn remove(self: *@This(), key: []const u8) bool {
+                pub inline fn remove(self: *@This(), key: u64) bool {
                     return self.buf.remove(key);
                 }
 
-                pub fn get(self: *@This(), key: []const u8) !?Data {
+                pub fn get(self: *@This(), key: u64) !?Data {
                     const cached = try self.buf.getPtr(key);
                     if (cached == null) return null;
 
                     const v = cached.?;
 
-                    if (v.expires_at < std.time.timestamp()) {
+                    const time = self.timer.read() / std.time.ns_per_s;
+
+                    if (v.expires_at < time) {
                         if (self.buf.remove(key)) {
                             // TODO: deinit the value if needed.
                         }
                         return null;
                     }
 
-                    self.touch(v);
+                    self.touch(v, time);
 
                     return v.data;
                 }
 
-                pub fn getPtr(self: *@This(), key: []const u8) !?*Data {
+                pub fn getPtr(self: *@This(), key: u64) !?*Data {
                     const cached = try self.buf.getPtr(key);
                     if (cached == null) return null;
 
                     const v = cached.?;
 
-                    if (v.expires_at < std.time.timestamp()) {
+                    const time = self.timer.read() / std.time.ns_per_s;
+
+                    if (v.expires_at < time) {
                         if (self.buf.remove(key)) {
                             // TODO: deinit the value if needed.
                         }
                         return null;
                     }
 
-                    self.touch(v);
+                    self.touch(v, time);
 
                     return &v.data;
                 }
 
-                pub inline fn put(self: *@This(), key: []const u8, data: Data) !void {
-                    const owned_key = try self.allocator.dupe(u8, key);
-
-                    return self.putBorrowed(owned_key, data);
+                pub inline fn put(self: *@This(), key: u64, data: Data) !void {
+                    return self.putBorrowed(key, data);
                 }
 
-                pub fn putBorrowed(self: *@This(), key: []const u8, data: Data) !void {
+                pub fn putBorrowed(self: *@This(), key: u64, data: Data) !void {
                     const v: DataType = .{
                         .data = data,
                         .expires_at = switch (Exp) {
-                            .absolute, .sliding => |r| std.time.timestamp() + r,
+                            .absolute, .sliding => |r| self.timer.read() / std.time.ns_per_s + r,
                             .unlimited => @compileError("Cannot construct a TTL context with unlimited time-to-live"),
                         },
                     };
@@ -110,6 +114,7 @@ pub fn Context(
                         .name = name,
                         .buf = .init(allocator, name),
                         .allocator = allocator,
+                        .timer = std.time.Timer.start() catch unreachable, // FIXME: Lying to the compiler
                     };
                 }
 

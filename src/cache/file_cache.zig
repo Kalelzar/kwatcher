@@ -163,11 +163,13 @@ pub fn Context(comptime Data: type) type {
     return struct {
         pub const id = "file";
         pub const data_ownership = .transient;
+        pub const key_type = .hash;
         name: []const u8,
         dir: std.fs.Dir,
         allocator: std.mem.Allocator,
 
-        pub fn get(self: *@This(), key: []const u8) !?Data {
+        pub fn get(self: *@This(), ikey: u64) !?Data {
+            const key = std.fmt.hex(ikey); // should be 16 bytes
             const pre = key[0..2];
             const post = key[2..4];
             const rest = key[4..];
@@ -186,7 +188,8 @@ pub fn Context(comptime Data: type) type {
             return try serializer.deserialize(reader, Data, self.allocator, 1);
         }
 
-        pub fn put(self: *@This(), key: []const u8, data: Data) !void {
+        pub fn put(self: *@This(), ikey: u64, data: Data) !void {
+            const key = std.fmt.hex(ikey); // should be 16 bytes
             const pre = key[0..2];
             const post = key[2..4];
             const rest = key[4..];
@@ -205,7 +208,8 @@ pub fn Context(comptime Data: type) type {
 
         pub const putBorrowed = put;
 
-        pub fn remove(self: *@This(), key: []const u8) bool {
+        pub fn remove(self: *@This(), ikey: u64) bool {
+            const key = std.fmt.hex(ikey); // should be 16 bytes
             const pre = key[0..2];
             const post = key[2..4];
             const rest = key[4..];

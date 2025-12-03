@@ -37,19 +37,22 @@ pub fn Dependencies(
 
         pub fn contextFactory(self: *@This(), persistent: std.mem.Allocator) !*ContextType {
             if (self.context) |c| {
+                @branchHint(.likely);
                 return c;
-            }
-
-            const ptr = try persistent.create(ContextType);
-            const key = self.interface.key;
-            if (comptime klib.meta.canBeError(ContextType.init)) {
-                ptr.* = try .init(persistent, key);
             } else {
-                ptr.* = .init(persistent, key);
-            }
-            self.context = ptr;
+                @branchHint(.cold);
 
-            return ptr;
+                const ptr = try persistent.create(ContextType);
+                const key = self.interface.key;
+                if (comptime klib.meta.canBeError(ContextType.init)) {
+                    ptr.* = try .init(persistent, key);
+                } else {
+                    ptr.* = .init(persistent, key);
+                }
+                self.context = ptr;
+
+                return ptr;
+            }
         }
 
         pub fn cacheFactory(inj: *inject.Injector, intf: Interface) cache.Cache(Data) {
@@ -166,27 +169,41 @@ pub fn Cache(comptime Data: type, comptime Invariant: anytype) SetBuilder(Data, 
 /// NOTE: This should be converted to a vtable so that the implementation can be swapped by the user.
 pub fn Context(comptime Data: type) type {
     return struct {
+        const RawHashContext = struct {
+            pub fn hash(self: @This(), key: u64) u32 {
+                _ = self;
+                return @truncate(key);
+            }
+
+            pub fn eql(self: @This(), a: u64, b: u64, b_index: usize) bool {
+                _ = self;
+                _ = b_index;
+                return a == b;
+            }
+        };
+
         pub const id = "memory";
         pub const data_ownership = .owned;
+        pub const key_type = .raw;
         name: []const u8,
-        buf: std.StringArrayHashMapUnmanaged(Data),
+        buf: std.ArrayHashMapUnmanaged(u64, Data, RawHashContext, false),
+        //buf: std.StringArrayHashMapUnmanaged(Data),
         allocator: std.mem.Allocator,
 
-        pub fn get(self: *@This(), key: []const u8) !?Data {
+        pub fn get(self: *@This(), key: u64) !?Data {
             return self.buf.get(key);
         }
 
-        pub fn getPtr(self: *@This(), key: []const u8) !?*Data {
+        pub fn getPtr(self: *@This(), key: u64) !?*Data {
             return self.buf.getPtr(key);
         }
 
-        pub fn put(self: *@This(), key: []const u8, data: Data) !void {
-            const k = try self.allocator.dupe(u8, key);
-            errdefer self.allocator.free(k);
-            return try self.putBorrowed(k, data);
+        pub fn put(self: *@This(), key: u64, data: Data) !void {
+            return try self.putBorrowed(key, data);
         }
 
-        pub fn putBorrowed(self: *@This(), key: []const u8, data: Data) !void {
+        /// @deprecated Keys are no longer strings so this doesn't make sense
+        pub fn putBorrowed(self: *@This(), key: u64, data: Data) !void {
             return self.buf.put(
                 self.allocator,
                 key,
@@ -206,11 +223,8 @@ pub fn Context(comptime Data: type) type {
             return self.buf.entries.len;
         }
 
-        pub fn remove(self: *@This(), key: []const u8) bool {
+        pub fn remove(self: *@This(), key: u64) bool {
             const res = self.buf.swapRemove(key);
-            if (res) {
-                self.allocator.free(key);
-            }
             return res;
         }
 
@@ -221,7 +235,6 @@ pub fn Context(comptime Data: type) type {
         pub fn deinit(self: *@This()) void {
             var it = self.buf.iterator();
             while (it.next()) |e| {
-                self.allocator.free(e.key_ptr.*);
                 const ti = @typeInfo(Data);
                 switch (ti) {
                     .@"struct" => {

@@ -8,6 +8,9 @@ pub fn benchmarks(
 ) !*std.Build.Step {
     const name: []const []const u8 = &.{
         "memCacheN",
+        "memCacheNFull",
+        "memCacheNFullLinear",
+        "memCacheNFullRandom",
         "memCacheNWithLRU",
         "memCacheNWithTTL",
         "memCacheNWithLRUThenTTL",
@@ -53,15 +56,21 @@ pub fn build(b: *std.Build) !void {
     const build_example = b.option(bool, "example", "Build the example application") orelse build_all;
     const build_static_library = b.option(bool, "lib", "Build a static library object") orelse build_all;
     const build_dump_tool = b.option(bool, "dump", "Build the dump tool") orelse build_all;
+    const include_metrics = b.option(bool, "metrics", "Include metrics generation in code.") orelse true;
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const o = b.addOptions();
+    o.addOption(bool, "enable_metrics", include_metrics);
 
     const kwatcher_library = b.addModule("kwatcher", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
+
+    kwatcher_library.addOptions("build_config", o);
 
     const kwatcher_example = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),

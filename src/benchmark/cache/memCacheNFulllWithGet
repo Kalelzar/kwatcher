@@ -6,29 +6,16 @@ const Root = struct {
 };
 
 const Ctx = struct {
-    const Config = kwatcher.cache.context.tiered.Cache(
+    const Config = kwatcher.cache.context.memory.Cache(
         usize,
         .{usize},
-        .{
-            .mem = kwatcher.cache.context.memory.Resolver,
-            .file = kwatcher.cache.context.file.Resolver,
-        },
     ).key(.bench)
-        .evict(.{
-            .mem = .none,
-            .file = .none,
-        })
-        .residency(.{
-            .mem = kwatcher.cache.Residency{ .unlimited = {} },
-            .file = kwatcher.cache.Residency{ .unlimited = {} },
-        })
-        .expiration(.{
-        .mem = kwatcher.cache.Expiration{ .unlimited = {} },
-        .file = kwatcher.cache.Expiration{ .unlimited = {} },
-    });
+        .evict(.lru)
+        .residency(.{ .count = 256 })
+        .expiration(.{ .absolute = 5 });
 
     pub fn preconfigure(injector: ?*kwatcher.inject.Injector, persistent: std.mem.Allocator) !*kwatcher.inject.Injector {
-        const withCache = try kwatcher.cache.context.tiered.interdict(Config, injector, persistent);
+        const withCache = try kwatcher.cache.context.memory.interdict(Config, injector, persistent);
         return withCache;
     }
 };

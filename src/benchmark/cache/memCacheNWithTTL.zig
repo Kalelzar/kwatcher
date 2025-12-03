@@ -22,8 +22,6 @@ pub fn main() !void {
     defer ctx.deinit();
 
     for (0..n) |i| {
-        var buf: [16]u8 = undefined;
-        const key = try std.fmt.bufPrint(&buf, "{d}", .{i});
-        try ctx.put(key, i);
+        try ctx.put(i, i);
     }
 }
