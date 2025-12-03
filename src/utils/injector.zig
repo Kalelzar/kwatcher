@@ -52,15 +52,31 @@ const FactoryResolver = *const fn (meta.TypeId) ?*const fn (*Injector) anyerror!
 /// The type of the dispose function.
 const DisposeFn = *const fn (Context) void;
 
+const use_analysis = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
+
 /// A dependency injector with support for parent injectors.
 /// It can dynamically provide the contents of a struct (`Context')
 /// to any function called with it, supporting both plain properties
 /// and factory functions.
 pub const Injector = struct {
+    const TidHashContext = struct {
+        pub fn hash(self: @This(), key: klib.meta.TypeId) u32 {
+            _ = self;
+            const res: u32 = @truncate(@intFromPtr(key));
+            return res;
+        }
+
+        pub fn eql(self: @This(), a: klib.meta.TypeId, b: klib.meta.TypeId) bool {
+            _ = self;
+            return a == b;
+        }
+    };
     /// Dependency graph
-    graph: Analyser.Graph,
+    graph: if (use_analysis) Analyser.Graph else void,
     /// The context from which to inject dependencies
     context: Context,
+    /// The name of the context.
+    context_name: []const u8,
     /// The resolver function
     resolver: Resolver,
     /// The factory resolver function
@@ -69,6 +85,10 @@ pub const Injector = struct {
     parent: ?*Injector = null,
     /// The dispose function
     dispose: ?DisposeFn,
+
+    resolver_buffer: [32768]u8 = undefined,
+    allocator: ?std.heap.FixedBufferAllocator = null,
+    resolver_cache: std.HashMapUnmanaged(klib.meta.TypeId, ResolutionPath, TidHashContext, 99) = .empty,
 
     /// Initialize a new injector with a context and optionally a parent
     /// The context must be passed as a pointer!
@@ -122,19 +142,17 @@ pub const Injector = struct {
                 } else {
                     var bogus = struct {}{};
                     var p = try Injector.init(&bogus, null);
-                    break :blk try p.call_first(ContextType.preconfigure, .{parent});
+                    break :blk try p.call_first(ContextType.preconfigure, .{null});
                 }
             }
         } else parent;
 
-        var graph = comptime Analyser.analyse(ContextType);
-        // for (0..graph.len) |i| {
-        //     std.debug.print("vvv\n", .{});
-        //     graph.nodes[i].print(graph, 0);
-        // }
+        var graph = if (comptime use_analysis) comptime Analyser.analyse(ContextType) else void{};
 
         if (configured_parent) |p| blk: {
-            graph.fulfill(p.graph);
+            if (comptime use_analysis) {
+                graph.fulfill(p.graph);
+            }
             // If we have a parent and a construct function on the context we might as well try to call it by injecting it's dependencies via
             // our parent.
             // This still lets us init contexts manually as users but we open the door to allow the framework to handle some of it for us
@@ -160,9 +178,20 @@ pub const Injector = struct {
             }
         }
 
-        if (!graph.isFulfilled()) {
-            graph.blame();
-            return error.Unfulfilled;
+        if (comptime use_analysis) {
+            if (!graph.isFulfilled()) {
+                graph.blame();
+                return error.Unfulfilled;
+            } else {
+                // std.log.info(
+                //     "Generated injector from context: {s}. Provides: ",
+                //     .{@typeName(ContextType)},
+                // );
+                // for (0..graph.len) |i| {
+                //     const n = graph.nodes[i];
+                //     std.log.info("  {s} from {s}.", .{ n.name, n.source });
+                // }
+            }
         }
 
         // The internal resolver functions used by the injector.
@@ -179,6 +208,10 @@ pub const Injector = struct {
             fn resolve(type_erased_context: Context, type_id: meta.TypeId) ?*anyopaque {
                 var typed_context: ContextPtrType = @ptrCast(@alignCast(@constCast(type_erased_context)));
 
+                if (type_id == meta.typeId(ContextPtrType)) {
+                    return typed_context;
+                }
+
                 inline for (std.meta.fields(ContextType)) |f| {
                     // What do we do if a context has two fields of the same type?
                     // Right now we just take the first one that matches but maybe
@@ -191,14 +224,12 @@ pub const Injector = struct {
                         &@field(typed_context, f.name);
 
                     const FieldType = @TypeOf(p);
+
                     if (type_id == meta.typeId(FieldType)) {
+                        @branchHint(.unpredictable);
                         std.debug.assert(@intFromPtr(p) != 0xaaaaaaaaaaaaaaaa);
                         return @ptrCast(@constCast(p));
                     }
-                }
-
-                if (type_id == meta.typeId(ContextPtrType)) {
-                    return typed_context;
                 }
 
                 return null;
@@ -226,6 +257,7 @@ pub const Injector = struct {
                     const FieldType = if (comptime meta.isValuePointer(meta.Result(fun))) meta.Result(fun) else *const meta.Result(fun);
 
                     if (meta.typeId(FieldType) == type_id) {
+                        @branchHint(.unpredictable);
                         const Internal = struct {
                             fn handle(inj: *Injector) !*anyopaque {
                                 var args: std.meta.ArgsTuple(@TypeOf(fun)) = undefined;
@@ -280,6 +312,7 @@ pub const Injector = struct {
         return .{
             .graph = graph,
             .context = @ptrCast(@constCast(context)),
+            .context_name = @typeName(ContextType),
             .resolver = &InternalResolver.resolve,
             .resolver_factory = &InternalResolver.resolveFactory,
             .dispose = dispose,
@@ -288,20 +321,23 @@ pub const Injector = struct {
     }
 
     /// Require a dependency of type `T`. Will return an error if a dependency is missing or a factory returns an error.
-    pub fn require(self: *Injector, comptime T: type) !T {
-        if (self.graph.indexOf(T)) |i| blk: {
-            const n = self.graph.nodes[i];
-            if (n.isFulfilled(&self.graph)) break :blk;
-            n.blame(&self.graph);
-            std.log.err("Unfulfilled dependency: {s}", .{@typeName(T)});
-            return error.UnfulfilledDependency;
-        } else {
-            std.log.err("Missing dependency: {s}", .{@typeName(T)});
-            return error.MissingDependency;
+    pub inline fn require(self: *Injector, comptime T: type) !T {
+        if (comptime use_analysis) {
+            if (self.graph.indexOf(T)) |i| blk: {
+                const n = self.graph.nodes[i];
+                if (n.isFulfilled(&self.graph)) break :blk;
+                n.blame(&self.graph);
+                std.log.err("[{s}] Unfulfilled dependency: {s}", .{ self.context_name, @typeName(T) });
+                return error.UnfulfilledDependency;
+            } else {
+                std.log.err("[{s}] Missing dependency in graph: {s}", .{ self.context_name, @typeName(T) });
+                std.debug.dumpCurrentStackTrace(null);
+                return error.MissingDependency;
+            }
         }
 
         return try self.get(T) orelse {
-            std.log.err("Missing dependency: {s}", .{@typeName(T)});
+            std.log.err("[{s}] Missing dependency: {s}", .{ self.context_name, @typeName(T) });
             return error.MissingDependency;
         };
     }
@@ -316,23 +352,132 @@ pub const Injector = struct {
     /// 4. If `T` is a const pointer `*const U`: Try to resolve a plain property of type `U` instead.
     /// 5. If a factory exists for `T` return the result of calling the factory with the current injector.
     /// 6. Else try to resolve via the parent if any or return null if no parent exists.
-    pub fn get(self: *Injector, comptime T: type) !?T {
-        if (self.graph.indexOf(T)) |i| blk: {
-            const n = self.graph.nodes[i];
-            if (n.isFulfilled(&self.graph)) break :blk;
-            n.blame(&self.graph);
-            std.log.warn("Unfulfilled dependency: {s}", .{@typeName(T)});
-            return null;
-        } else {
-            return null;
+    pub inline fn get(self: *Injector, comptime T: type) !?T {
+        if (comptime use_analysis) {
+            if (self.graph.indexOf(T)) |i| blk: {
+                const n = self.graph.nodes[i];
+                if (n.isFulfilled(&self.graph)) break :blk;
+                n.blame(&self.graph);
+                std.log.warn("Unfulfilled dependency: {s}", .{@typeName(T)});
+                return null;
+            } else {
+                return null;
+            }
         }
 
+        if (self.allocator == null) {
+            self.allocator = .init(&self.resolver_buffer);
+            try self.resolver_cache.ensureTotalCapacity(
+                self.allocator.?.allocator(),
+                256,
+            );
+        }
+
+        const entry = self.resolver_cache.getOrPutAssumeCapacity(klib.meta.typeId(T));
+
+        if (entry.found_existing) {
+            @branchHint(.likely);
+            return self.replay(T, entry.value_ptr.*);
+        } else {
+            @branchHint(.unlikely);
+            entry.value_ptr.* = self.record(T);
+            return self.replay(T, entry.value_ptr.*);
+        }
+    }
+
+    pub fn record(self: *Injector, comptime T: type) ResolutionPath {
         if (comptime T == *Injector) {
-            return self;
+            @branchHint(.unlikely);
+            return .{
+                .injector = self,
+            };
         }
 
         if (comptime !meta.isValuePointer(T)) {
-            return if (try self.get(*const T)) |p| p.* else null;
+            return self.record(*const T);
+        }
+
+        if (self.resolver(self.context, meta.typeId(T))) |ptr| {
+            return .{
+                .resolver = ptr,
+            };
+        }
+
+        if (comptime @typeInfo(T).pointer.is_const) {
+            if (self.resolver(self.context, meta.typeId(*@typeInfo(T).pointer.child))) |ptr| {
+                return .{
+                    .resolver = ptr,
+                };
+            }
+        }
+        if (self.resolver_factory(meta.typeId(T))) |factory| {
+            const cache = self.resolver(self.context, meta.typeId(*?T)) orelse self.resolver(self.context, meta.typeId(*?*T));
+
+            return .{
+                .factory = .{
+                    .inj = self,
+                    .cache = cache,
+                    .fac = factory,
+                },
+            };
+        }
+
+        return if (self.parent) |p| p.record(T) else .{
+            .not_found = {},
+        };
+    }
+
+    pub fn replay(self: *Injector, comptime T: type, path: ResolutionPath) !?T {
+        _ = self;
+        return switch (path) {
+            .injector => |i| if (comptime T == *Injector) i else error.TypeMismatch,
+            .resolver => |p| blk: {
+                if (comptime klib.meta.isValuePointer(T)) {
+                    break :blk @ptrCast(@alignCast(@constCast(p)));
+                } else {
+                    const r: *T = @ptrCast(@alignCast(@constCast(p)));
+                    break :blk r.*;
+                }
+            },
+            .factory => |f| blk: {
+                if (comptime klib.meta.isValuePointer(T)) {
+                    if (f.cache) |c| {
+                        const cr: *?T = @ptrCast(@alignCast(@constCast(c)));
+                        if (cr.*) |o| {
+                            break :blk o;
+                        }
+                    }
+
+                    break :blk @ptrCast(@alignCast(@constCast(try f.fac(f.inj))));
+                } else {
+                    const r: *T = @ptrCast(@alignCast(@constCast(try f.fac(f.inj))));
+                    break :blk r.*;
+                }
+            },
+            .not_found => null,
+        };
+    }
+
+    pub fn getWithOverride(self: *Injector, child: *Injector, comptime T: type) !?T {
+        if (comptime use_analysis) {
+            if (self.graph.indexOf(T)) |i| blk: {
+                const n = self.graph.nodes[i];
+                if (n.isFulfilled(&self.graph)) break :blk;
+                n.blame(&self.graph);
+                std.log.warn("Unfulfilled dependency: {s}", .{@typeName(T)});
+                return null;
+            } else {
+                return null;
+            }
+        }
+
+        if (comptime T == *Injector) {
+            @branchHint(.unlikely);
+            return child;
+        }
+
+        if (comptime !meta.isValuePointer(T)) {
+            return if (try self.getWithOverride(child, *const T)) |p| p.* else null;
         }
 
         if (self.resolver(self.context, meta.typeId(T))) |ptr| {
@@ -345,10 +490,10 @@ pub const Injector = struct {
             }
         }
         if (self.resolver_factory(meta.typeId(T))) |factory| {
-            return @ptrCast(@alignCast(@constCast(try factory(self))));
+            return @ptrCast(@alignCast(@constCast(try factory(child))));
         }
 
-        return if (self.parent) |p| try p.get(T) else null;
+        return if (self.parent) |p| try p.getWithOverride(child, T) else null;
     }
 
     test "expect `get` to return the injector if requested" {
@@ -535,8 +680,11 @@ const Analyser = struct {
 
         pub fn indexOf(self: *Graph, comptime T: type) ?u8 {
             const tid = klib.meta.typeId(T);
+            // std.log.info("Index of: {s}", .{@typeName(T)});
             for (0..self.len) |i| {
+                // std.log.info("  [{d:03}] Trying {s}", .{ i, self.nodes[i].name });
                 if (self.nodes[i].id == tid) {
+                    // std.log.info("  [{d:03}] Found {s}", .{ i, self.nodes[i].name });
                     return @intCast(i);
                 }
             }
@@ -800,6 +948,17 @@ const reserved_declarations_map = std.StaticStringMap(void).initComptime(.{
     .{"init"},
     .{"preconfigure"}, //FIXME: This does need to be checked
 });
+
+const ResolutionPath = union(enum) {
+    injector: *Injector,
+    resolver: *anyopaque,
+    factory: struct {
+        inj: *Injector,
+        cache: ?*anyopaque,
+        fac: *const fn (*Injector) anyerror!*anyopaque,
+    },
+    not_found: void,
+};
 
 fn resolveNull(_: Context, _: meta.TypeId) ?*anyopaque {
     return null;
