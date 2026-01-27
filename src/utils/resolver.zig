@@ -1,7 +1,7 @@
 const std = @import("std");
 const klib = @import("klib");
 
-const injector = @import("../utils/injector.zig");
+const dep = @import("../dep.zig");
 
 pub fn Resolver(comptime Container: type) type {
     klib.meta.ensureStruct(Container);
@@ -9,7 +9,80 @@ pub fn Resolver(comptime Container: type) type {
     return struct {
         const Self = @This();
 
-        pub fn resolve(inj: *injector.Injector, comptime path: []const u8, container: *Container) resolveAsErrorUnion(path) {
+        // FIXME: This should check if the path can fail and conditionally return an error union
+        // instead of forcing this to be always fallable.
+        pub fn resolveRef(inj: *dep.DepCtx, comptime path: []const u8, container: *Container) resolveRefAsErrorUnion(path) {
+            if (comptime std.mem.indexOfScalar(u8, path, '.')) |idx| {
+                const first = comptime path[0..idx];
+                const rest = comptime path[1 + idx ..];
+
+                if (comptime @hasField(Container, first)) {
+                    return Resolver(@FieldType(Container, first)).resolveRef(inj, rest, &@field(container, first));
+                } else if (comptime @hasDecl(Container, first)) {
+                    const ti: std.builtin.Type = @typeInfo(@TypeOf(@field(Container, first)));
+                    if (ti.@"fn".params.len > 0) {
+                        //FIXME: None of this looks correct. Check it.
+                        const maybe_self = ti.@"fn".params[0];
+                        if (maybe_self.type) |mself_type| {
+                            const mself_ti: std.builtin.Type = @typeInfo(mself_type);
+                            switch (mself_ti) {
+                                .pointer => |p| {
+                                    if (p.child == Container) {
+                                        return inj.call_first(@field(Container, path), .{@constCast(container)});
+                                    }
+                                },
+                                else => {
+                                    if (mself_type == Container) {
+                                        return inj.call_first(@field(Container, path), .{container.*});
+                                    }
+                                },
+                            }
+                        }
+                    }
+                    var value = try inj.call(@field(Container, first), .{});
+
+                    return Resolver(@TypeOf(value)).resolveRef(inj, rest, &value);
+                } else {
+                    @compileError(std.fmt.comptimePrint("'{s}' is not a valid field in '{}'.", .{ first, Container }));
+                }
+            } else {
+                if (comptime @hasField(Container, path)) {
+                    if (comptime klib.meta.isValuePointer(@FieldType(Container, path))) {
+                        return @field(container, path);
+                    } else {
+                        return &@field(container, path);
+                    }
+                } else if (comptime @hasDecl(Container, path)) {
+                    const ti: std.builtin.Type = @typeInfo(@TypeOf(@field(Container, path)));
+                    if (ti.@"fn".params.len > 0) {
+                        const maybe_self = ti.@"fn".params[0];
+                        if (maybe_self.type) |mself_type| {
+                            const mself_ti: std.builtin.Type = @typeInfo(mself_type);
+                            switch (mself_ti) {
+                                .pointer => |p| {
+                                    if (p.child == Container) {
+                                        return inj.call_first(@field(Container, path), .{@constCast(container)});
+                                    }
+                                },
+                                else => {
+                                    if (mself_type == Container) {
+                                        return inj.call_first(@field(Container, path), .{container.*});
+                                    }
+                                },
+                            }
+                        }
+                    }
+                    if (comptime !klib.meta.isValuePointer(klib.meta.Return(@field(Container, path)))) {
+                        @compileError("Cannot take a mutable reference to a non-pointer result type.");
+                    }
+                    return inj.call_first(@field(Container, path), .{});
+                } else {
+                    @compileError(std.fmt.comptimePrint("'{s}' is not a valid field in '{}'.", .{ path, Container }));
+                }
+            }
+        }
+
+        pub fn resolve(inj: *dep.DepCtx, comptime path: []const u8, container: *Container) resolveAsErrorUnion(path) {
             if (comptime std.mem.indexOfScalar(u8, path, '.')) |idx| {
                 const first = comptime path[0..idx];
                 const rest = comptime path[1 + idx ..];
@@ -65,7 +138,7 @@ pub fn Resolver(comptime Container: type) type {
                             }
                         }
                     }
-                    return inj.call(@field(Container, path), .{});
+                    return inj.call_first(@field(Container, path), .{});
                 } else {
                     @compileError(std.fmt.comptimePrint("'{s}' is not a valid field in '{}'.", .{ path, Container }));
                 }
@@ -79,6 +152,18 @@ pub fn Resolver(comptime Container: type) type {
                 .error_union => R,
                 else => @Type(.{
                     .error_union = .{ .error_set = anyerror, .payload = R },
+                }),
+            };
+        }
+
+        fn resolveRefAsErrorUnion(comptime path: []const u8) type {
+            const R = resolveType(path);
+            const ti: std.builtin.Type = @typeInfo(R);
+            const T = if (comptime klib.meta.isValuePointer(R)) R else *R;
+            return switch (ti) {
+                .error_union => R,
+                else => @Type(.{
+                    .error_union = .{ .error_set = anyerror, .payload = T },
                 }),
             };
         }
