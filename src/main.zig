@@ -1,22 +1,237 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const kwatcher = @import("kwatcher");
-const klib = @import("klib");
+const kw = @import("kwatcher");
+
+pub const std_options = std.Options{
+    .log_scope_levels = &[_]std.log.ScopeLevel{
+        .{ .scope = .dependency, .level = .info },
+        .{ .scope = .server, .level = .info },
+        .{ .scope = .amqp_client, .level = .info },
+        .{ .scope = .circuit_breaker_client, .level = .warn },
+        .{ .scope = .intern_fmt_cache, .level = .warn },
+        .{ .scope = .replay, .level = .info },
+        .{ .scope = .client, .level = .info },
+        .{ .scope = .example, .level = .info },
+    },
+};
+
+const log = std.log.scoped(.example);
+
+// ============================================================================
+// Configuration
+// ============================================================================
+
+/// The application configuration schema.
+/// This maps to a JSON config file (e.g., example.json)
+pub const Config = struct {
+    driver: struct {
+        amqp: kw.config.BaseConfig,
+    },
+    app: AppConfig,
+};
+
+pub const AppConfig = struct {
+    greeting: []const u8 = "Hello",
+    interval_seconds: u32 = 5,
+};
+
+// ============================================================================
+// Custom Dependencies
+// ============================================================================
+
+/// A singleton dependency that maintains state across requests.
+/// Registered as a static dependency.
+const CounterDependency = struct {
+    count: u64 = 0,
+
+    pub fn increment(self: *CounterDependency) u64 {
+        self.count += 1;
+        return self.count;
+    }
+};
+
+// ============================================================================
+// Schemas
+// ============================================================================
+
+/// A simple heartbeat message schema
+pub const HeartbeatMessage = struct {
+    pub const schema_name = "heartbeat";
+    pub const schema_version = 1;
+
+    timestamp: i64,
+    event: []const u8,
+    count: u64,
+    greeting: []const u8,
+};
+
+// ============================================================================
+// Routes
+// ============================================================================
+
+/// AMQP route handlers.
+/// Function names follow the pattern: "method:event exchange/routing_key"
+const AmqpRoutes = struct {
+    /// Publishes a heartbeat message to the "amq.direct" exchange with routing key "heartbeat"
+    /// The context tuple contains: (timestamp, greeting_override)
+    pub fn @"publish:heartbeat amq.direct/heartbeat"(
+        ctx: struct { i64, ?[]const u8 },
+        counter: *CounterDependency,
+        app_config: *AppConfig,
+    ) HeartbeatMessage {
+        const count = counter.increment();
+        const greeting = ctx.@"1" orelse app_config.greeting;
+
+        log.info("Publishing heartbeat #{d} with greeting: {s}", .{ count, greeting });
+
+        return .{
+            .timestamp = ctx.@"0",
+            .event = "heartbeat",
+            .count = count,
+            .greeting = greeting,
+        };
+    }
+};
+
+/// Cron route handlers.
+/// Function names follow the pattern: "job_name schedule"
+const CronRoutes = struct {
+    /// Triggers every 5 seconds (second minute hour day month weekday)
+    pub fn @"heartbeat_tick */5 * * * * *"(inj: *kw.deps.DepCtx) !void {
+        const scheduler = try inj.require(Scheduler(.amqp));
+        const timestamp = std.time.microTimestamp();
+
+        // Publish a heartbeat event with no greeting override
+        try scheduler.publish(
+            .{ .heartbeat = .{ timestamp, null } },
+            .{ .inj = inj },
+        );
+    }
+};
+
+// ============================================================================
+// Driver Setup
+// ============================================================================
+
+/// Context type for dynamic routing (can hold request-scoped data)
+const RouteContext = struct {
+    request_id: u64 = 0,
+};
+
+/// AMQP driver configuration
+const amqp_driver = kw.amqp.Driver
+    .new(.amqp)
+    .config("driver.amqp")
+    .listen(false) // Don't consume, only publish
+    .jobs(0) // No consumer jobs when not listening
+    .routes(kw.meta.flatten(&.{
+        kw.amqp.From(AmqpRoutes, RouteContext),
+    }))
+    .build();
+
+/// Cron driver configuration
+const cron_driver = kw.cron.Driver
+    .new(.cron)
+    .listen(true)
+    .jobs(1)
+    .routes(kw.cron.From(CronRoutes))
+    .build();
+
+/// Combined driver registry
+const drivers = kw.DriverRegistry
+    .new()
+    .registerHandler(cron_driver)
+    .registerHandler(amqp_driver);
+
+/// Type alias for the scheduler (used to publish events from cron routes)
+/// SchedulerMap() returns a function that maps driver keys to scheduler types
+const Scheduler = drivers.SchedulerMap();
+
+// ============================================================================
+// Main Application
+// ============================================================================
+
+var config_slot: Config = undefined;
 
 pub fn juicyMain(allocator: std.mem.Allocator) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    _ = allocator;
-}
 
-var slot: *anyopaque = undefined;
+    // Initialize metrics (optional)
+    try kw.metrics.initialize(allocator, "example", "1.0.0", "example-client", .{});
+    defer kw.metrics.deinitialize();
+
+    // Load configuration from file
+    config_slot = try kw.config.findConfigFile(Config, arena.allocator(), "example") orelse {
+        std.log.err("Could not load config! Create 'example.json' with the required fields.", .{});
+        std.log.err("Example config:", .{});
+        std.log.err(
+            \\{{
+            \\  "driver": {{
+            \\    "amqp": {{
+            \\      "server": {{
+            \\        "host": "localhost",
+            \\        "port": 5672,
+            \\        "heartbeat": 5
+            \\      }},
+            \\      "credentials": {{
+            \\        "username": "guest",
+            \\        "password": "guest"
+            \\      }}
+            \\    }}
+            \\  }},
+            \\  "app": {{
+            \\    "greeting": "Hello",
+            \\    "interval_seconds": 5
+            \\  }}
+            \\}}
+        , .{});
+        return error.MissingConfig;
+    };
+
+    // Create singleton dependencies
+    var counter = CounterDependency{};
+
+    // Build the dependency container
+    // The chain of .with() and .static() calls registers dependencies at different lifetimes:
+    // - .static(): Lives for the entire application lifetime
+    // - .scoped(): Created fresh for each request
+    const deps = kw.deps.DependencyContainer(Config)
+        .new(drivers)
+        // Register default dependencies (allocator pools, user info, client info)
+        .with(.all, kw.default.withDefault(&config_slot, .{
+            .name = "example",
+            .version = "1.0.0",
+        }), allocator)
+        // Register app-specific config resolver
+        .with(.all, kw.default.config(AppConfig, "app"), allocator)
+        // Register AMQP client pool and connection handling
+        .with(.amqp, kw.amqp.defaultFor(drivers, RouteContext), allocator)
+        // Register our custom counter as a static dependency
+        .static(.amqp, &counter, allocator);
+
+    // Create and start the server
+    var server = try kw.server.Server(@TypeOf(deps), drivers)
+        .init(allocator, deps, 2); // 2 consumer threads
+    defer server.deinit();
+
+    log.info("Starting example server...", .{});
+    log.info("Press Ctrl+C to stop.", .{});
+
+    try server.start();
+}
 
 pub fn main() !void {
     if (comptime builtin.mode == .Debug) {
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        var gpa = std.heap.GeneralPurposeAllocator(.{
+            .stack_trace_frames = 10,
+        }).init;
         const allocator = gpa.allocator();
-        try juicyMain(allocator);
+        juicyMain(allocator) catch |e| {
+            std.log.err("Application error: {}", .{e});
+        };
+        _ = gpa.detectLeaks();
     } else {
         const alloc = std.heap.smp_allocator;
         try juicyMain(alloc);
