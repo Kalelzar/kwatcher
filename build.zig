@@ -23,7 +23,6 @@ pub fn benchmarks(
         "tierCacheN",
     };
     const step = b.step("benchmark", "Builds various benchmarks.");
-    const global_install = b.getInstallStep();
 
     inline for (name) |n| {
         const file = "src/benchmark/cache/" ++ n ++ ".zig";
@@ -42,8 +41,6 @@ pub fn benchmarks(
 
         const install = b.addInstallArtifact(bench_exe, .{});
 
-        global_install.dependOn(&install.step);
-
         step.dependOn(&install.step);
     }
 
@@ -55,7 +52,6 @@ pub fn build(b: *std.Build) !void {
     const build_all = b.option(bool, "all", "Build all components. You can still disable individual components") orelse false;
     const build_example = b.option(bool, "example", "Build the example application") orelse build_all;
     const build_static_library = b.option(bool, "lib", "Build a static library object") orelse build_all;
-    const build_dump_tool = b.option(bool, "dump", "Build the dump tool") orelse build_all;
     const include_metrics = b.option(bool, "metrics", "Include metrics generation in code.") orelse true;
 
     const target = b.standardTargetOptions(.{});
@@ -76,12 +72,9 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-    });
-
-    const kwatcher_dump = b.createModule(.{
-        .root_source_file = b.path("src/tools/dmp.zig"),
-        .target = target,
-        .optimize = optimize,
+        .dwarf_format = .@"64",
+        .link_libc = false,
+        .omit_frame_pointer = false,
     });
 
     const tests = b.addTest(.{
@@ -95,14 +88,6 @@ pub fn build(b: *std.Build) !void {
     });
     if (build_example) {
         b.installArtifact(example);
-    }
-
-    const dump = b.addExecutable(.{
-        .name = "kwatcher-dmp",
-        .root_module = kwatcher_dump,
-    });
-    if (build_dump_tool) {
-        b.installArtifact(dump);
     }
 
     const lib = b.addLibrary(.{
@@ -137,7 +122,6 @@ pub fn build(b: *std.Build) !void {
     const check = b.step("check", "Build without generating artifacts.");
     check.dependOn(&lib.step);
     check.dependOn(&example.step);
-    check.dependOn(&dump.step);
 
     const test_step = b.step("test", "Run the unit tests.");
     test_step.dependOn(&run_tests.step);
@@ -164,9 +148,9 @@ pub fn build(b: *std.Build) !void {
     // Imports:
     // Internal:
     kwatcher_example.addImport("kwatcher", kwatcher_library);
-    kwatcher_dump.addImport("kwatcher", kwatcher_library);
     // 1st Party:
     kwatcher_library.addImport("klib", klib);
+    kwatcher_example.addImport("klib", klib);
     // 3rd Party:
     kwatcher_library.addImport("zamqp", zamqp);
     kwatcher_library.addImport("uuid", uuid);
