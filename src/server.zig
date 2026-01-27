@@ -1,705 +1,390 @@
+const builtin = @import("builtin");
 const std = @import("std");
-const log_server = std.log.scoped(.server);
-const log_deps = std.log.scoped(.dependency);
 const klib = @import("klib");
-const meta = klib.meta;
 
-const schema = @import("schema.zig");
-const mem = @import("mem.zig");
+const Drivers = @import("driver.zig").Drivers;
+const Event = @import("event.zig").Event;
+const Props = @import("event.zig").Properties;
+const ExProps = @import("event.zig").ExtendedProperties;
+const dep = @import("dep.zig");
 
-const config = @import("utils/config.zig");
-const metrics = @import("utils/metrics.zig");
-const InternFmtCache = @import("utils/intern_fmt_cache.zig");
-const Injector = @import("utils/injector.zig").Injector;
-const Timer = @import("utils/timer.zig");
+const shared = @import("utils/shared.zig");
+const arc = @import("utils/arc.zig");
+const MCMPQueue = @import("utils/queue.zig").StaticStrict;
 
-const Client = @import("client/client.zig");
-const AmqpClient = @import("client/amqp_client.zig");
-const DurableCacheClient = @import("client/durable_cache_client.zig");
-const CircuitBreakerClient = @import("client/circuit_breaker_client.zig");
+const kwev = @import("kwev/kwev.zig");
+const recorder = @import("kwev/recorder.zig");
 
-const DefaultRoutes = @import("route/default_routes.zig");
-const Route = @import("route/route.zig").Route;
-const context = @import("route/context.zig");
+const ScopedAllocator = @import("mem/mem.zig").ScopedAllocator;
 
-const protocol = @import("protocol/protocol.zig");
+pub const Root = @This();
 
-const replay = @import("recording/replay.zig");
+pub fn genAccepts(comptime ET: type, comptime T: type) *const fn (ET) bool {
+    const H = struct {
+        pub fn accepts(e: ET) bool {
+            const v = @intFromEnum(e);
 
-fn Dependencies(comptime Context: type, comptime UserConfig: type, comptime client_name: []const u8, comptime client_version: []const u8) type {
-    const __ignore = struct {};
+            const bounds = comptime blk: {
+                var min: u12 = std.math.maxInt(u12);
+                var max: u12 = std.math.minInt(u12);
+                for (@typeInfo(T).@"enum".fields) |f| {
+                    if (min > f.value) min = f.value;
+                    if (max < f.value) max = f.value;
+                }
 
-    return struct {
-        const Self = @This();
-        const UserContext = @FieldType(Context, "custom");
-        allocator: std.mem.Allocator,
-        arena: *std.heap.ArenaAllocator,
-        internal_arena: mem.InternalArena,
-        instrumented_allocator: *klib.mem.InstrumentedAllocator,
-        intern_fmt_cache: *InternFmtCache,
-        context: *Context,
-
-        client_cache: ?*AmqpClient = null,
-        dcc_cache: ?*DurableCacheClient = null,
-        cbc_cache: ?*CircuitBreakerClient = null,
-        timer: ?Timer = null,
-        user_info: ?schema.UserInfo = null,
-        user_config: ?UserConfig = null,
-        base_config: ?config.BaseConfig = null,
-        merged_config: ?config.Config(UserConfig) = null,
-
-        pub fn clientInfoFactory(client_registry: *protocol.client_registration.registry, client: Client) schema.ClientInfo {
-            log_deps.debug("Factory(ClientInfo)", .{});
-            return .{
-                .version = client_version,
-                .name = client_name,
-                .id = client_registry.id(client),
+                break :blk .{ .min = min, .max = max - 1 };
             };
-        }
 
-        pub fn userContextFactory(ctx: *Context) *UserContext {
-            log_deps.debug("Factory(UserContext)", .{});
-            return &ctx.custom;
-        }
-
-        pub fn clientRegistryFactory(ctx: *Context) *protocol.client_registration.registry {
-            log_deps.debug("Factory(protocol.client_registration.registry)", .{});
-            return &ctx.client;
-        }
-
-        pub fn timerFactory(self: *Self, allocator: std.mem.Allocator, base_config: config.BaseConfig) !Timer {
-            if (self.timer) |res| {
-                log_deps.debug("Factory(Timer): cache_hit", .{});
-                return res;
-            } else {
-                log_deps.debug("Factory(Timer): create", .{});
-                var timer = Timer.init(allocator);
-                try timer.register("heartbeat", base_config.config.heartbeat_interval);
-                try timer.register("metrics", base_config.config.metrics_interval_ns);
-                // TODO: Register elsewhere
-                try timer.register("announce", base_config.config.heartbeat_interval);
-                self.timer = timer;
-                return self.timer.?;
-            }
-        }
-
-        pub fn userInfo(self: *Self, allocator: std.mem.Allocator) !schema.UserInfo {
-            if (self.user_info) |res| {
-                log_deps.debug("Factory(UserInfo): cache_hit", .{});
-                return res;
-            } else {
-                log_deps.debug("Factory(UserInfo): fresh", .{});
-                self.user_info = try schema.UserInfo.init(allocator, null);
-                return self.user_info.?;
-            }
-        }
-
-        pub fn mergedConfig(self: *Self, arena: *std.heap.ArenaAllocator) !config.Config(UserConfig) {
-            if (self.merged_config) |m| {
-                log_deps.debug("Factory(config.Config(UserConfig)): cache_hit", .{});
-                return m;
-            } else {
-                log_deps.debug("Factory(config.Config(UserConfig)): fresh", .{});
-                const merged_config = try config.findConfigFileWithDefaults(
-                    UserConfig,
-                    client_name,
-                    arena,
-                );
-                self.merged_config = merged_config;
-                return self.merged_config.?;
-            }
-        }
-
-        pub fn userConfig(self: *Self, merged_config: config.Config(UserConfig)) UserConfig {
-            if (self.user_config) |res| {
-                log_deps.debug("Factory(UserConfig): cache_hit", .{});
-                return res;
-            } else {
-                log_deps.debug("Factory(UserConfig): fresh", .{});
-                const user_config = meta.copy(
-                    @TypeOf(merged_config.value),
-                    UserConfig,
-                    merged_config.value,
-                );
-                self.user_config = user_config;
-
-                return self.user_config.?;
-            }
-        }
-
-        pub fn baseConfig(self: *Self, merged_config: config.Config(UserConfig)) !config.BaseConfig {
-            if (self.base_config) |res| {
-                log_deps.debug("Factory(BaseConfig): cache_hit", .{});
-                return res;
-            } else {
-                log_deps.debug("Factory(BaseConfig): fresh", .{});
-                const base_config = meta.copy(
-                    @TypeOf(merged_config.value),
-                    config.BaseConfig,
-                    merged_config.value,
-                );
-                self.base_config = base_config;
-                return self.base_config.?;
-            }
-        }
-
-        pub fn clientFactory(self: *Self, allocator: std.mem.Allocator, config_file: config.BaseConfig) !*AmqpClient {
-            if (self.client_cache) |res| {
-                log_deps.debug("Factory(AmqpClient): cache_hit", .{});
-                return res;
-            } else {
-                log_deps.debug("Factory(AmqpClient): fresh", .{});
-                const amqp_client = try allocator.create(AmqpClient);
-                amqp_client.* = try AmqpClient.init(allocator, config_file, client_name);
-                metrics.setClientId(amqp_client.id);
-                self.client_cache = amqp_client;
-                return self.client_cache.?;
-            }
-        }
-
-        pub fn durableCacheClientFactory(self: *Self, allocator: std.mem.Allocator, config_file: config.BaseConfig) !*DurableCacheClient {
-            if (self.dcc_cache) |res| {
-                log_deps.debug("Factory(DurableCacheClient): cache_hit", .{});
-                return res;
-            } else {
-                log_deps.debug("Factory(DurableCacheClient): fresh", .{});
-                const dcc = try allocator.create(DurableCacheClient);
-                dcc.* = try DurableCacheClient.init(allocator, config_file);
-                errdefer allocator.destroy(dcc);
-                self.dcc_cache = dcc;
-                return self.dcc_cache.?;
-            }
-        }
-
-        pub fn circuitBreakerClientFactory(self: *Self, allocator: std.mem.Allocator, main: *AmqpClient, fallback: *DurableCacheClient) !*CircuitBreakerClient {
-            if (self.cbc_cache) |res| {
-                log_deps.debug("Factory(CircuitBreakerClient): cache_hit", .{});
-                return res;
-            } else {
-                log_deps.debug("Factory(CircuitBreakerClient): fresh", .{});
-                const cbc = try allocator.create(CircuitBreakerClient);
-                errdefer allocator.destroy(cbc);
-                cbc.* = try CircuitBreakerClient.init(allocator, main.client(), fallback.client(), .{});
-                try CircuitBreakerClient.connect(cbc);
-                self.cbc_cache = cbc;
-                return self.cbc_cache.?;
-            }
-        }
-
-        pub fn clientProxyFactory(base_client: *CircuitBreakerClient) Client {
-            log_deps.debug("Factory(Client)", .{});
-            return base_client.client();
-        }
-
-        pub fn init(allocator: std.mem.Allocator) !Self {
-            log_deps.debug("SingletonDependency DI: INIT", .{});
-            const arr_ptr = try allocator.create(std.heap.ArenaAllocator);
-            const instr_ptr = try allocator.create(klib.mem.InstrumentedAllocator);
-            errdefer allocator.destroy(arr_ptr);
-            const ifc_ptr = try allocator.create(InternFmtCache);
-            errdefer allocator.destroy(ifc_ptr);
-            const ctx = try allocator.create(Context);
-            errdefer allocator.destroy(ctx);
-
-            const result = Self{
-                .context = ctx,
-                .intern_fmt_cache = ifc_ptr,
-                .allocator = allocator,
-                .instrumented_allocator = instr_ptr,
-                .arena = arr_ptr,
-                .internal_arena = try mem.InternalArena.init(allocator, metrics.shim),
-            };
-            result.instrumented_allocator.* = metrics.instrumentAllocator(std.heap.page_allocator);
-            result.arena.* = std.heap.ArenaAllocator.init(instr_ptr.allocator());
-            result.intern_fmt_cache.* = InternFmtCache.init(instr_ptr.allocator());
-            result.context.* = .{};
-            return result;
-        }
-
-        pub fn deinit(self: *Self) __ignore {
-            log_deps.debug("SingletonDependency DI: END", .{});
-            if (self.timer) |_|
-                self.timer.?.deinit();
-
-            if (self.user_info) |*u|
-                u.deinit();
-
-            if (self.client_cache) |c| {
-                c.deinit();
-                self.allocator.destroy(c);
-            }
-
-            if (self.dcc_cache) |c| {
-                c.deinit();
-                self.allocator.destroy(c);
-            }
-
-            self.intern_fmt_cache.deinit();
-            self.allocator.destroy(self.intern_fmt_cache);
-            self.allocator.destroy(self.context);
-            self.internal_arena.deinit();
-            self.arena.deinit();
-            self.allocator.destroy(self.arena);
-            self.allocator.destroy(self.instrumented_allocator);
-
-            return .{};
+            return v >= bounds.min and v <= bounds.max;
         }
     };
+
+    return &H.accepts;
 }
 
-const DefaultEventProvider = struct {
-    pub fn metrics(timer: Timer) !bool {
-        return try timer.ready("metrics");
-    }
+const PropCtx = struct {
+    props: Props,
 };
 
-pub fn Server(
-    comptime client_name: []const u8,
-    comptime client_version: []const u8,
-    comptime UserSingletonDependencies: type,
-    comptime UserScopedDependencies: type,
-    comptime UserConfig: type,
-    comptime UserContext: type,
-    comptime Routes: type,
-    comptime EventProvider: type,
-) type {
+pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
+    const EventType = D.EventList();
+    const EventValues = D.EventValues();
+    const E = Event(EventType, EventValues);
+    const Handlers = D.Handlers(EventType, EventValues);
+    const SchCtx = D.SchedulerCtx();
+    const Deps = comptime blk: {
+        var Dm = _Deps;
+        for (SchCtx) |S| {
+            Dm = Dm.Static(.all, *S);
+        }
+        break :blk Dm;
+    };
+    Deps.verify();
     return struct {
         const Self = @This();
-        const Context = context.Context(UserContext);
-        instrumented_allocator: *klib.mem.InstrumentedAllocator,
-        deps: *Dependencies(Context, UserConfig, client_name, client_version),
-        user_deps: *UserSingletonDependencies,
-        routes: std.ArrayListUnmanaged(Route(Context)),
 
-        consumers: std.StringHashMapUnmanaged(Route(Context)),
-        publishers: std.ArrayListUnmanaged(Route(Context)),
+        should_run: bool,
+        consumers: u8,
+        allocator: std.mem.Allocator,
+        queue: MCMPQueue(E),
+        handlers: std.meta.Tuple(&Handlers) = undefined,
+        schedulers: std.meta.Tuple(&SchCtx) = std.mem.zeroInit(std.meta.Tuple(&SchCtx), .{}),
+        deps: Deps,
+        rand: std.Random.Xoshiro256 = std.Random.DefaultPrng.init(0),
 
-        base_injector: *Injector,
-        user_injector: *Injector,
+        pub fn init(alloc: std.mem.Allocator, context: _Deps, consumers: u8) !Self {
+            var f = try kwev.KWEV.init("static.kwev", 512 * 1024);
+            defer f.deinit();
+            const fs = try kwev.inscribe(&f, D);
+            try f.finalize(fs);
 
-        retries: i8 = 0,
-        backoff: u64 = 5,
-        should_run: std.atomic.Value(bool) = .init(true),
-
-        pub fn init(allocator: std.mem.Allocator, deps: *UserSingletonDependencies) !Self {
-            var instrumented_allocator = try allocator.create(klib.mem.InstrumentedAllocator);
-            instrumented_allocator.* = metrics.instrumentAllocator(allocator);
-            const alloc = instrumented_allocator.allocator();
-            try metrics.initialize(
-                alloc,
-                client_name,
-                client_version,
-                try klib.host.hostname(allocator),
-                .{},
-            );
-            const default_deps = try Dependencies(
-                Context,
-                UserConfig,
-                client_name,
-                client_version,
-            ).init(alloc);
-
-            const user_routes = comptime Route(Context).from(Routes, EventProvider);
-            const default_routes = comptime Route(Context).from(DefaultRoutes, DefaultEventProvider);
-            const client_registration_routes = comptime Route(Context).from(
-                protocol.client_registration.route,
-                protocol.client_registration.events,
-            );
-
-            const route_count = user_routes.len + client_registration_routes.len + default_routes.len;
-
-            var routes = try std.ArrayListUnmanaged(Route(Context)).initCapacity(alloc, route_count);
-
-            routes.appendSliceAssumeCapacity(user_routes);
-            routes.appendSliceAssumeCapacity(default_routes);
-            routes.appendSliceAssumeCapacity(client_registration_routes);
-
-            const deps_ptr = try allocator.create(@TypeOf(default_deps));
-            deps_ptr.* = default_deps;
-
-            const res = Self{
-                .base_injector = try alloc.create(Injector),
-                .user_injector = try alloc.create(Injector),
-                .instrumented_allocator = instrumented_allocator,
-                .user_deps = deps,
-                .deps = deps_ptr,
-                .routes = routes,
-                .consumers = .{},
-                .publishers = .{},
+            return .{
+                .should_run = true,
+                .allocator = alloc,
+                .queue = .init(try alloc.alignedAlloc(
+                    E,
+                    std.mem.Alignment.@"16",
+                    1024,
+                )),
+                .deps = context.become(Deps),
+                .consumers = consumers,
             };
-
-            const base_injector = try Injector.init(res.deps, null);
-            res.base_injector.* = base_injector;
-            const user_injector = try Injector.init(res.user_deps, res.base_injector);
-            res.user_injector.* = user_injector;
-
-            return res;
         }
 
         pub fn deinit(self: *Self) void {
-            log_server.info("Shutting server down...", .{});
-            metrics.deinitialize();
-            _ = self.deps.deinit();
-            self.instrumented_allocator.*.child_allocator.destroy(self.instrumented_allocator);
+            self.allocator.free(self.queue.buffer);
+            self.deps.deinit(self.allocator);
+            inline for (Handlers, 0..) |_, i| {
+                self.handlers[i].deinit(self.allocator);
+            }
+            // TODO: deinit schedulers
         }
 
-        pub fn configure(self: *Self) !void {
-            log_server.info("Configuring server", .{});
-
-            const client = try self.user_injector.require(Client);
-
-            const alloc = self.instrumented_allocator.allocator();
-            self.publishers.clearRetainingCapacity();
-            var ki = self.consumers.keyIterator();
-            while (ki.next()) |e| {
-                alloc.free(e.*);
+        pub fn bind(self: *Self) !void {
+            var od = self.deps.become(_Deps);
+            self.handlers = try D.initAll(self.allocator, &od, EventType, EventValues);
+            inline for (Handlers, 0..) |_, i| {
+                var h = &self.handlers[i];
+                h.bind(&self.queue);
+                self.schedulers[i].scheduler = h.scheduler();
+                self.deps.staticAssumeRegistered(.all, &self.schedulers[i], self.allocator);
             }
-            self.consumers.clearRetainingCapacity();
+        }
 
-            log_server.info("Found {d} routes: ", .{self.routes.items.len});
-            for (self.routes.items) |*route_ptr| {
-                var route = route_ptr.*;
-                const existing = try (&route).updateBindings(self.user_injector);
-                if (existing) |_| {
-                    @panic("A consumer tag shouldn't exist yet. Something is very wrong. Server state corrupted... Aborting");
+        pub fn watch(self: *Self) !void {
+            const pool = try self.allocator.create(std.Thread.Pool);
+            defer self.allocator.destroy(pool);
+            const jobs = comptime blk: {
+                var jobs: u8 = 0;
+                for (D.drivers) |Dvs| {
+                    jobs += Dvs.jobs;
                 }
-                const ct = try (&route).bind(client);
-                log_server.info(
-                    "  {t} {s}/{s}/{s}",
+                break :blk jobs;
+            };
+
+            try std.Thread.Pool.init(pool, .{ .allocator = self.allocator, .n_jobs = jobs });
+            defer pool.deinit();
+            var wg = std.Thread.WaitGroup{};
+
+            inline for (Handlers, 0..) |_, i| {
+                var dep_ctx = try self.deps.compile(
+                    D.drivers[i].key,
+                    .scoped,
+                    self.allocator,
+                );
+                const H = struct {
+                    allocator: std.mem.Allocator,
+                    pub fn deinit(this: *@This(), target: *dep.DepCtx) void {
+                        Deps.deactualize(target, D.drivers[i].key, .scoped);
+                        Deps.reset(target, D.drivers[i].key, .scoped, this.allocator);
+                    }
+                };
+
+                try self.deps.prepare(
+                    &dep_ctx,
+                    D.drivers[i].key,
+                    .scoped,
+                    self.allocator,
+                );
+                try self.deps.actualize(D.drivers[i].key, .scoped, &dep_ctx);
+
+                const scoped = try dep_ctx.require(ScopedAllocator);
+                const arcctx = try arc.ArcCtx(dep.DepCtx, H).init(
+                    scoped.value,
                     .{
-                        route.method,
-                        route.binding.exchange,
-                        route.binding.route,
-                        route.binding.queue orelse "[transient]",
+                        .data = dep_ctx,
+                        .ctx = .{
+                            .allocator = self.allocator,
+                        },
                     },
                 );
-                if (ct) |consumer_tag| {
-                    log_server.debug(
-                        "Assigning '{} {s}/{s}/{?s}' to {s}",
-                        .{
-                            route.method,
-                            route.binding.exchange,
-                            route.binding.route,
-                            route.binding.queue,
-                            consumer_tag,
-                        },
-                    );
-                    try self.consumers.put(alloc, try alloc.dupe(u8, consumer_tag), route);
-                } else {
-                    try self.publishers.append(alloc, route);
-                }
+                try self.handlers[i].watch(&wg, pool, arcctx);
             }
+
+            pool.waitAndWork(&wg);
         }
 
-        pub fn handlePublish(self: *Self) !void {
-            const PublishArgs = std.meta.Tuple(&.{*Injector});
-            var cl = try self.user_injector.require(Client);
-            defer cl.reset();
-            var internal_arena = try self.user_injector.require(mem.InternalArena);
-            defer internal_arena.reset();
-            var timer = try self.base_injector.require(Timer);
-            for (self.publishers.items) |*route| {
-                const act_start = std.time.microTimestamp();
-                defer internal_arena.reset();
-                const event_handler = route.handlers.event.?;
-                // Prepare dependency injection
-                var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
-                var scoped_injector = try Injector.init(&scoped_deps, self.user_injector);
-                defer scoped_injector.maybeDeconstruct();
-                var binding_injector = try Injector.init(@constCast(&.{ .binding = @constCast(&route.binding) }), &scoped_injector);
-                defer binding_injector.maybeDeconstruct();
-                const args = PublishArgs{&binding_injector};
-
-                // Readiness check
-                const ready = @call(.auto, event_handler, args) catch |e| {
-                    log_server.err(
-                        "Encountered an error while querying the event provider for '{s}/{s}': {}",
-                        .{ route.binding.exchange, route.binding.route, e },
-                    );
-                    continue;
-                };
-                if (!ready) continue;
-
-                defer {
-                    const time = std.time.microTimestamp() - act_start;
-                    metrics.latency(route.name, time) catch {};
-                }
-
-                // Publish message to the client.
-                const msg = @call(.auto, route.handlers.publish.?, args) catch |e| {
-                    try metrics.publishError(route.binding.route, route.binding.exchange);
-                    log_server.err(
-                        "Encountered an error while publishing an event on '{s}/{s}': {}",
-                        .{ route.binding.exchange, route.binding.route, e },
-                    );
-                    continue;
-                };
-                try cl.publish(msg, .{});
-                try metrics.publish(route.binding.route, route.binding.exchange);
+        pub fn EventOf(comptime ev: EventType) ?struct { type, usize } {
+            inline for (Handlers, 0..) |H, i| {
+                if (comptime H.accepts(ev)) return .{ H, i };
             }
-            try timer.step();
+            return null;
         }
 
-        pub fn handleReplay(self: *Self) !void {
-            const cb = try self.user_injector.require(*CircuitBreakerClient);
-            if (cb.state != .closed) return;
+        pub fn begin(self: *Self) !void {
+            const pool = try self.allocator.create(std.Thread.Pool);
+            defer self.allocator.destroy(pool);
+            try std.Thread.Pool.init(pool, .{ .allocator = self.allocator, .n_jobs = self.consumers });
+            defer pool.deinit();
+            var wg = std.Thread.WaitGroup{};
 
-            const base_config = try self.user_injector.require(config.BaseConfig);
-            var internal_arena = try self.user_injector.require(mem.InternalArena);
-            defer internal_arena.reset();
-            var amcl = try AmqpClient.init(
-                internal_arena.allocator(),
-                base_config,
-                client_name,
-            );
-            defer amcl.deinit();
-            var cl = amcl.client();
-            defer cl.reset();
-
-            var manager = try replay.ReplayManager.init(
-                internal_arena.allocator(),
-                base_config.config.recording_dir,
-                cl,
-            );
-            defer manager.deinit();
-
-            try manager.replay();
-        }
-
-        pub fn handleConsume(self: *Self, interval: u64) !void {
-            const ConsumeArgs = std.meta.Tuple(&.{ *Injector, []const u8 });
-            var cl = try self.user_injector.require(Client);
-            defer cl.reset();
-            var internal_arena = try self.user_injector.require(mem.InternalArena);
-            defer internal_arena.reset();
-
-            var remaining: i64 = @intCast(interval);
-            var total: i32 = 0;
-            var handled: i32 = 0;
-            main: while (remaining > 0) {
-                const act_start = std.time.microTimestamp();
-                const rabbitmq_wait_us = @divTrunc(remaining, std.time.ns_per_us);
-                const start_time = try std.time.Instant.now();
-                var envelope = try cl.consume(rabbitmq_wait_us);
-                defer internal_arena.reset();
-                if (envelope) |*response| {
-                    defer response.deinit();
-                    total += 1;
-                    try metrics.consume(response.routing_key);
-                    const maybe_route = self.consumers.getPtr(response.consumer_tag);
-                    if (maybe_route == null) return error.InvalidConsumer;
-                    const route = maybe_route.?;
-                    defer {
-                        const time = std.time.microTimestamp() - act_start;
-                        metrics.latency(route.name, time) catch {};
-                    }
-
-                    var scoped_deps = std.mem.zeroInit(UserScopedDependencies, .{});
-                    var scoped_injector = try Injector.init(&scoped_deps, self.user_injector);
-                    defer scoped_injector.maybeDeconstruct();
-                    var binding_injector = try Injector.init(@constCast(&.{ .binding = &route.binding }), &scoped_injector);
-                    defer binding_injector.maybeDeconstruct();
-                    switch (route.method) {
-                        .consume => {
-                            handled += 1;
-                            {
-                                const args = ConsumeArgs{ &binding_injector, response.message.body };
-                                @call(.auto, route.handlers.consume.?, args) catch |e| {
-                                    log_server.err(
-                                        "Encountered an error while consuming a message on '{s}/{s}': {}\n\t{s}\n",
-                                        .{ route.binding.exchange, route.binding.route, e, response.message.body },
-                                    );
-                                    try cl.reject(response.delivery_tag, false, .{});
-                                    continue;
-                                };
-                                try cl.ack(response.delivery_tag, .{});
-                                try metrics.ack(route.binding.route);
-                                const end_time = try std.time.Instant.now();
-                                const diff = end_time.since(start_time);
-                                remaining -= @intCast(diff);
-                            }
-                        },
-                        .reply => {
-                            handled += 1;
-                            {
-                                const reply_to = (response.message.basic_properties.get(.reply_to) orelse {
-                                    log_server.err("Reply handler didn't receive a reply queue. Not acknowledging invalid request", .{});
-                                    continue;
-                                }).slice() orelse unreachable;
-
-                                const args = ConsumeArgs{ &binding_injector, response.message.body };
-                                log_server.debug("Replying to {s}/{s}", .{ route.binding.exchange, reply_to });
-                                var msg: schema.SendMessage = @call(.auto, route.handlers.reply.?, args) catch |e| {
-                                    log_server.err(
-                                        "Encountered an error while replying a message on '{s}/{s}': {}\n\t{s}\n",
-                                        .{ route.binding.exchange, route.binding.route, e, response.message.body },
-                                    );
-                                    try cl.reject(response.delivery_tag, false, .{});
-                                    continue;
-                                };
-                                if (response.message.basic_properties.get(.correlation_id)) |ci| {
-                                    msg.options.correlation_id = ci.slice();
-                                }
-                                msg.options.routing_key = reply_to;
-                                try cl.publish(msg, .{});
-                                try metrics.publish(reply_to, route.binding.exchange);
-                                // Only ack the message if the response is successful. That way we get to retry it if it fails.
-                                try cl.ack(response.delivery_tag, .{});
-                                try metrics.ack(route.binding.route);
-                                const end_time = try std.time.Instant.now();
-                                const diff = end_time.since(start_time);
-                                remaining -= @intCast(diff);
-                            }
-                        },
-                        else => {
-                            return error.InvalidMethod;
-                        },
-                    }
-                    internal_arena.reset();
-                    // Release the memory used up by the message processing.
-                    // In high volume scenarios it might be worth letting memory accumulate
-                    // and then releasing it at the end though since we hold on to the memory
-                    // this probably doesn't cost us very much.
-
-                    continue :main; // We can just let the loop fall through but this way we
-                    // are already prepped in case we need to add more substantial
-                    // logic after i.e rejection and whatnot
-                }
-                const end_time = try std.time.Instant.now();
-                const diff = end_time.since(start_time);
-                remaining -= @intCast(diff);
+            for (0..self.consumers) |_| {
+                pool.spawnWg(&wg, Self.run, .{self});
             }
-            //std.log.info("Cycle: {}/{}.", .{ handled, total });
-        }
 
-        pub fn run(self: *Self, extra: struct { cycles: u64 }) !void {
-            const alloc = self.instrumented_allocator.allocator();
-            const base_conf = try self.user_injector.require(config.BaseConfig);
-            var rem_cycles = extra.cycles;
-            self.configure() catch |e| {
-                log_server.err("Encountered an error while configuring the client: {}", .{e});
-                return e;
-            };
-            const interval: u64 = base_conf.config.polling_interval;
-            while (self.should_run.raw) {
-                if (extra.cycles > 0 and rem_cycles == 0) {
-                    break;
-                } else if (extra.cycles > 0) {
-                    rem_cycles -= 1;
-                }
-
-                try metrics.resetCycle();
-                const start_time = try std.time.Instant.now();
-                for (self.publishers.items) |*route| {
-                    const ct = try route.updateBindings(self.user_injector);
-                    if (ct) |_| {
-                        return error.UnexpectedConsumerTag;
-                    }
-                }
-
-                var it = self.consumers.iterator();
-                while (it.next()) |entry| {
-                    const maybe_new = try entry.value_ptr.updateBindings(self.user_injector);
-                    if (maybe_new == null) return error.ExpectedConsumerTag;
-                    const new = maybe_new.?;
-                    if (!std.mem.eql(u8, new, entry.key_ptr.*)) {
-                        const v = entry.value_ptr.*;
-                        const k = entry.key_ptr.*;
-                        self.consumers.removeByPtr(entry.key_ptr);
-                        alloc.free(k);
-                        try self.consumers.put(alloc, try alloc.dupe(u8, new), v);
-                        log_server.debug("--------------- NEW {s}     -----------", .{new});
-                        continue;
-                    }
-                }
-
-                self.handleReplay() catch |e| {
-                    log_server.err("Encountered an error while handling replaying events: {}. This is likely a bug in KWatcher.", .{e});
-                    return e;
-                };
-                self.handlePublish() catch |e| {
-                    log_server.err("Encountered an error while handling publishing events: {}. This is likely a bug in KWatcher.", .{e});
-                    return e;
-                };
-                self.handleConsume(interval) catch |e| {
-                    log_server.err("Encountered an error while handling consuming events: {}. This is likely a bug in KWatcher.", .{e});
-                    return e;
-                };
-                const end_time = try std.time.Instant.now();
-                const duration_us = end_time.since(start_time) / std.time.ns_per_us;
-                try metrics.cycle(duration_us);
-            }
-        }
-
-        pub fn reset(self: *Self) !void {
-            const client = try self.user_injector.require(Client);
-
-            client.disconnect() catch |e| switch (e) {
-                .InvalidState, .DeadClient => {},
-                else => return e,
-            };
-
-            std.Thread.sleep(self.backoff * std.time.ns_per_s);
-            try client.connect();
-            try self.configure(); // if this fails we let it abort.
+            pool.waitAndWork(&wg);
         }
 
         pub fn stop(self: *Self) void {
-            self.should_run.store(false, .unordered);
+            @atomicStore(bool, &self.should_run, false, .release);
+            inline for (Handlers, 0..) |_, i| {
+                self.handlers[i].stop();
+            }
+            for (0..self.consumers) |_| {
+                std.log.debug("Poison", .{});
+                self.queue.push(.{
+                    .event_type = .shutdown,
+                    .event_data = .{ .internal = .{ .shutdown = .{} } },
+                });
+            }
         }
 
-        pub fn start(self: *Self) !void {
-            // In contrast to run, start will try to connect again in case a disconnection occurs.
-            main_loop: while (self.should_run.raw) {
-                self.run(.{ .cycles = 0 }) catch |e| {
-                    if (e == error.AuthFailure) {
-                        return e; // We really can't do anything if the credentials are wrong.
-                    }
+        pub fn stopHandler(self: *Self, comptime addr: **anyopaque) std.posix.Sigaction.handler_fn {
+            const H = struct {
+                pub fn shutdown(_: c_int) callconv(.c) void {
+                    const s: *Self = @ptrCast(@alignCast(addr.*));
+                    s.stop();
+                }
+            };
 
-                    switch (e) {
-                        error.Disconnected,
-                        error.HeartbeatTimeout,
-                        error.InvalidState,
-                        => {},
-                        error.DeadClient => {
-                            const old_client = self.deps.client_cache;
-                            if (old_client) |c| {
-                                c.deinit();
-                            }
-                            self.deps.client_cache = null;
-                        },
-                        else => {
-                            log_server.err("Cannot recover from error: {}. Aborting..", .{e});
-                            return error.ReconnectionFailure;
-                        },
-                    }
+            addr.* = @ptrCast(@alignCast(self));
 
-                    var last_error: anyerror = e;
+            return H.shutdown;
+        }
 
-                    while (self.retries <= 10) {
-                        log_server.err(
-                            "Got disconnected with: {}. Retrying ({}) after {} seconds.",
-                            .{ last_error, self.retries, self.backoff },
-                        );
-                        std.Thread.sleep(self.backoff * std.time.ns_per_s);
+        fn run(self: *Self) void {
+            var buffer: [16 * 1024]u8 = undefined;
+            var fba = std.heap.FixedBufferAllocator.init(&buffer);
+            var driver_map: [D.drivers.len]dep.DepCtx = undefined;
+            var rec: recorder.Recorder = undefined;
+            recorder.Recorder.initPinned(
+                &rec,
+                std.Thread.getCurrentId(),
+                256 * 1024,
+            ) catch unreachable;
+            defer rec.deinit();
+            inline for (D.drivers, 0..) |Driver, i| {
+                driver_map[i] = self.deps.compile(Driver.key, .scoped, fba.allocator()) catch unreachable;
+                self.deps.prepare(&driver_map[i], Driver.key, .scoped, fba.allocator()) catch unreachable;
+            }
 
-                        self.backoff *= 2;
-                        self.retries += 1;
+            defer {
+                inline for (D.drivers, 0..) |Driver, i| {
+                    defer Deps.reset(&driver_map[i], Driver.key, .scoped, fba.allocator());
+                }
+            }
 
-                        _ = self.user_injector.require(Client) catch |ce| {
-                            last_error = ce;
-                            continue;
-                        };
-
-                        self.backoff = 5;
-                        self.retries = 0;
-                        continue :main_loop;
-                    }
-
-                    log_server.err("Failed to reconnect after {} retries. Aborting...", .{self.retries});
-                    return error.ReconnectionFailure;
+            while (@atomicLoad(bool, &self.should_run, .acquire) or !self.queue.empty()) {
+                self.handle(false, &driver_map, &rec) catch |e| switch (e) {
+                    error.ShutdownImminent => {
+                        std.log.debug("T{d} will now drain", .{std.Thread.getCurrentId()});
+                        self.drain(&driver_map, &rec) catch {};
+                        std.log.debug("T{d} has exited", .{std.Thread.getCurrentId()});
+                        return;
+                    },
+                    else => std.log.err("Failure: {t}", .{e}),
                 };
             }
+        }
+
+        fn drain(self: *Self, injmap: []dep.DepCtx, rec: *recorder.Recorder) !void {
+            while (true) {
+                const front = self.queue.peek();
+                if (front) |_| {
+                    std.log.debug("T{d}: Trying", .{std.Thread.getCurrentId()});
+                    self.handle(true, injmap, rec) catch |e| {
+                        std.log.err("Caught error while draining: {s}", .{@errorName(e)});
+                    };
+                    std.log.debug("T{d}: Drained 1", .{std.Thread.getCurrentId()});
+                }
+                return;
+            }
+        }
+
+        fn handle(
+            self: *Self,
+            is_draining: bool,
+            injmap: []dep.DepCtx,
+            rec: *recorder.Recorder,
+        ) !void {
+            var maybe_next = if (is_draining) self.queue.tryPop(std.time.ns_per_ms * 5) orelse return else self.queue.pop();
+
+            handle: switch (maybe_next.event_type) {
+                .noop => {
+                    std.log.debug("Noop :)", .{});
+                },
+                .shutdown => {
+                    if (!is_draining) {
+                        std.log.debug("Shutting down thread. :)", .{});
+                        return error.ShutdownImminent;
+                    } else {
+                        std.log.debug("Draining. :)", .{});
+                        self.queue.push(maybe_next);
+                    }
+                },
+                inline else => |ev| {
+                    const err: anyerror!void = fail: {
+                        const Handler = comptime EventOf(ev);
+                        if (comptime Handler == null) {
+                            @branchHint(.cold);
+                            break :fail error.InvalidEvent;
+                        } else {
+                            @branchHint(.likely);
+                            const H, const i = comptime Handler.?;
+                            const handler = &self.handlers[i];
+                            const Driver = comptime D.drivers[i];
+
+                            const inj_ctx = &injmap[i];
+                            self.deps.actualize(Driver.key, .scoped, inj_ctx) catch |e| break :fail e;
+                            defer Deps.deactualize(inj_ctx, Driver.key, .scoped);
+
+                            if (maybe_next.properties.correlation_id == 0) {
+                                var buf: [16]u8 = undefined;
+                                std.Random.bytes(self.rand.random(), &buf);
+                                maybe_next.properties.correlation_id = std.mem.bytesToValue(u128, &buf);
+                            }
+
+                            var prop_ctx = PropCtx{ .props = maybe_next.properties };
+                            const o = inj_ctx.require(ScopedAllocator) catch |e| break :fail e;
+                            var v = dep.DependencyContainer(struct {}).new(D).static(
+                                .all,
+                                &prop_ctx,
+                                o.value,
+                            );
+                            var cm = v.compile(Driver.key, .scoped, o.value) catch |e| break :fail e;
+                            v.prepare(&cm, Driver.key, .scoped, o.value) catch |e| break :fail e;
+                            v.actualize(Driver.key, .scoped, &cm) catch |e| break :fail e;
+                            cm.parent = inj_ctx;
+                            defer @TypeOf(v).deactualize(&cm, Driver.key, .scoped);
+
+                            @call(.auto, H.handle, .{
+                                handler,
+                                ev,
+                                maybe_next,
+                                &cm,
+                            }) catch |e| break :fail e;
+
+                            try rec.append(maybe_next);
+                        }
+                    };
+
+                    err catch |e| {
+                        if (maybe_next.properties.attempts >= 3) {
+                            try rec.append(maybe_next);
+                            return e;
+                        }
+
+                        std.log.warn(
+                            "[{d}/3] Route {s} failed with error '{}'. Retrying...",
+                            .{ maybe_next.properties.attempts + 1, @tagName(ev), e },
+                        );
+
+                        maybe_next.properties.attempts += 1;
+                        self.queue.tryPush(
+                            maybe_next,
+                            std.time.ns_per_ms * 1,
+                        ) catch |e2| switch (e2) {
+                            error.WouldBlock => {
+                                continue :handle ev;
+                            },
+                            else => return e,
+                        };
+                    };
+                },
+            }
+        }
+
+        pub fn start(self: *@This()) !void {
+            const H = struct {
+                var slot: *anyopaque = undefined;
+            };
+
+            if (comptime builtin.os.tag == .linux) {
+                // call our shutdown function (below) when
+                // SIGINT or SIGTERM are received
+                std.posix.sigaction(std.posix.SIG.INT, &.{
+                    .handler = .{
+                        .handler = self.stopHandler(&H.slot),
+                    },
+                    .mask = std.posix.sigemptyset(),
+                    .flags = 0,
+                }, null);
+                std.posix.sigaction(std.posix.SIG.TERM, &.{
+                    .handler = .{ .handler = self.stopHandler(&H.slot) },
+                    .mask = std.posix.sigemptyset(),
+                    .flags = 0,
+                }, null);
+            }
+
+            try self.bind();
+
+            const thread = try std.Thread.spawn(
+                .{ .allocator = self.allocator },
+                watch,
+                .{self},
+            );
+            try self.begin();
+            thread.join();
         }
     };
 }
