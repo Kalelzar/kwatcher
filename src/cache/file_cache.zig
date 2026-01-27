@@ -3,7 +3,9 @@ const klib = @import("klib");
 const cache = @import("cache.zig");
 const serializer = @import("byte_serializer.zig");
 const eviction = @import("eviction.zig");
-const inject = @import("../utils/injector.zig");
+const inject = @import("../dep.zig");
+
+// FIXME: Migrate to DepCtx
 
 pub fn Resolver(
     comptime Data: type,

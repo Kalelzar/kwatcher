@@ -2,7 +2,7 @@ const std = @import("std");
 const klib = @import("klib");
 const cache = @import("cache.zig");
 const eviction = @import("eviction.zig");
-const inject = @import("../utils/injector.zig");
+const dep = @import("../dep.zig");
 
 pub fn Resolver(
     comptime Data: type,
@@ -55,29 +55,25 @@ pub fn Dependencies(
             }
         }
 
-        pub fn cacheFactory(inj: *inject.Injector, intf: Interface) cache.Cache(Data) {
+        pub fn cacheFactory(inj: *dep.DepCtx, intf: Interface) cache.Cache(Data) {
             return .{ .config = intf.interface(), .inj = inj };
+        }
+
+        pub fn deconstruct(self: *@This()) void {
+            if (self.context) |c| {
+                const alloc = c.allocator; // Yucky!. We need to update deconstruct to support parameter injection.
+                c.deinit();
+                alloc.destroy(c);
+            }
         }
     };
 }
 
-pub fn interdict(
-    comptime config: anytype,
-    parent: ?*inject.Injector,
-    persistent: std.mem.Allocator,
-) !*inject.Injector {
+pub fn Container(comptime config: anytype) type {
     const Data = @TypeOf(config).DataType;
     const Invariant = @TypeOf(config).InvariantType;
 
-    const inj = try persistent.create(inject.Injector);
-    errdefer persistent.destroy(inj);
-    const deps = Dependencies(Data, Invariant, config){};
-    const ctx = try persistent.create(@TypeOf(deps));
-
-    ctx.* = deps;
-    inj.* = try .init(ctx, parent);
-
-    return inj;
+    return Dependencies(Data, Invariant, config);
 }
 
 pub fn SetBuilder(comptime Data: type, comptime Invariant: anytype) type {

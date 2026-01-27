@@ -1,5 +1,5 @@
 const std = @import("std");
-const Injector = @import("../utils/injector.zig").Injector;
+const dep = @import("../dep.zig");
 const metrics = @import("../utils/metrics.zig");
 const build_config = @import("build_config");
 
@@ -15,7 +15,7 @@ pub const Tiered = @import("tiered_cache.zig").TieredCache;
 pub fn Cache(comptime Data: type) type {
     return struct {
         config: HotCold(Data),
-        inj: *Injector,
+        inj: *dep.DepCtx,
 
         pub fn get(self: @This(), invariant: anytype) !Data {
             const start = if (comptime build_config.enable_metrics) std.time.microTimestamp() else 0;
@@ -25,7 +25,8 @@ pub fn Cache(comptime Data: type) type {
                     metrics.latency(self.config.action_name, time) catch {};
                 }
             }
-            const arg: *anyopaque = @constCast(&invariant);
+            const ptr: *@TypeOf(invariant) = @constCast(&invariant);
+            const arg: *anyopaque = @ptrCast(@alignCast(ptr));
             if (self.config.hot) |h| {
                 @branchHint(.likely);
                 return @call(.auto, h, .{ self.inj, arg });
@@ -156,6 +157,16 @@ fn hashingStrategy(comptime Invariant: anytype, comptime off: usize, in: std.met
             const high = hashingStrategy(Invariant, off + 1, in) << 8;
             return high | low;
         }
+    } else if (comptime Invariant[off] == u1) {
+        if (comptime Invariant.len - off == 1) {
+            return @intCast(in[off]);
+        } else {
+            // Store the current u1 in the highest byte and we can try to fit the rest of the invariant in the remaining.
+            // We know that we CAN fit what remains here.
+            const low = @as(u64, @intCast(in[off]));
+            const high = hashingStrategy(Invariant, off + 1, in) << 1;
+            return high | low;
+        }
     } else {
         @compileError("Type '" ++ @typeName(Invariant[off]) ++ "' is missing an invariant hash fast path.");
     }
@@ -165,9 +176,9 @@ pub fn autoCacheWithContexts(
     comptime Data: type,
     comptime Invariant: anytype,
     comptime Context: anytype,
-) *const fn (*Injector, *anyopaque) anyerror!Data {
+) *const fn (*dep.DepCtx, *anyopaque) anyerror!Data {
     const H = struct {
-        pub fn get(inj: *Injector, invariant: *anyopaque) anyerror!Data {
+        pub fn get(inj: *dep.DepCtx, invariant: *anyopaque) anyerror!Data {
             const C = struct {
                 var config: ?HotCold(Data) = null;
                 var contexts: TupleTToV(Context) = splatNull(Context);
@@ -251,9 +262,9 @@ pub fn autoPushWithContexts(
     comptime Data: type,
     comptime Invariant: anytype,
     comptime Context: anytype,
-) *const fn (*Injector, Data, *anyopaque) anyerror!?Data {
+) *const fn (*dep.DepCtx, Data, *anyopaque) anyerror!?Data {
     const H = struct {
-        pub fn push(inj: *Injector, data: Data, invariant: *anyopaque) anyerror!?Data {
+        pub fn push(inj: *dep.DepCtx, data: Data, invariant: *anyopaque) anyerror!?Data {
             const C = struct {
                 var config: ?HotCold(Data) = null;
                 var contexts: TupleTToV(Context) = splatNull(Context);

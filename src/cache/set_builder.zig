@@ -1,5 +1,5 @@
 const std = @import("std");
-const Injector = @import("../utils/injector.zig").Injector;
+const dep = @import("../dep.zig");
 const cache = @import("cache.zig");
 
 pub const EvictionStrategy = enum {
@@ -22,9 +22,9 @@ pub const Expiration = union(enum) {
 pub fn SetOptions(comptime Data: type) type {
     return union(enum) {
         key: []const u8,
-        hot: *const fn (*Injector, *anyopaque) anyerror!Data,
-        cold: *const fn (*Injector, *anyopaque) anyerror!Data,
-        push: *const fn (*Injector, Data, *anyopaque) anyerror!?Data,
+        hot: *const fn (*dep.DepCtx, *anyopaque) anyerror!Data,
+        cold: *const fn (*dep.DepCtx, *anyopaque) anyerror!Data,
+        push: *const fn (*dep.DepCtx, Data, *anyopaque) anyerror!?Data,
         eviction: EvictionStrategy,
         residency: Residency,
         expiration: Expiration,
@@ -63,10 +63,10 @@ pub fn SetBuilder(comptime Data: type, comptime Invariant: anytype) type {
             return self.extend(.{ .key = @tagName(k) });
         }
 
-        fn handler(comptime f: anytype) *const fn (*Injector, *anyopaque) anyerror!Data {
+        fn handler(comptime f: anytype) *const fn (*dep.DepCtx, *anyopaque) anyerror!Data {
             const H = struct {
                 pub fn handle(
-                    inj: *Injector,
+                    inj: *dep.DepCtx,
                     invariant: *anyopaque,
                 ) anyerror!Data {
                     const in: *std.meta.Tuple(&Invariant) = @ptrCast(@alignCast(@constCast(invariant)));
@@ -78,10 +78,10 @@ pub fn SetBuilder(comptime Data: type, comptime Invariant: anytype) type {
             return &H.handle;
         }
 
-        fn pushHandler(comptime f: anytype) *const fn (*Injector, Data, *anyopaque) anyerror!?Data {
+        fn pushHandler(comptime f: anytype) *const fn (*dep.DepCtx, Data, *anyopaque) anyerror!?Data {
             const H = struct {
                 pub fn handle(
-                    inj: *Injector,
+                    inj: *dep.DepCtx,
                     data: Data,
                     invariant: *anyopaque,
                 ) anyerror!Data {

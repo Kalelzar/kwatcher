@@ -1,7 +1,9 @@
 const std = @import("std");
 const klib = @import("klib");
 const cache = @import("cache.zig");
-const inject = @import("../utils/injector.zig");
+const inject = @import("../dep.zig");
+
+// FIXME: Migrate to DepCtx
 
 pub fn SetBuilder(
     comptime Data: type,
@@ -197,7 +199,7 @@ pub fn Dependencies(
             return ptr;
         }
 
-        pub fn cacheFactory(inj: *inject.Injector, intf: Interface) cache.Cache(Data) {
+        pub fn cacheFactory(inj: *inject.DepCtx, intf: Interface) cache.Cache(Data) {
             return .{ .config = intf.interface(), .inj = inj };
         }
     };
