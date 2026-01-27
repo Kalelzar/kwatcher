@@ -1,9 +1,7 @@
 const std = @import("std");
 const klib = @import("klib");
 const cache = @import("cache.zig");
-const inject = @import("../dep.zig");
-
-// FIXME: Migrate to DepCtx
+const dep = @import("../dep.zig");
 
 pub fn SetBuilder(
     comptime Data: type,
@@ -184,54 +182,44 @@ pub fn Dependencies(
 
         pub fn contextFactory(self: *@This(), persistent: std.mem.Allocator) !*ContextType {
             if (self.context) |c| {
+                @branchHint(.likely);
                 return c;
-            }
-
-            const ptr = try persistent.create(ContextType);
-            const key = self.interface.key;
-            if (comptime klib.meta.canBeError(ContextType.init)) {
-                ptr.* = try .init(persistent, key);
             } else {
-                ptr.* = .init(persistent, key);
-            }
-            self.context = ptr;
+                @branchHint(.cold);
 
-            return ptr;
+                const ptr = try persistent.create(ContextType);
+                const key = self.interface.key;
+                if (comptime klib.meta.canBeError(ContextType.init)) {
+                    ptr.* = try .init(persistent, key);
+                } else {
+                    ptr.* = .init(persistent, key);
+                }
+                self.context = ptr;
+
+                return ptr;
+            }
         }
 
-        pub fn cacheFactory(inj: *inject.DepCtx, intf: Interface) cache.Cache(Data) {
+        pub fn cacheFactory(inj: *dep.DepCtx, intf: Interface) cache.Cache(Data) {
             return .{ .config = intf.interface(), .inj = inj };
+        }
+
+        pub fn deconstruct(self: *@This()) void {
+            if (self.context) |c| {
+                const alloc = c.allocator;
+                c.deinit();
+                alloc.destroy(c);
+            }
         }
     };
 }
 
-pub fn interdict(
-    comptime config: anytype,
-    parent: ?*inject.Injector,
-    persistent: std.mem.Allocator,
-) !*inject.Injector {
+pub fn Container(comptime config: anytype, comptime index: comptime_int) type {
     const Data = @TypeOf(config).DataType;
     const Invariant = @TypeOf(config).InvariantType;
     const Resolvers = @TypeOf(config).ResolversStruct;
-    var res: ?*inject.Injector = parent;
-    inline for (@typeInfo(@TypeOf(Resolvers)).@"struct".fields, 0..) |_, i| {
-        const inj = try persistent.create(inject.Injector);
-        errdefer persistent.destroy(inj);
-        const deps = Dependencies(
-            Data,
-            Invariant,
-            Resolvers,
-            config,
-            i,
-        ){};
-        const ctx = try persistent.create(@TypeOf(deps));
 
-        ctx.* = deps;
-        inj.* = try .init(ctx, res);
-        res = inj;
-    }
-
-    return res orelse error.EmptyInjector;
+    return Dependencies(Data, Invariant, Resolvers, config, index);
 }
 
 pub fn Cache(

@@ -85,6 +85,7 @@ pub fn build(b: *std.Build) !void {
     const example = b.addExecutable(.{
         .name = "kwatcher-example",
         .root_module = kwatcher_example,
+        .use_llvm = true, // Due to https://github.com/ziglang/zig/issues/24181
     });
     if (build_example) {
         b.installArtifact(example);
