@@ -1,142 +1,24 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
 const kwatcher = @import("kwatcher");
+const klib = @import("klib");
 
-const log = std.log.scoped(.example);
+pub fn juicyMain(allocator: std.mem.Allocator) !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    _ = allocator;
+}
 
-const P = struct {};
-
-pub const AfkStatus = enum {
-    Active,
-    Inactive,
-};
-
-pub const StatusDiff = struct {
-    prev: AfkStatus,
-    current: AfkStatus,
-    timestamp: i64,
-};
-
-pub const AfkStatusChangeProperties = kwatcher.schema.Schema(
-    1,
-    "afk.status-change",
-    struct {
-        diff: StatusDiff,
-    },
-);
-
-pub const AfkStatusChange = kwatcher.schema.Heartbeat.V1(AfkStatusChangeProperties);
-
-pub const std_options = std.Options{
-    .log_scope_levels = &[_]std.log.ScopeLevel{
-        .{ .scope = .dependency, .level = .info },
-        .{ .scope = .server, .level = .info },
-        .{ .scope = .example, .level = .info },
-        .{ .scope = .amqp_client, .level = .info },
-        .{ .scope = .circuit_breaker_client, .level = .warn },
-        .{ .scope = .intern_fmt_cache, .level = .warn },
-        .{ .scope = .replay, .level = .info },
-        .{ .scope = .client, .level = .info },
-    },
-};
-
-const TestRoutes = struct {
-    pub fn @"PUBLISH:heartbeat amq.direct/heartbeat"(
-        user_info: kwatcher.schema.UserInfo,
-        client_info: kwatcher.schema.ClientInfo,
-    ) kwatcher.schema.Heartbeat.V1(P) {
-        //log.info("{s} {s} {s}", .{ user_info.hostname, user_info.username, user_info.id });
-        //log.info("{s} {s} {s}", .{ client_info.name, client_info.version, client_info.id });
-        return .{
-            .event = "TEST",
-            .user = user_info.v1(),
-            .client = client_info.v1(),
-            .properties = .{},
-            .timestamp = std.time.microTimestamp(),
-        };
-    }
-
-    pub fn @"CONSUME amq.direct/afk-status/afk-status"(change: AfkStatusChange, deps: *SingletonDeps) void {
-        log.debug(
-            "[{}]: Status changed {} -> {}",
-            .{ change.timestamp, change.properties.diff.prev, change.properties.diff.current },
-        );
-        deps.status = change.properties.diff.current;
-    }
-
-    pub fn @"PUBLISH:heartbeat amq.direct/inc.{custom.i}"() kwatcher.schema.Message(kwatcher.schema.Schema(1, "test", struct {})) {
-        log.debug(
-            "Sending message for reply.",
-            .{},
-        );
-        return .{
-            .schema = .{},
-            .options = .{
-                .reply_to = "test.reply-to",
-            },
-        };
-    }
-
-    pub fn @"REPLY amq.direct/inc.{custom.i}/test-replies"(msg: kwatcher.schema.Schema(1, "test", struct {})) kwatcher.schema.Schema(1, "test-response", struct {}) {
-        _ = msg;
-        log.debug(
-            "Sending reply.",
-            .{},
-        );
-        return .{};
-    }
-
-    pub fn @"CONSUME amq.direct/test.reply-to"(msg: kwatcher.schema.Schema(1, "test-response", struct {}), ctx: *UserContext) void {
-        _ = msg;
-        ctx.i += 1;
-        log.debug(
-            "Reply received",
-            .{},
-        );
-    }
-};
-
-const UserContext = struct {
-    i: u64 = 0,
-};
-
-const EventHandler = struct {
-    pub fn heartbeat(timer: kwatcher.Timer, status: AfkStatus) !bool {
-        if (status == .Inactive) return false;
-        return try timer.ready("heartbeat");
-    }
-
-    pub fn disabled() bool {
-        return false;
-    }
-};
-
-const ExtraConfig = struct {
-    soup: bool,
-};
-
-const SingletonDeps = struct {
-    status: AfkStatus = AfkStatus.Active,
-};
-
-const ScopedDeps = struct {};
+var slot: *anyopaque = undefined;
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    var deps = SingletonDeps{};
-    var server = try kwatcher.server.Server(
-        "test",
-        "0.1.2",
-        SingletonDeps,
-        ScopedDeps,
-        ExtraConfig,
-        UserContext,
-        TestRoutes,
-        EventHandler,
-    ).init(
-        allocator,
-        &deps,
-    );
-    try server.start();
-    server.deinit();
+    if (comptime builtin.mode == .Debug) {
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        const allocator = gpa.allocator();
+        try juicyMain(allocator);
+    } else {
+        const alloc = std.heap.smp_allocator;
+        try juicyMain(alloc);
+    }
 }
