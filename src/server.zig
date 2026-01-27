@@ -2,6 +2,8 @@ const builtin = @import("builtin");
 const std = @import("std");
 const klib = @import("klib");
 
+const log = std.log.scoped(.server);
+
 const Drivers = @import("driver.zig").Drivers;
 const Event = @import("event.zig").Event;
 const Props = @import("event.zig").Properties;
@@ -191,7 +193,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                 self.handlers[i].stop();
             }
             for (0..self.consumers) |_| {
-                std.log.debug("Poison", .{});
+                log.debug("Poison", .{});
                 self.queue.push(.{
                     .event_type = .shutdown,
                     .event_data = .{ .internal = .{ .shutdown = .{} } },
@@ -237,12 +239,12 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
             while (@atomicLoad(bool, &self.should_run, .acquire) or !self.queue.empty()) {
                 self.handle(false, &driver_map, &rec) catch |e| switch (e) {
                     error.ShutdownImminent => {
-                        std.log.debug("T{d} will now drain", .{std.Thread.getCurrentId()});
+                        log.debug("T{d} will now drain", .{std.Thread.getCurrentId()});
                         self.drain(&driver_map, &rec) catch {};
-                        std.log.debug("T{d} has exited", .{std.Thread.getCurrentId()});
+                        log.debug("T{d} has exited", .{std.Thread.getCurrentId()});
                         return;
                     },
-                    else => std.log.err("Failure: {t}", .{e}),
+                    else => log.err("Failure: {t}", .{e}),
                 };
             }
         }
@@ -251,11 +253,11 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
             while (true) {
                 const front = self.queue.peek();
                 if (front) |_| {
-                    std.log.debug("T{d}: Trying", .{std.Thread.getCurrentId()});
+                    log.debug("T{d}: Trying", .{std.Thread.getCurrentId()});
                     self.handle(true, injmap, rec) catch |e| {
-                        std.log.err("Caught error while draining: {s}", .{@errorName(e)});
+                        log.err("Caught error while draining: {s}", .{@errorName(e)});
                     };
-                    std.log.debug("T{d}: Drained 1", .{std.Thread.getCurrentId()});
+                    log.debug("T{d}: Drained 1", .{std.Thread.getCurrentId()});
                 }
                 return;
             }
@@ -271,14 +273,14 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
 
             handle: switch (maybe_next.event_type) {
                 .noop => {
-                    std.log.debug("Noop :)", .{});
+                    log.debug("Noop :)", .{});
                 },
                 .shutdown => {
                     if (!is_draining) {
-                        std.log.debug("Shutting down thread. :)", .{});
+                        log.debug("Shutting down thread. :)", .{});
                         return error.ShutdownImminent;
                     } else {
-                        std.log.debug("Draining. :)", .{});
+                        log.debug("Draining. :)", .{});
                         self.queue.push(maybe_next);
                     }
                 },
@@ -334,7 +336,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                             return e;
                         }
 
-                        std.log.warn(
+                        log.warn(
                             "[{d}/3] Route {s} failed with error '{}'. Retrying...",
                             .{ maybe_next.properties.attempts + 1, @tagName(ev), e },
                         );

@@ -1,6 +1,8 @@
 const std = @import("std");
 const klib = @import("klib");
 
+const log = std.log.scoped(.cron);
+
 const dep = @import("../dep.zig");
 const server = @import("../server.zig");
 const Event = @import("../event.zig").Event;
@@ -211,7 +213,7 @@ pub fn DriverBuilder(
                                     .event => |e| @tagName(e.event_type),
                                 };
                                 while (now < sch.?.run_at) {
-                                    std.log.info("Job '{s}' to fire in {d} seconds.", .{ name, @max(0, sch.?.run_at - now) });
+                                    log.info("Job '{s}' to fire in {d} seconds.", .{ name, @max(0, sch.?.run_at - now) });
                                     self.mutex.lock();
                                     self.cond.timedWait(&self.mutex, @as(u64, @intCast(@max(0, sch.?.run_at - now))) * std.time.ns_per_s) catch {};
                                     self.mutex.unlock();
@@ -221,7 +223,7 @@ pub fn DriverBuilder(
                                 }
                                 if (!sch.?.oneshot) {
                                     const next = calcNext(@max(now, sch.?.run_at), sch.?.schedule);
-                                    std.log.info("Scheduling job '{s}' to fire in {d} seconds.", .{ name, @max(0, next - now) });
+                                    log.info("Scheduling job '{s}' to fire in {d} seconds.", .{ name, @max(0, next - now) });
                                     sch.?.run_at = next;
                                     self.mutex.lock();
                                     self.schedules.add(sch.?) catch unreachable; //FIXME: Yikes
@@ -241,14 +243,14 @@ pub fn DriverBuilder(
                                             });
                                             break;
                                         }
-                                        std.log.info("Job {s} queued successfully.", .{name});
+                                        log.info("Job {s} queued successfully.", .{name});
                                     },
                                     .event => |event| {
                                         while (true) {
                                             self.queue.?.push(event);
                                             break;
                                         }
-                                        std.log.info("Event {s} queued successfully.", .{name});
+                                        log.info("Event {s} queued successfully.", .{name});
                                     },
                                 }
                             }
