@@ -7,8 +7,8 @@
 //! MethodDeclaration ::= PublishDeclaration | ConsumeDeclaration | ReplyDeclaration
 //!
 //! PublishDeclaration ::= "publish" [ Modifier ] ":" EventName " " ExchangeName "/" RoutingKey
-//! ConsumeDeclaration ::= "consume" [ Modifier ]" " ExchangeName "/" BindingKey [ "/" QueueName ]
-//! ReplyDeclaration   ::= "reply" [ Modifier ] " " ExchangeName "/" BindingKey [ "/" QueueName ]
+//! ConsumeDeclaration ::= "consume" [ Modifier ] ":" EventName " " ExchangeName "/" BindingKey [ "/" QueueName ]
+//! ReplyDeclaration   ::= "reply" [ Modifier ] ":" EventName " " ExchangeName "/" BindingKey [ "/" QueueName ]
 //!
 //! EventName      ::= Identifier
 //!
@@ -34,9 +34,8 @@
 //! where client.id is bound to the current client id.
 
 const std = @import("std");
-const resolver = @import("resolver.zig");
 
-const injector = @import("../utils/injector.zig");
+const resolver = @import("../utils/resolver.zig");
 const InternFmtCache = @import("../utils/intern_fmt_cache.zig");
 
 /// The type of tokens allowed in a route string
@@ -326,6 +325,9 @@ const ConstExpr = struct {
 pub const ConsumeExpr = struct {
     /// The method of the expression -> always 'consume'.
     method: ExprType = .consume,
+    /// The identifier of the event used to construct it's event union key/consumer key.
+    /// An event CANNOT be dynamically bound and must be comptime-known.
+    event: ConstExpr,
     /// The exchange of the route. Required.
     /// An exchange MAY contain dynamically bound parameters.
     exchange: ValueExpr,
@@ -364,6 +366,9 @@ const ExprType = enum {
 pub const ReplyExpr = struct {
     /// The method of the expression -> always 'reply'.
     method: ExprType = .reply,
+    /// The identifier of the event used to construct it's event union key/consumer key.
+    /// An event CANNOT be dynamically bound and must be comptime-known.
+    event: ConstExpr,
     /// The exchange of the route. Required.
     /// An exchange MAY contain dynamically bound parameters.
     exchange: ValueExpr,
@@ -395,7 +400,7 @@ pub const ReplyExpr = struct {
 pub const PublishExpr = struct {
     /// The method of the expression -> always 'publish'.
     method: ExprType = .publish,
-    /// The function name of the event in the event provider that triggers the publishing.
+    /// The identifier of the event used to construct it's event union key/consumer key.
     /// An event CANNOT be dynamically bound and must be comptime-known.
     event: ConstExpr,
     /// The exchange of the route. Required.
@@ -542,8 +547,15 @@ pub fn Template(comptime Context: type) type {
         /// Parses a consume expression.
         fn parseConsume(comptime self: *Parser) ConsumeExpr {
             const sep = self.consume(.separator, "Expected a separator after a method");
-            if (comptime !c(" ", sep.lexeme)) {
-                @compileError("Expected the separator after the method to be a whitespace.");
+            if (comptime !c(":", sep.lexeme)) {
+                @compileError("Expected the separator after the method to be a colon.");
+            }
+
+            const event = self.parseConstant();
+
+            const sepMain = self.consume(.separator, "Expected a separator after an event");
+            if (comptime !c(" ", sepMain.lexeme)) {
+                @compileError("Expected the separator after the event to be a whitespace.");
             }
 
             const exchange = self.parseValue();
@@ -573,6 +585,7 @@ pub fn Template(comptime Context: type) type {
                 .exchange = exchange,
                 .route = route,
                 .queue = queue,
+                .event = event,
             };
         }
 
@@ -632,6 +645,7 @@ pub fn Template(comptime Context: type) type {
                     const expr = self.parseConsume();
                     return ReplyExpr{
                         .exchange = expr.exchange,
+                        .event = expr.event,
                         .queue = expr.queue,
                         .route = expr.route,
                     };

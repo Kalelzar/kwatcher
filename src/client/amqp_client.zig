@@ -127,7 +127,7 @@ const Connection = struct {
                 },
             },
             .{
-                .heartbeat = configuration.server.heartbeat,
+                .heartbeat = 0,
                 .properties = &table,
             },
         ) catch |err| switch (err) {
@@ -232,7 +232,7 @@ const Connection = struct {
         queue: []const u8,
         route: []const u8,
         exchange: []const u8,
-        opts: Client.ChannelOpts,
+        opts: Client.BindOpts,
     ) !void {
         self.lock.lock();
         defer self.lock.unlock();
@@ -462,7 +462,7 @@ const Connection = struct {
 state: State,
 
 /// The user configuration applied to the client.
-configuration: config.BaseConfig,
+configuration: *config.BaseConfig,
 
 /// An allocator used to allocate internal resources for the lifetime of the client.
 /// @lifetime The allocator needs to outlive the client.
@@ -499,7 +499,7 @@ fn ensureState(self: *AmqpClient, state: State) anyerror!void {
 /// @borrow allocator
 /// @borrow configuration
 /// @own name
-pub fn init(allocator: std.mem.Allocator, configuration: config.BaseConfig, name: []const u8) MemError!AmqpClient {
+pub fn init(allocator: std.mem.Allocator, configuration: *config.BaseConfig, name: []const u8) MemError!AmqpClient {
     const own_name = try allocator.dupe(u8, name);
     const id = try std.fmt.allocPrint(allocator, "ti_{s}_{x}", .{ own_name, std.crypto.random.int(u128) });
     return .{
@@ -548,7 +548,7 @@ pub fn connect(ptr: *anyopaque) !void {
     errdefer self.allocator.destroy(cptr);
     cptr.* = Connection.init(
         self.allocator,
-        self.configuration,
+        self.configuration.*,
         self.name,
     ) catch |e| return recategorizeError(e);
 
@@ -631,7 +631,7 @@ pub fn bind(
     queue: ?[]const u8,
     route: []const u8,
     exchange: []const u8,
-    opts: Client.ChannelOpts,
+    opts: Client.BindOpts,
 ) ![]const u8 {
     var self = getSelf(ptr);
     var conn = try self.ensureConnected();
@@ -643,7 +643,7 @@ pub fn bind(
             try declareEphemeralQueue(self);
 
     const alloc = self.allocator;
-    const consumer_tag = try std.fmt.allocPrint(alloc, "{s}-{s}.{s}.{s}-{s}", .{ self.name, declared_queue, route, exchange, opts.channel_name orelse "__consume" });
+    const consumer_tag = opts.consumer_tag orelse try std.fmt.allocPrint(alloc, "{s}-{s}.{s}.{s}-{s}", .{ self.name, declared_queue, route, exchange, opts.channel_name orelse "__consume" });
     errdefer alloc.free(consumer_tag);
 
     conn.bind(

@@ -19,6 +19,12 @@ pub const ChannelOpts = struct {
     channel_name: ?[]const u8 = null,
 };
 
+/// Optional parameters for bind operations.
+pub const BindOpts = struct {
+    channel_name: ?[]const u8 = null,
+    consumer_tag: ?[]const u8 = null,
+};
+
 /// Represents a consumed message.
 /// TODO: Reduce dependance on amqp implementation details.
 pub const Response = struct {
@@ -80,7 +86,7 @@ pub const VTable = struct {
         queue: ?[]const u8,
         route: []const u8,
         exchange: []const u8,
-        opts: ChannelOpts,
+        opts: BindOpts,
     ) anyerror![]const u8,
     /// Unbinds a consumer from the broker.
     unbind: *const fn (
@@ -162,7 +168,7 @@ pub fn bind(
     queue: ?[]const u8,
     route: []const u8,
     exchange: []const u8,
-    opts: ChannelOpts,
+    opts: BindOpts,
 ) ![]const u8 {
     return self.vtable.bind(self.ptr, queue, route, exchange, opts);
 }
