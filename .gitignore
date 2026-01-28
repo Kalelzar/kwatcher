@@ -6,3 +6,4 @@ zig-out/
 callgrind.out.*
 cachegrind.out.*
 /.recording/
+*.kwev
