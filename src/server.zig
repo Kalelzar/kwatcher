@@ -308,7 +308,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
 
                             var prop_ctx = PropCtx{ .props = maybe_next.properties };
                             const o = inj_ctx.require(ScopedAllocator) catch |e| break :fail e;
-                            var v = dep.DependencyContainer(struct {}).new(D).static(
+                            var v = dep.DependencyContainer(struct {}).newBlank(D).static(
                                 .all,
                                 &prop_ctx,
                                 o.value,

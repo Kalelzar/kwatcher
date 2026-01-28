@@ -1020,10 +1020,56 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
             self.statics.deinit(allocator);
         }
 
+        fn next(
+            self: @This(),
+            comptime drivers: DriverRegistry,
+            allocator: std.mem.Allocator,
+            comptime i: comptime_int,
+        ) Extended(@This(), drivers, i) {
+            if (i >= drivers.drivers.len) {
+                return self;
+            } else {
+                const D = drivers.drivers[i];
+                if (comptime @hasDecl(D, "DependencyContext")) {
+                    return D.DependencyContext.apply(self, .all, allocator, Config).next(
+                        drivers,
+                        allocator,
+                        i + 1,
+                    );
+                } else {
+                    return self.next(drivers, allocator, i + 1);
+                }
+            }
+        }
+
+        fn Extended(comptime DH: type, comptime drivers: DriverRegistry, comptime i: comptime_int) type {
+            if (i >= drivers.drivers.len) {
+                return DH;
+            } else {
+                const D = drivers.drivers[i];
+
+                if (comptime @hasDecl(D, "DependencyContext")) {
+                    return Extended(
+                        D.DependencyContext.Return(.all, Config, DH),
+                        drivers,
+                        i + 1,
+                    );
+                } else {
+                    return Extended(DH, drivers, i + 1);
+                }
+            }
+        }
+
+        pub fn newBlank(comptime drivers: DriverRegistry) Drivers(drivers) {
+            return .{ .statics = .{} };
+        }
+
         pub fn new(
             comptime drivers: DriverRegistry,
-        ) Drivers(drivers) {
-            return .{ .statics = .{} };
+            alloc: std.mem.Allocator,
+        ) Extended(Drivers(drivers), drivers, 0) {
+            const dh: Drivers(drivers) = .{ .statics = .{} };
+            return dh.next(drivers, alloc, 0);
         }
 
         pub fn verify() void {
