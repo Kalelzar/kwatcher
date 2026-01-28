@@ -4,11 +4,12 @@
 //! A route string is defined as follows:
 //! ```ebnf
 //! RouteString    ::= MethodDeclaration
-//! MethodDeclaration ::= PublishDeclaration | ConsumeDeclaration | ReplyDeclaration
+//! MethodDeclaration ::= PublishDeclaration | ConsumeDeclaration | ReplyDeclaration | ProvideDeclaration
 //!
 //! PublishDeclaration ::= "publish" [ Modifier ] ":" EventName " " ExchangeName "/" RoutingKey
 //! ConsumeDeclaration ::= "consume" [ Modifier ] ":" EventName " " ExchangeName "/" BindingKey [ "/" QueueName ]
 //! ReplyDeclaration   ::= "reply" [ Modifier ] ":" EventName " " ExchangeName "/" BindingKey [ "/" QueueName ]
+//! ProvideDeclaration ::= "provide" [ Modifier ] ":" EventName " " ExchangeName "/" BindingKey [ "/" QueueName ]
 //!
 //! EventName      ::= Identifier
 //!
@@ -46,6 +47,8 @@ const TokenType = enum {
     consume,
     /// The 'reply' method
     reply,
+    /// The 'provide' method
+    provide,
     /// The no record modifier
     norecord,
     /// Any non-special identifier
@@ -143,6 +146,8 @@ pub fn scan(comptime source: []const u8) []const Token {
                 break :blk &output;
             };
 
+            // FIXME: This should check if the indentifier continues after.
+            // Right now we do not allow these reserved words to occur as the beginning of an identifier.
             const token: Token =
                 if (c("publish", normalized))
                     .{ .type = .publish, .lexeme = normalized }
@@ -150,6 +155,8 @@ pub fn scan(comptime source: []const u8) []const Token {
                     .{ .type = .consume, .lexeme = normalized }
                 else if (c("reply", normalized))
                     .{ .type = .reply, .lexeme = normalized }
+                else if (c("provide", normalized))
+                    .{ .type = .provide, .lexeme = normalized }
                 else {
                     point += 1;
                     continue;
@@ -190,6 +197,14 @@ test "scan should tokenize a consume method" {
     const token = res[0];
     try std.testing.expectEqualStrings(token.lexeme, "consume");
     try std.testing.expectEqual(token.type, TokenType.consume);
+}
+
+test "scan should tokenize a provide method" {
+    const res = comptime scan("provide");
+    try std.testing.expectEqual(res.len, 1);
+    const token = res[0];
+    try std.testing.expectEqualStrings(token.lexeme, "provide");
+    try std.testing.expectEqual(token.type, TokenType.provide);
 }
 
 test "scan should tokenize methods as case-insensitive" {
@@ -355,11 +370,46 @@ pub const ConsumeExpr = struct {
     }
 };
 
+/// An expression that represents a 'consume' route.
+pub const ProvideExpr = struct {
+    /// The method of the expression -> always 'consume'.
+    method: ExprType = .provide,
+    /// The identifier of the event used to construct it's event union key/consumer key.
+    /// An event CANNOT be dynamically bound and must be comptime-known.
+    event: ConstExpr,
+    /// The exchange of the route. Required.
+    /// An exchange MAY contain dynamically bound parameters.
+    exchange: ValueExpr,
+    /// The binding key of the route. Required.
+    /// A binding key MAY contain dynamically bound parameters.
+    route: ValueExpr,
+    /// The queue to which to bind. Optional.
+    /// A queue MAY contain dynamically bound parameters.
+    /// If not specified a transient, auto_delete, broker-generated queue is assumed.
+    queue: ?ValueExpr,
+
+    /// A debug comptime helper for printing the expression.
+    pub fn print(comptime self: ProvideExpr, comptime indent: []const u8) void {
+        @compileLog(indent ++ "ProvideExpr:");
+        @compileLog(indent ++ "  exchange:");
+        self.exchange.print(indent ++ "  ");
+        @compileLog(indent ++ "  route:");
+        self.route.print(indent ++ "  ");
+        @compileLog(indent ++ "  queue:");
+        if (self.queue) |q| {
+            q.print(indent ++ "  ");
+        } else {
+            @compileLog(indent ++ "  null");
+        }
+    }
+};
+
 /// An expression that represents a 'reply' route.
 const ExprType = enum {
     reply,
     publish,
     consume,
+    provide,
 };
 
 /// The
@@ -439,7 +489,8 @@ pub fn Template(comptime Context: type) type {
                 .consume => ConsumeExpr,
                 .publish => PublishExpr,
                 .reply => ReplyExpr,
-                else => @compileError("A route must begin with a method (publish/route/consume)"),
+                .provide => ProvideExpr,
+                else => @compileError("A route must begin with a method (publish/route/consume/provide)"),
             };
         }
 
@@ -489,7 +540,7 @@ pub fn Template(comptime Context: type) type {
             while (!self.isAtEnd()) {
                 const s = self.peek();
                 switch (s.type) {
-                    .consume, .publish, .reply => @compileError("Method found while parsing a value"),
+                    .consume, .publish, .reply, .provide => @compileError("Method found while parsing a value"),
                     .separator => {
                         if (c(s.lexeme, "/")) {
                             break;
@@ -527,7 +578,7 @@ pub fn Template(comptime Context: type) type {
             while (comptime !self.isAtEnd()) {
                 const s = self.peek();
                 switch (s.type) {
-                    .consume, .publish, .reply => @compileError("Method found while parsing a value"),
+                    .consume, .publish, .reply, .provide => @compileError("Method found while parsing a value"),
                     .separator => {
                         break;
                     },
@@ -644,6 +695,15 @@ pub fn Template(comptime Context: type) type {
                 .reply => {
                     const expr = self.parseConsume();
                     return ReplyExpr{
+                        .exchange = expr.exchange,
+                        .event = expr.event,
+                        .queue = expr.queue,
+                        .route = expr.route,
+                    };
+                },
+                .provide => {
+                    const expr = self.parseConsume();
+                    return ProvideExpr{
                         .exchange = expr.exchange,
                         .event = expr.event,
                         .queue = expr.queue,

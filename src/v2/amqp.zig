@@ -4,6 +4,7 @@ const kw = @import("../root.zig");
 
 const Client = kw.Client;
 const schema = kw.schema;
+const cache = kw.cache;
 const mem = kw.mem;
 const InternFmtCache = kw.InternFmtCache;
 const AmqpTemplate = @import("../template/Amqp.zig");
@@ -21,9 +22,27 @@ pub const default = @import("amqp/default.zig").default;
 pub const defaultFor = @import("amqp/default.zig").defaultFor;
 pub const Pool = @import("amqp/pool.zig").ClientPool;
 
-pub const Method = enum { publish, consume, reply };
+pub const Method = enum { publish, consume, reply, provide };
 
 pub const Driver = shared.DriverBuilder(DriverBuilder, true);
+
+pub fn Provided(comptime T: type) type {
+    return struct {
+        allocator: std.mem.Allocator,
+        value: T,
+
+        pub fn init(value: T, allocator: std.mem.Allocator) @This() {
+            return .{
+                .value = value,
+                .allocator = allocator,
+            };
+        }
+
+        pub fn deinit(self: *@This(), pool: *mem.PoolAllocator) void {
+            pool.reset(self.allocator) catch {};
+        }
+    };
+}
 
 fn FilterRoutes(comptime Rs: []const type, comptime method: anytype) []const type {
     const count = comptime blk: {
@@ -50,6 +69,115 @@ fn FilterRoutes(comptime Rs: []const type, comptime method: anytype) []const typ
     return &Nrs;
 }
 
+fn ConstructProviders(comptime Rs: []const type) []const struct { type, type } {
+    const Ts = comptime blk: {
+        var Ts: [Rs.len]struct { type, type } = undefined;
+        for (Rs, 0..) |R, i| {
+            Ts[i] = .{ R.CallContext, R.Handler.Invariant };
+        }
+
+        break :blk Ts;
+    };
+
+    return &Ts;
+}
+
+fn Unwrap(comptime I: type) []const type {
+    switch (@typeInfo(I)) {
+        .@"struct" => |s| {
+            if (comptime !s.is_tuple) @compileError("Can only unwrap a tuple");
+            const fields = s.fields;
+            const res = comptime blk: {
+                var res: [fields.len]type = undefined;
+                for (fields, 0..) |field, i| {
+                    res[i] = field.type;
+                }
+                break :blk res;
+            };
+            return &res;
+        },
+        else => @compileError("Can only unwrap a tuple"),
+    }
+}
+
+fn EnsureProvider(comptime key: @Type(.enum_literal), comptime R: type, comptime I: type) type {
+    return struct {
+        const Static = kw.cache.context.memory.Container(
+            kw.cache.context.memory.Cache(Provided(R), Unwrap(I))
+                .key(key)
+                .evict(.none)
+                .residency(.{ .unlimited = {} })
+                .expiration(.{ .unlimited = {} }),
+        );
+
+        pub fn apply(
+            dephub: anytype,
+            comptime category: anytype,
+            allocator: std.mem.Allocator,
+            comptime Config: type,
+        ) Return(category, Config, @TypeOf(dephub)) {
+            const H = struct {
+                var fixme_move_elsewhere_cache = Static{};
+            };
+
+            return dephub.static(category, &H.fixme_move_elsewhere_cache, allocator);
+        }
+
+        pub fn Return(comptime category: anytype, comptime Config: type, comptime DH: type) type {
+            _ = Config;
+            return DH.Static(category, *Static);
+        }
+    };
+}
+
+fn ProvideAll(comptime Rs: []const struct { type, type }) type {
+    return struct {
+        fn applyNext(
+            dephub: anytype,
+            comptime category: anytype,
+            allocator: std.mem.Allocator,
+            comptime i: comptime_int,
+        ) ReturnNext(category, @TypeOf(dephub), i) {
+            if (comptime i >= Rs.len) {
+                return dephub;
+            } else {
+                const Data, const Invariant = Rs[i];
+                const C = EnsureProvider(.todo, Data, Invariant);
+                return applyNext(
+                    C.apply(dephub, category, allocator, void),
+                    category,
+                    allocator,
+                    i + 1,
+                );
+            }
+        }
+
+        pub fn apply(
+            dephub: anytype,
+            comptime category: anytype,
+            allocator: std.mem.Allocator,
+            comptime Config: type,
+        ) Return(category, Config, @TypeOf(dephub)) {
+            return applyNext(dephub, category, allocator, 0);
+        }
+
+        fn ReturnNext(comptime category: anytype, comptime DH: type, comptime i: comptime_int) type {
+            if (comptime i >= Rs.len) {
+                return DH;
+            } else {
+                const Data, const Invariant = Rs[i];
+                const C = EnsureProvider(.todo, Data, Invariant);
+                return ReturnNext(category, C.Return(category, void, DH), i + 1);
+            }
+        }
+
+        pub fn Return(comptime category: anytype, comptime Config: type, comptime DH: type) type {
+            _ = Config;
+            return ReturnNext(category, DH, 0);
+        }
+    };
+}
+
 pub fn DriverBuilder(
     comptime driver_key: @Type(.enum_literal),
     comptime config: []const u8,
@@ -67,13 +195,18 @@ pub fn DriverBuilder(
                 pub const PubRoutes = FilterRoutes(Routes, .publish);
                 pub const PubRouteKeys = shared.EnumerateRoutes(PubRoutes);
                 pub const PubCallContext = shared.UniteCallContext(PubRoutes);
-                pub const ConsRoutes = FilterRoutes(Routes, .consume) ++ FilterRoutes(Routes, .reply);
+                pub const ConsRoutes = FilterRoutes(Routes, .consume) ++ FilterRoutes(Routes, .reply) ++ FilterRoutes(Routes, .provide);
+                pub const ProviderRoutes = FilterRoutes(Routes, .provide);
                 pub const ConsRouteKeys = shared.EnumerateRoutes(ConsRoutes);
                 pub const ConsCallContext = shared.UniteCallContext(ConsRoutes);
                 pub const Dependencies = shared.MergeDeps(
                     Routes,
                     &.{ Client, std.mem.Allocator },
                 );
+
+                pub const Provides = ConstructProviders(ProviderRoutes);
+                pub const DependencyContext = ProvideAll(Provides);
+
                 pub const map = shared.RouteMap(Routes);
 
                 pub const EventType = enum(u12) {
@@ -429,6 +562,7 @@ pub fn DriverBuilder(
                                         .consumer_tag = consumer_tag.?,
                                         .internal = msg.?,
                                     };
+
                                     defer client.reset();
 
                                     const correlation_id = msg.?.envelope.message.properties.get(.correlation_id);
@@ -459,6 +593,7 @@ pub fn DriverBuilder(
                                         continue;
                                     };
 
+                                    //FIXME: This should happen after a successful publish/consume instead.
                                     client.ack(msg.?.delivery_tag, .{}) catch |e| {
                                         std.log.warn(
                                             "Encountered an error '{s}' while acking a message {d}.",
@@ -996,6 +1131,136 @@ pub fn RouteParser(comptime Context: type) type {
             return self.extend(RB);
         }
 
+        fn withProvide(
+            comptime self: @This(),
+            comptime consexpr: AmqpTemplate.ProvideExpr,
+            comptime f: anytype,
+        ) @This() {
+            const exch = consexpr.exchange;
+            const exch_is_dynamically_bound = exch.params.len != 0;
+            const ExType = if (exch_is_dynamically_bound)
+                shared.DependantTemplate(Context, exch.raw, exch.fmt, exch.params)
+            else
+                shared.ComptimeTemplate(exch.raw);
+            const ex_value: ExType = .{};
+            const parsed_routing_key = consexpr.route;
+            const route_is_dynamically_bound = parsed_routing_key.params.len != 0;
+            const RtType = if (route_is_dynamically_bound)
+                shared.DependantTemplate(
+                    Context,
+                    parsed_routing_key.raw,
+                    parsed_routing_key.fmt,
+                    parsed_routing_key.params,
+                )
+            else
+                shared.ComptimeTemplate(parsed_routing_key.raw);
+            const rt_value: RtType = .{};
+
+            const fargs = @typeInfo(@TypeOf(f)).@"fn".params;
+
+            const __CallContext = fargs[0].type.?;
+
+            const __Dependencies = comptime blk: {
+                var deps: [fargs.len - 1]type = undefined;
+                for (fargs[1..fargs.len], 0..) |a, i| {
+                    deps[i] = a.type.?; // TODO: check when this could ever be null. How even?
+                }
+                break :blk deps;
+            };
+
+            const H = struct {
+                pub fn make(comptime Base: type) type {
+                    return struct {
+                        pub const CallContext = __CallContext;
+                        pub const Invariant = klib.meta.Result(f);
+                        pub const Dependencies = __Dependencies ++ .{cache.Cache(Provided(CallContext))} ++ if (exch_is_dynamically_bound or route_is_dynamically_bound) .{ std.mem.Allocator, Context } else .{};
+
+                        pub fn name(inj: *dep.DepCtx) ![]const u8 {
+                            const allocator = try inj.require(std.mem.Allocator);
+                            return std.fmt.allocPrint(
+                                allocator,
+                                "ampq: {t} {s}/{s}",
+                                .{
+                                    Base.method,
+                                    try Base.exchange.get(inj),
+                                    try Base.routing_key.get(inj),
+                                },
+                            );
+                        }
+
+                        pub fn call(
+                            inj: *dep.DepCtx,
+                            context: CallContext,
+                            evprop: EventPropertiesEx,
+                        ) anyerror!void {
+                            // TODO: If any of the requested types for injection are
+                            // EventProperties we should inject this instead of pushing it to the
+                            // injector.
+                            _ = evprop;
+                            var args: std.meta.ArgsTuple(@TypeOf(f)) = undefined;
+                            if (comptime std.meta.fields(@TypeOf(args)).len == 0) {
+                                @compileError("Provider routes need at least one parameter for the incoming message");
+                            }
+
+                            if (comptime !@hasField(@TypeOf(args[0]), "schema_name") or
+                                !@hasField(@TypeOf(args[0]), "schema_version"))
+                            {
+                                @compileError("The first parameter of a provider route has to be a schema.");
+                            }
+
+                            const cch = try inj.require(cache.Cache(Provided(CallContext)));
+                            const palloc = try inj.require(*mem.PoolAllocator);
+
+                            args[0] = context;
+
+                            inline for (1..args.len) |i| {
+                                args[i] = try inj.require(@TypeOf(args[i]));
+                            }
+
+                            const inv = if (comptime klib.meta.canBeError(f))
+                                try @call(.auto, f, args)
+                            else
+                                @call(.auto, f, args);
+
+                            // FIXME: There has to be a better way
+                            var buf: [4096]u8 = undefined;
+                            var fba = std.heap.FixedBufferAllocator.init(&buf);
+                            var wr = std.Io.Writer.Allocating.init(fba.allocator());
+                            try std.zon.stringify.serialize(context, .{}, &wr.writer);
+
+                            // FIXME: Since we are already going to deinit the old one anyway we might as well
+                            // reuse it's allocator instead of taking out a new lease.
+
+                            const tiny_allocator = try palloc.suballocator();
+                            const copy = try std.zon.parse.fromSlice(
+                                CallContext,
+                                tiny_allocator,
+                                try wr.toOwnedSliceSentinel(0),
+                                null,
+                                .{},
+                            );
+
+                            const old = try cch.push(.init(copy, tiny_allocator), inv);
+                            if (old) |*o| {
+                                @constCast(o).deinit(palloc);
+                            }
+                        }
+                    };
+                }
+            };
+
+            const RB = RouteBase(
+                .provide,
+                ex_value,
+                rt_value,
+                H.make,
+                consexpr.event.raw,
+                .send,
+            );
+
+            return self.extend(RB);
+        }
+
         fn withReply(
             comptime self: @This(),
             comptime consexpr: AmqpTemplate.ReplyExpr,
@@ -1127,6 +1392,9 @@ pub fn RouteParser(comptime Context: type) type {
                 const f = @field(Container, fnname);
 
                 switch (expression.method) {
+                    .provide => {
+                        return self.withProvide(expression, f);
+                    },
                     .publish => {
                         return self.withPublish(expression, f);
                     },
