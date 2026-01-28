@@ -235,15 +235,18 @@ pub fn Context(comptime Data: type) type {
                 switch (ti) {
                     .@"struct" => {
                         if (comptime @hasDecl(Data, "deinit")) {
-                            const dfn = @typeInfo(Data.deinit);
+                            const dfn = @typeInfo(@TypeOf(Data.deinit));
                             switch (dfn) {
                                 .@"fn" => |f| {
-                                    if (comptime f.params.len > 1 and f.params[2].type == std.mem.Allocator) {
+                                    if (comptime f.params.len > 1 and f.params[1].type == std.mem.Allocator) {
                                         e.value_ptr.deinit(self.allocator);
-                                    } else {
+                                    } else if (comptime f.params.len == 1) {
                                         e.value_ptr.deinit();
+                                    } else {
+                                        // FIXME
                                     }
                                 },
+                                else => {},
                             }
                         }
                     },

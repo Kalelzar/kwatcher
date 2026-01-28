@@ -69,7 +69,7 @@ fn splatNull(comptime Context: anytype) TupleTToV(Context) {
     return tuple;
 }
 
-fn hashingStrategy(comptime Invariant: anytype, comptime off: usize, in: std.meta.Tuple(&Invariant)) u64 {
+fn hashingStrategy(comptime Invariant: []const type, comptime off: usize, in: std.meta.Tuple(Invariant)) u64 {
     if (comptime off == 0) {
         const actual = comptime blk: {
             var actual: u64 = 0;
@@ -177,6 +177,7 @@ pub fn autoCacheWithContexts(
     comptime Invariant: anytype,
     comptime Context: anytype,
 ) *const fn (*dep.DepCtx, *anyopaque) anyerror!Data {
+    const InvList: []const type = if (comptime @TypeOf(Invariant) == []const type) Invariant else &Invariant;
     const H = struct {
         pub fn get(inj: *dep.DepCtx, invariant: *anyopaque) anyerror!Data {
             const C = struct {
@@ -191,8 +192,8 @@ pub fn autoCacheWithContexts(
             };
 
             const hash: u64 = blk: {
-                const in: *std.meta.Tuple(&Invariant) = @ptrCast(@alignCast(invariant));
-                break :blk hashingStrategy(Invariant, 0, in.*);
+                const in: *std.meta.Tuple(InvList) = @ptrCast(@alignCast(invariant));
+                break :blk hashingStrategy(InvList, 0, in.*);
             };
 
             // FIXME: Do not require the contexts twice.
@@ -263,6 +264,7 @@ pub fn autoPushWithContexts(
     comptime Invariant: anytype,
     comptime Context: anytype,
 ) *const fn (*dep.DepCtx, Data, *anyopaque) anyerror!?Data {
+    const InvList: []const type = if (comptime @TypeOf(Invariant) == []const type) Invariant else &Invariant;
     const H = struct {
         pub fn push(inj: *dep.DepCtx, data: Data, invariant: *anyopaque) anyerror!?Data {
             const C = struct {
@@ -277,8 +279,8 @@ pub fn autoPushWithContexts(
             };
 
             const hash: u64 = blk: {
-                const in: *std.meta.Tuple(&Invariant) = @ptrCast(@alignCast(invariant));
-                break :blk hashingStrategy(Invariant, 0, in.*);
+                const in: *std.meta.Tuple(InvList) = @ptrCast(@alignCast(invariant));
+                break :blk hashingStrategy(InvList, 0, in.*);
             };
 
             inline for (0..Context.len) |i| {
