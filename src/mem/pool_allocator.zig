@@ -36,6 +36,28 @@ pub const PoolAllocator = struct {
         return new_block.allocator();
     }
 
+    pub fn suballocatorCustom(self: *PoolAllocator, size: usize) !std.mem.Allocator {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const next = self.free.pop();
+        if (next) |b| {
+            self.used.appendAssumeCapacity(b);
+            return b.allocator();
+        }
+
+        const new_block = try self.underlying.create(Block);
+        errdefer self.underlying.destroy(new_block);
+        new_block.* = .{
+            .len = 0,
+            .page = try self.underlying.alloc(u8, size),
+        };
+        errdefer self.underlying.free(new_block.page);
+        try self.used.append(self.underlying, new_block);
+        try self.free.ensureTotalCapacity(self.underlying, self.used.capacity);
+        return new_block.allocator();
+    }
+
     pub fn reset(self: *PoolAllocator, alloc: std.mem.Allocator) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
