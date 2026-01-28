@@ -67,7 +67,7 @@ pub fn DriverBuilder(
                 pub const PubRoutes = FilterRoutes(Routes, .publish);
                 pub const PubRouteKeys = shared.EnumerateRoutes(PubRoutes);
                 pub const PubCallContext = shared.UniteCallContext(PubRoutes);
-                pub const ConsRoutes = FilterRoutes(Routes, .consume);
+                pub const ConsRoutes = FilterRoutes(Routes, .consume) ++ FilterRoutes(Routes, .reply);
                 pub const ConsRouteKeys = shared.EnumerateRoutes(ConsRoutes);
                 pub const ConsCallContext = shared.UniteCallContext(ConsRoutes);
                 pub const Dependencies = shared.MergeDeps(
@@ -223,6 +223,8 @@ pub fn DriverBuilder(
                             inj: *dep.DepCtx,
                             ctx: []const u8,
                             evprop: EventPropertiesEx,
+                            event: *const ConsumeData,
+                            client: Client,
                         ) anyerror!void {
                             if (comptime ConsRoutes.len == 0) return;
                             switch (k) {
@@ -249,11 +251,38 @@ pub fn DriverBuilder(
                                         );
                                     };
                                     defer rctx.deinit();
-                                    return @call(
-                                        .auto,
-                                        R.call,
-                                        .{ inj, rctx.value, evprop },
-                                    );
+
+                                    if (comptime R.method == .reply) {
+                                        var h = try @call(.auto, R.call, .{ inj, rctx.value, evprop });
+
+                                        const route = event.internal.message.basic_properties.get(.reply_to);
+
+                                        if (route) |r| {
+                                            h.options.routing_key = r.slice() orelse unreachable;
+                                        } else {
+                                            h.options.routing_key = event.internal.routing_key;
+                                        }
+
+                                        if (h.options.correlation_id == null) {
+                                            var correlation_id: [128]u8 = undefined;
+                                            const end = std.fmt.printInt(
+                                                &correlation_id,
+                                                evprop.correlation_id,
+                                                10,
+                                                .lower,
+                                                .{},
+                                            );
+                                            h.options.correlation_id = correlation_id[0..end];
+                                        }
+
+                                        try client.publish(h, .{});
+                                    } else {
+                                        return @call(
+                                            .auto,
+                                            R.call,
+                                            .{ inj, rctx.value, evprop },
+                                        );
+                                    }
                                 },
                             }
                         }
@@ -507,11 +536,19 @@ pub fn DriverBuilder(
                             event: ConsumeData,
                             evprop: EventPropertiesEx,
                             injector: *dep.DepCtx,
+                            client: Client,
                         ) anyerror!void {
                             _ = self;
                             const route = event.consumer_tag;
                             defer @constCast(&event.internal).deinit(); // Yikes.
-                            const maybe = dispatchConsume(route, injector, event.body, evprop);
+                            const maybe = dispatchConsume(
+                                route,
+                                injector,
+                                event.body,
+                                evprop,
+                                &event,
+                                client,
+                            );
                             // std.log.info("Consume: {t}", .{route});
                             maybe catch |e| {
                                 return e;
@@ -959,6 +996,125 @@ pub fn RouteParser(comptime Context: type) type {
             return self.extend(RB);
         }
 
+        fn withReply(
+            comptime self: @This(),
+            comptime consexpr: AmqpTemplate.ReplyExpr,
+            comptime f: anytype,
+        ) @This() {
+            const exch = consexpr.exchange;
+            const exch_is_dynamically_bound = exch.params.len != 0;
+            const ExType = if (exch_is_dynamically_bound)
+                shared.DependantTemplate(Context, exch.raw, exch.fmt, exch.params)
+            else
+                shared.ComptimeTemplate(exch.raw);
+            const ex_value: ExType = .{};
+            const parsed_routing_key = consexpr.route;
+            const route_is_dynamically_bound = parsed_routing_key.params.len != 0;
+            const RtType = if (route_is_dynamically_bound)
+                shared.DependantTemplate(
+                    Context,
+                    parsed_routing_key.raw,
+                    parsed_routing_key.fmt,
+                    parsed_routing_key.params,
+                )
+            else
+                shared.ComptimeTemplate(parsed_routing_key.raw);
+            const rt_value: RtType = .{};
+
+            const fargs = @typeInfo(@TypeOf(f)).@"fn".params;
+
+            const __CallContext = fargs[0].type.?;
+
+            const __Dependencies = comptime blk: {
+                var deps: [fargs.len - 1]type = undefined;
+                for (fargs[1..fargs.len], 0..) |a, i| {
+                    deps[i] = a.type.?; // TODO: check when this could ever be null. How even?
+                }
+                break :blk deps;
+            };
+
+            const H = struct {
+                pub fn make(comptime Base: type) type {
+                    return struct {
+                        pub const CallContext = __CallContext;
+                        pub const Dependencies = __Dependencies ++ if (exch_is_dynamically_bound or route_is_dynamically_bound) .{ std.mem.Allocator, Context } else .{};
+
+                        pub fn name(inj: *dep.DepCtx) ![]const u8 {
+                            const allocator = try inj.require(std.mem.Allocator);
+                            return std.fmt.allocPrint(
+                                allocator,
+                                "ampq: {t} {s}/{s}",
+                                .{
+                                    Base.method,
+                                    try Base.exchange.get(inj),
+                                    try Base.routing_key.get(inj),
+                                },
+                            );
+                        }
+
+                        pub fn call(
+                            inj: *dep.DepCtx,
+                            context: CallContext,
+                            evprop: EventPropertiesEx,
+                        ) anyerror!schema.SendMessage {
+                            // TODO: If any of the requested types for injection are
+                            // EventProperties we should inject this instead of pushing it to the
+                            // injector.
+                            _ = evprop;
+                            var args: std.meta.ArgsTuple(@TypeOf(f)) = undefined;
+                            const ReturnType = klib.meta.Result(f);
+                            if (comptime std.meta.fields(@TypeOf(args)).len == 0) {
+                                @compileError("Reply routes need at least one parameter for the incoming message");
+                            }
+
+                            if (comptime !@hasField(@TypeOf(args[0]), "schema_name") or
+                                !@hasField(@TypeOf(args[0]), "schema_version"))
+                            {
+                                @compileError("The first parameter of a reply route has to be a schema.");
+                            }
+
+                            args[0] = context;
+
+                            inline for (1..args.len) |i| {
+                                args[i] = try inj.require(@TypeOf(args[i]));
+                            }
+
+                            const maybe_result = @call(.auto, f, args);
+
+                            const result =
+                                switch (comptime @typeInfo(klib.meta.Return(f))) {
+                                    .error_union => try maybe_result,
+                                    else => maybe_result,
+                                };
+
+                            // FIXME: Ideally we don't need this
+                            const arena = try inj.require(mem.ScopedAllocator);
+                            const alloc = arena.value;
+                            return handlePublish(
+                                ReturnType,
+                                result,
+                                alloc,
+                                try Base.exchange.get(inj),
+                                "__placeholder__",
+                                false,
+                            );
+                        }
+                    };
+                }
+            };
+
+            const RB = RouteBase(
+                .reply,
+                ex_value,
+                rt_value,
+                H.make,
+                consexpr.event.raw,
+                .send,
+            );
+
+            return self.extend(RB);
+        }
+
         pub fn parse(
             comptime self: @This(),
             comptime Container: type,
@@ -977,7 +1133,9 @@ pub fn RouteParser(comptime Context: type) type {
                     .consume => {
                         return self.withConsume(expression, f);
                     },
-                    else => @compileError("Not supported yet!"),
+                    .reply => {
+                        return self.withReply(expression, f);
+                    },
                 }
             }
         }
