@@ -180,6 +180,34 @@ pub const Drivers = struct {
         return values;
     }
 
+    pub fn DriverConfig(comptime self: Drivers) type {
+        var value: [self.drivers.len]std.builtin.Type.StructField = undefined;
+        var added = 0;
+        inline for (self.drivers) |D| {
+            if (@hasDecl(D, "ConfigType")) {
+                defer added = added + 1;
+                const name: [:0]const u8 = @tagName(D.key);
+                value[added] = std.builtin.Type.StructField{
+                    .alignment = @alignOf(D.ConfigType),
+                    .name = name,
+                    .type = D.ConfigType,
+                    .default_value_ptr = null,
+                    .is_comptime = false,
+                };
+            }
+        }
+
+        const values = @Type(.{ .@"struct" = .{
+            .decls = &.{},
+            .fields = value[0..added],
+            .layout = .auto,
+            .is_tuple = false,
+            .backing_integer = null,
+        } });
+
+        return values;
+    }
+
     pub fn Schedulers(comptime self: Drivers) [self.drivers.len]type {
         var schedulers: [self.drivers.len]type = undefined;
         const hs = self.Handlers(self.EventList(), self.EventValues());

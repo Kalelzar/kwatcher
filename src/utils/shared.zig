@@ -285,6 +285,19 @@ pub fn FreeTemplate(
     };
 }
 
+/// Encodes a dynamic template that is linked to another template.
+/// i.e the value is stored in another route.
+pub fn LinkedTemplate(
+    comptime key: []const u8,
+) type {
+    return struct {
+        pub const TemplateType = .linked;
+        pub fn get(_: @This(), _: *dep.DepCtx) ![]const u8 {
+            return key;
+        }
+    };
+}
+
 const DTCtx = struct {
     pub fn deinit(_: *DTCtx, r: *DTR) void {
         r.alloc.free(r.value);

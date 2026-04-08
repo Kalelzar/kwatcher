@@ -7,11 +7,6 @@ const meta = klib.meta;
 const config = klib.config;
 
 pub const BaseConfig = struct {
-    protocol: struct {
-        client: struct {
-            announce_message_expiration: u64 = 5,
-        } = .{},
-    } = .{},
     server: struct {
         host: []const u8 = "localhost",
         port: i32 = 5672,
