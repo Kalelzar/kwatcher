@@ -35,5 +35,10 @@ pub const middleware = struct {
 };
 
 comptime {
-    @import("std").testing.refAllDecls(@This());
+    const std = @import("std");
+    std.testing.refAllDecls(@This());
+    std.testing.refAllDecls(@import("template/Http.zig"));
+    // TODO: remove
+    std.testing.refAllDecls(@import("v2/amqp.zig"));
+    std.testing.refAllDecls(@import("client/amqp_client.zig"));
 }
