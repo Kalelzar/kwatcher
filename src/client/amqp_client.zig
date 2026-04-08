@@ -62,6 +62,7 @@ const Channel = struct {
 /// Data related to the active connection.
 const Connection = struct {
     this: amqp.Connection,
+    allocator: std.mem.Allocator,
     socket: amqp.TcpSocket,
     channels: std.StringHashMapUnmanaged(Channel),
     counter: u16 = 1,
@@ -142,6 +143,7 @@ const Connection = struct {
             .channels = channel_map,
             .socket = socket,
             .this = connection,
+            .allocator = allocator,
         };
     }
 
@@ -194,6 +196,35 @@ const Connection = struct {
         if (self.channels.fetchRemove(channel_name)) |entry| {
             try entry.value.this.close(.REPLY_SUCCESS);
         }
+    }
+
+    pub fn declareExchange(
+        self: *Connection,
+        exchange: []const u8,
+        type_: []const u8,
+        extra: struct {
+            passive: bool = false,
+            durable: bool = true,
+            internal: bool = false,
+            auto_delete: bool = false,
+            arguments: amqp.table_t = amqp.table_t.empty(),
+        },
+    ) !void {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        const rpc_channel = self.channels.get("__rpc") orelse return error.StateCorrupted;
+
+        const exchange_bytes = amqp.bytes_t.init(exchange);
+        const type_bytes = amqp.bytes_t.init(type_);
+
+        try rpc_channel.this.exchange_declare(exchange_bytes, type_bytes, .{
+            .passive = extra.passive,
+            .durable = extra.durable,
+            .internal = extra.internal,
+            .auto_delete = extra.auto_delete,
+            .arguments = extra.arguments,
+        });
     }
 
     pub fn declareQueue(
@@ -324,6 +355,58 @@ const Connection = struct {
         );
     }
 
+    pub fn getReturns(self: *Connection, timeout: ?i64) !?Client.ReturnedMessage {
+        var timeval = std.c.timeval{
+            .sec = 0,
+            .usec = @truncate(timeout orelse 0),
+        };
+
+        const frame = try self.this.simple_wait_frame(if (timeout != null) &timeval else null);
+        switch (frame.frame_type) {
+            .METHOD => {
+                switch (frame.payload.method.id) {
+                    .BASIC_RETURN => {
+                        if (self.getById(frame.channel)) |c| {
+                            var message = try c.this.read_message(0);
+                            defer message.destroy();
+                            const decoded_meta = frame.payload.method.decoded orelse return error.MalformedFrame;
+                            const meta: *amqp.amqp_basic_return_t = @ptrCast(@alignCast(decoded_meta));
+
+                            log.err("Found unrouted message", .{});
+
+                            return .{
+                                .allocator = self.allocator,
+                                .exchange = try self.allocator.dupe(u8, meta.exchange.slice() orelse unreachable),
+                                .routing_key = try self.allocator.dupe(u8, meta.routing_key.slice() orelse unreachable),
+                                .message = .{
+                                    .basic_properties = try dupeProperties(self.allocator, &message.properties),
+                                    .body = try self.allocator.dupe(u8, message.body.slice() orelse unreachable),
+                                },
+                            };
+                        }
+                        return error.InvalidChannel;
+                    },
+                    .CHANNEL_CLOSE => {
+                        log.err("Channel was closed.", .{});
+                        return error.ChannelClosed;
+                    },
+                    .CONNECTION_CLOSE => {
+                        log.err("Connection was closed.", .{});
+                        return error.ConnectionClosed;
+                    },
+                    else => |mi| {
+                        log.err("Found method '{}' while reading a message.", .{mi});
+                        return error.UnexpectedMethod;
+                    },
+                }
+            },
+            else => |f| {
+                log.warn("Received a frame of type '{}' while waiting for returns.", .{f});
+                return null;
+            },
+        }
+    }
+
     pub fn consume(self: *Connection, timeout: i64) !?Client.Response {
         self.lock.lock();
         defer self.lock.unlock();
@@ -342,12 +425,25 @@ const Connection = struct {
                     .METHOD => {
                         switch (frame.payload.method.id) {
                             .BASIC_RETURN => {
-                                log.err("Unrouted message", .{});
                                 if (self.getById(frame.channel)) |c| {
                                     var message = try c.this.read_message(0);
                                     defer message.destroy();
-                                    log.err("  Body: {s}", .{message.body.slice() orelse unreachable});
-                                    return null;
+                                    const decoded_meta = frame.payload.method.decoded orelse return error.MalformedFrame;
+                                    const meta: *amqp.amqp_basic_return_t = @ptrCast(@alignCast(decoded_meta));
+
+                                    log.err("Unrouted message", .{});
+
+                                    return .{
+                                        .returned = .{
+                                            .allocator = self.allocator,
+                                            .exchange = try self.allocator.dupe(u8, meta.exchange.slice() orelse unreachable),
+                                            .routing_key = try self.allocator.dupe(u8, meta.routing_key.slice() orelse unreachable),
+                                            .message = .{
+                                                .basic_properties = try dupeProperties(self.allocator, &message.properties),
+                                                .body = try self.allocator.dupe(u8, message.body.slice() orelse unreachable),
+                                            },
+                                        },
+                                    };
                                 }
                                 return error.InvalidChannel;
                             },
@@ -373,29 +469,31 @@ const Connection = struct {
             },
             else => |le| return le,
         };
+        defer envelope.destroy();
 
         const response: Client.Response = .{
-            .consumer_tag = envelope.consumer_tag.slice() orelse unreachable,
-            .delivery_tag = envelope.delivery_tag,
-            .exchange = envelope.exchange.slice() orelse unreachable,
-            .routing_key = envelope.routing_key.slice() orelse unreachable,
-            .redelivered = envelope.redelivered != 0,
-            .message = .{
-                .basic_properties = envelope.message.properties,
-                .body = envelope.message.body.slice() orelse unreachable,
+            .incoming = .{
+                .consumer_tag = try self.allocator.dupe(u8, envelope.consumer_tag.slice() orelse unreachable),
+                .delivery_tag = envelope.delivery_tag,
+                .exchange = try self.allocator.dupe(u8, envelope.exchange.slice() orelse unreachable),
+                .routing_key = try self.allocator.dupe(u8, envelope.routing_key.slice() orelse unreachable),
+                .redelivered = envelope.redelivered != 0,
+                .message = .{
+                    .basic_properties = try dupeProperties(self.allocator, &envelope.message.properties),
+                    .body = try self.allocator.dupe(u8, envelope.message.body.slice() orelse unreachable),
+                },
+                .allocator = self.allocator,
             },
-            // We pass the envelope up so that our user can .destroy() it when they no longer need it
-            .envelope = envelope,
         };
 
         log.debug(
             "[{}] Consumed a message on {s} from {s}/{s}:\n\t{s}",
             .{
-                response.delivery_tag,
-                response.consumer_tag,
-                response.exchange,
-                response.routing_key,
-                response.message.body,
+                response.incoming.delivery_tag,
+                response.incoming.consumer_tag,
+                response.incoming.exchange,
+                response.incoming.routing_key,
+                response.incoming.message.body,
             },
         );
 
@@ -533,6 +631,9 @@ pub fn connect(ptr: *anyopaque) !void {
     var self = getSelf(ptr);
     self.mutex.lock();
     defer self.mutex.unlock();
+    errdefer {
+        log.err("Failed to connect.", .{});
+    }
 
     if (self.state == .connected) {
         try disconnect(self);
@@ -558,6 +659,8 @@ pub fn connect(ptr: *anyopaque) !void {
     openChannel(self, "__rpc") catch |e| try self.handleDisconnect(e, cptr);
     openChannel(self, "__publish") catch |e| try self.handleDisconnect(e, cptr);
     openChannel(self, "__consume") catch |e| try self.handleDisconnect(e, cptr);
+
+    try self.connection.?.declareExchange("kw.grave", "headers", .{});
 }
 
 fn ensureConnected(self: *AmqpClient) !*Connection {
@@ -598,12 +701,32 @@ pub fn declareEphemeralQueue(ptr: *anyopaque) ![]const u8 {
     var self = getSelf(ptr);
     var conn = try self.ensureConnected();
 
+    const table_size_max = 1;
+    var table_buf: [table_size_max]amqp.table_entry_t = undefined;
+    var table_size: usize = 0;
+
+    table_buf[table_size] = .{
+        .key = amqp.bytes_t.init("x-dead-letter-exchange"),
+        .value = .{
+            .kind = amqp.AMQP_FIELD_KIND_UTF8,
+            .value = .{
+                .bytes = amqp.bytes_t.init("dlx.direct"),
+            },
+        },
+    };
+    table_size += 1;
+
+    const table = amqp.table_t{
+        .entries = table_buf[0..table_size].ptr,
+        .num_entries = @intCast(table_size),
+    };
+
     return conn.declareQueue(null, .{
         .passive = false,
         .durable = false,
         .exclusive = true,
         .auto_delete = true,
-        .arguments = amqp.table_t.empty(),
+        .arguments = table,
     }) catch |e| {
         try self.handleDisconnect(e, conn);
         unreachable;
@@ -697,6 +820,17 @@ pub fn consume(ptr: *anyopaque, timeout: i64) !?Client.Response {
     };
 }
 
+pub fn getReturns(ptr: *anyopaque, timeout: i64) !?Client.ReturnedMessage {
+    var self = getSelf(ptr);
+    var conn = try self.ensureConnected();
+
+    return conn.getReturns(timeout) catch |e| {
+        if (e == error.Timeout) return null;
+        try self.handleDisconnect(e, conn);
+        unreachable;
+    };
+}
+
 pub fn ack(
     ptr: *anyopaque,
     delivery_tag: u64,
@@ -747,6 +881,34 @@ pub fn publish(
         props.set(.reply_to, amqp.bytes_t.init(r));
     }
 
+    var buf: [32]u8 = undefined;
+    if (message.options.expiration) |r| {
+        const size = std.fmt.printInt(&buf, r, 10, .lower, .{});
+        props.set(.expiration, amqp.bytes_t.init(buf[0..size]));
+    }
+
+    const table_size_max = 1;
+    var table_buf: [table_size_max]amqp.table_entry_t = undefined;
+    var table_size: usize = 0;
+
+    table_buf[table_size] = .{
+        .key = amqp.bytes_t.init("x-publisher-key"),
+        .value = .{
+            .kind = amqp.AMQP_FIELD_KIND_BYTES,
+            .value = .{
+                .bytes = amqp.bytes_t.init(message.options.publisher_key),
+            },
+        },
+    };
+    table_size += 1;
+
+    const table = amqp.table_t{
+        .entries = table_buf[0..table_size].ptr,
+        .num_entries = @intCast(table_size),
+    };
+
+    props.set(.headers, table);
+
     conn.publish(
         message.body,
         message.options.exchange,
@@ -756,10 +918,12 @@ pub fn publish(
     ) catch |e| try self.handleDisconnect(e, conn);
 
     log.debug(
-        "[{s}] Publishing to {s}/{s}:\n\t{s}",
+        "[{s}] Publishing to <{s}>{s}/{s}:\n\t{s}",
         .{
             correlation_id.slice().?,
+            message.options.publisher_key,
             message.options.exchange,
+
             message.options.routing_key,
             message.body,
         },
@@ -797,6 +961,39 @@ fn handleDisconnect(self: *AmqpClient, err: anyerror, conn: *Connection) !void {
     };
 }
 
+fn tryDupe(allocator: std.mem.Allocator, buf: ?amqp.bytes_t) error{OutOfMemory}!?[]u8 {
+    if (buf) |b| {
+        const slice = b.slice() orelse unreachable;
+        const res = try allocator.dupe(u8, slice);
+        return res;
+    }
+
+    return null;
+}
+
+fn dupeProperties(allocator: std.mem.Allocator, bp: *amqp.BasicProperties) !Client.Properties {
+    var props: Client.Properties = .{};
+    errdefer props.deinit(allocator);
+
+    props.correlation_id = try tryDupe(allocator, bp.get(.correlation_id));
+    props.reply_to = try tryDupe(allocator, bp.get(.reply_to));
+
+    const headers: ?amqp.table_t = bp.get(.headers);
+    if (headers) |h| out: {
+        if (h.entries == null or h.num_entries == 0) break :out;
+
+        for (0..@intCast(h.num_entries)) |i| {
+            const entry: amqp.table_entry_t = h.entries.?[i];
+            if (entry.value.kind != amqp.AMQP_FIELD_KIND_BYTES) return error.UnsupportedAmqpHeader;
+            const key = (try tryDupe(allocator, entry.key)).?;
+            const value = (try tryDupe(allocator, entry.value.value.bytes)).?;
+            try props.headers.put(allocator, key, value);
+        }
+    }
+
+    return props;
+}
+
 fn getId(ptr: *anyopaque) []const u8 {
     const self = getSelf(ptr);
     return self.id;
@@ -814,6 +1011,7 @@ pub fn client(self: *AmqpClient) Client {
             .openChannel = openChannel,
             .closeChannel = closeChannel,
             .consume = consume,
+            .getReturns = getReturns,
             .publish = publish,
             .reset = reset,
             .declareEphemeralQueue = declareEphemeralQueue,

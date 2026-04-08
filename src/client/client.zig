@@ -27,15 +27,46 @@ pub const BindOpts = struct {
 
 /// Represents a consumed message.
 /// TODO: Reduce dependance on amqp implementation details.
-pub const Response = struct {
+pub const Response = union(enum) {
+    incoming: MessageResponse,
+    returned: ReturnedMessage,
+
+    /// Deinitialize the message.
+    pub fn deinit(self: *Response) void {
+        switch (self.*) {
+            inline else => |*e| e.deinit(),
+        }
+    }
+};
+
+pub const Properties = struct {
+    correlation_id: ?[]const u8 = null,
+    reply_to: ?[]const u8 = null,
+    headers: std.StringHashMapUnmanaged([]const u8) = .empty,
+
+    pub fn deinit(self: *Properties, alloc: std.mem.Allocator) void {
+        if (self.correlation_id) |*i| {
+            alloc.free(i.*);
+        }
+        if (self.reply_to) |*i| {
+            alloc.free(i.*);
+        }
+
+        var it = self.headers.iterator();
+        while (it.next()) |entry| {
+            alloc.free(entry.key_ptr.*);
+            alloc.free(entry.value_ptr.*);
+        }
+
+        self.headers.clearAndFree(alloc);
+    }
+};
+
+pub const MessageResponse = struct {
     /// The key that was used to route the message
     routing_key: []const u8,
     /// The exchange that routed the message to us
     exchange: []const u8,
-    /// The raw envelope provided by the AMQP client
-    /// TODO: Abstract this away into some context that can be freed by the user
-    /// There is zero need to leak internals just so we have something to free
-    envelope: amqp.Envelope,
     /// The tag of the consumer that read the message
     consumer_tag: []const u8,
     /// The delivery tag of the message
@@ -46,14 +77,46 @@ pub const Response = struct {
     message: struct {
         /// Any additional properties attached to the message
         /// TODO: Abstract away amqp internals.
-        basic_properties: amqp.BasicProperties,
+        basic_properties: Properties,
         /// The raw string body of the message.
         body: []const u8,
     },
 
+    // The allocator that own the response
+    allocator: std.mem.Allocator,
+
     /// Deinitialize the message.
-    pub fn deinit(self: *Response) void {
-        self.envelope.destroy();
+    pub fn deinit(self: *MessageResponse) void {
+        self.message.basic_properties.deinit(self.allocator);
+        self.allocator.free(self.message.body);
+        self.allocator.free(self.consumer_tag);
+        self.allocator.free(self.routing_key);
+        self.allocator.free(self.exchange);
+    }
+};
+
+pub const ReturnedMessage = struct {
+    /// The key that was used to route the message
+    routing_key: []const u8,
+    /// The exchange that routed the message to us
+    exchange: []const u8,
+    message: struct {
+        /// Any additional properties attached to the message
+        /// TODO: Abstract away amqp internals.
+        basic_properties: Properties,
+        /// The raw string body of the message.
+        body: []const u8,
+    },
+
+    // The allocator that own the response
+    allocator: std.mem.Allocator,
+
+    /// Deinitialize the message.
+    pub fn deinit(self: *ReturnedMessage) void {
+        self.message.basic_properties.deinit(self.allocator);
+        self.allocator.free(self.message.body);
+        self.allocator.free(self.routing_key);
+        self.allocator.free(self.exchange);
     }
 };
 
@@ -97,6 +160,9 @@ pub const VTable = struct {
     /// Attempts a non-blocking read of a message that will wait for the given timeout in ns.
     /// Will return null if no message is available.
     consume: *const fn (self_ptr: *anyopaque, timeout_ns: i64) anyerror!?Response,
+    /// Attempts a non-blocking read of a returned message that will wait for the given timeout in ns.
+    /// Will return null if no returned message is available.
+    getReturns: *const fn (self_ptr: *anyopaque, timeout_ns: i64) anyerror!?ReturnedMessage,
     /// Publishes a new message with the given options.
     publish: *const fn (
         self_ptr: *anyopaque,
@@ -186,6 +252,12 @@ pub fn unbind(
 /// Will return null if no message is available.
 pub fn consume(self: Client, timeout_ns: i64) !?Response {
     return self.vtable.consume(self.ptr, timeout_ns);
+}
+
+/// Attempts a non-blocking read of a message that will wait for the given timeout in ns.
+/// Will return null if no message is available.
+pub fn getReturns(self: Client, timeout_ns: i64) !?ReturnedMessage {
+    return self.vtable.getReturns(self.ptr, timeout_ns);
 }
 
 /// Publishes a new message with the given options.

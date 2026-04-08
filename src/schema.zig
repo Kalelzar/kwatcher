@@ -26,6 +26,9 @@ pub const MessageOptions = meta.MergeStructs(ConfigurableMessageOptions, struct 
 
     /// Whether to include the message in recordings.
     norecord: bool,
+
+    /// The publisher key of the message
+    publisher_key: []const u8,
 });
 
 /// A message with configurable options that can be returned from a publishing route.

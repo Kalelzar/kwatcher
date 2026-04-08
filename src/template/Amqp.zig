@@ -49,6 +49,10 @@ const TokenType = enum {
     reply,
     /// The 'provide' method
     provide,
+    /// The 'unrouted' target
+    unrouted,
+    /// The 'rejected' target
+    rejected,
     /// The no record modifier
     norecord,
     /// Any non-special identifier
@@ -75,6 +79,8 @@ fn c(comptime a: []const u8, comptime b: []const u8) bool {
 }
 
 /// Parse a comptime route string into a list of tokens.
+/// Note: This sucks balls, like, a lot. It needs a decent, proper tokenizer
+/// like the ones in Http/Cron.
 /// @param source A comptime route string
 /// @returns a comptime-known list of tokens.
 pub fn scan(comptime source: []const u8) []const Token {
@@ -157,6 +163,10 @@ pub fn scan(comptime source: []const u8) []const Token {
                     .{ .type = .reply, .lexeme = normalized }
                 else if (c("provide", normalized))
                     .{ .type = .provide, .lexeme = normalized }
+                else if (c("rejected", normalized))
+                    .{ .type = .rejected, .lexeme = normalized }
+                else if (c("unrouted", normalized))
+                    .{ .type = .unrouted, .lexeme = normalized }
                 else {
                     point += 1;
                     continue;
@@ -205,6 +215,22 @@ test "scan should tokenize a provide method" {
     const token = res[0];
     try std.testing.expectEqualStrings(token.lexeme, "provide");
     try std.testing.expectEqual(token.type, TokenType.provide);
+}
+
+test "scan should tokenize a unrouted method" {
+    const res = comptime scan("unrouted");
+    try std.testing.expectEqual(res.len, 1);
+    const token = res[0];
+    try std.testing.expectEqualStrings(token.lexeme, "unrouted");
+    try std.testing.expectEqual(token.type, TokenType.unrouted);
+}
+
+test "scan should tokenize a rejected method" {
+    const res = comptime scan("rejected");
+    try std.testing.expectEqual(res.len, 1);
+    const token = res[0];
+    try std.testing.expectEqualStrings(token.lexeme, "rejected");
+    try std.testing.expectEqual(token.type, TokenType.rejected);
 }
 
 test "scan should tokenize methods as case-insensitive" {
@@ -410,6 +436,8 @@ const ExprType = enum {
     publish,
     consume,
     provide,
+    rejected,
+    unrouted,
 };
 
 /// The
@@ -475,6 +503,38 @@ pub const PublishExpr = struct {
     }
 };
 
+/// An expression that represents a 'rejected' route.
+pub const RejectedExpr = struct {
+    /// The method of the expression -> always 'rejected'.
+    method: ExprType = .rejected,
+    /// The identifier of the event used to construct it's event union key/consumer key.
+    /// An event CANNOT be dynamically bound and must be comptime-known.
+    event: ConstExpr,
+
+    /// A debug comptime helper for printing the expression.
+    pub fn print(comptime self: RejectedExpr, comptime indent: []const u8) void {
+        @compileLog(indent ++ "RejectedExpr:");
+        @compileLog(indent ++ "  event:");
+        self.event.print(indent ++ "  ");
+    }
+};
+
+/// An expression that represents a 'unrouted' route.
+pub const UnroutedExpr = struct {
+    /// The method of the expression -> always 'unrouted'.
+    method: ExprType = .unrouted,
+    /// The identifier of the event used to construct it's event union key/consumer key.
+    /// An event CANNOT be dynamically bound and must be comptime-known.
+    event: ConstExpr,
+
+    /// A debug comptime helper for printing the expression.
+    pub fn print(comptime self: UnroutedExpr, comptime indent: []const u8) void {
+        @compileLog(indent ++ "UnroutedExpr:");
+        @compileLog(indent ++ "  event:");
+        self.event.print(indent ++ "  ");
+    }
+};
+
 /// A template parser for route strings backed by the given route parameter context.
 /// @typeparam Context The type of the context where route parameters will be looked up.
 pub fn Template(comptime Context: type) type {
@@ -490,7 +550,9 @@ pub fn Template(comptime Context: type) type {
                 .publish => PublishExpr,
                 .reply => ReplyExpr,
                 .provide => ProvideExpr,
-                else => @compileError("A route must begin with a method (publish/route/consume/provide)"),
+                .rejected => RejectedExpr,
+                .unrouted => UnroutedExpr,
+                else => @compileError("A route must begin with a method (publish/route/consume/provide/rejected/unrouted)"),
             };
         }
 
@@ -540,7 +602,7 @@ pub fn Template(comptime Context: type) type {
             while (!self.isAtEnd()) {
                 const s = self.peek();
                 switch (s.type) {
-                    .consume, .publish, .reply, .provide => @compileError("Method found while parsing a value"),
+                    .consume, .publish, .reply, .provide, .rejected, .unrouted => @compileError("Method found while parsing a value"),
                     .separator => {
                         if (c(s.lexeme, "/")) {
                             break;
@@ -578,7 +640,7 @@ pub fn Template(comptime Context: type) type {
             while (comptime !self.isAtEnd()) {
                 const s = self.peek();
                 switch (s.type) {
-                    .consume, .publish, .reply, .provide => @compileError("Method found while parsing a value"),
+                    .consume, .publish, .reply, .provide, .rejected, .unrouted => @compileError("Method found while parsing a value"),
                     .separator => {
                         break;
                     },
@@ -686,6 +748,24 @@ pub fn Template(comptime Context: type) type {
             };
         }
 
+        /// Parses a rejected expression.
+        fn parseRejected(comptime self: *Parser) RejectedExpr {
+            const sep = self.consume(.separator, "Expected a separator after a method");
+            if (comptime !c(":", sep.lexeme)) {
+                @compileError("Expected the separator after the method to be a colon.");
+            }
+
+            const event = self.parseConstant();
+
+            if (!self.isAtEnd()) {
+                @compileError("Expected end of file.");
+            }
+
+            return .{
+                .event = event,
+            };
+        }
+
         /// Parses out the entire source string. This leaves the parser consumed.
         pub fn parseTokens(comptime self: *Parser) ExpressionType(self) {
             const method = self.next();
@@ -710,7 +790,14 @@ pub fn Template(comptime Context: type) type {
                         .route = expr.route,
                     };
                 },
-                else => @compileError("A route must begin with a method (publish/route/consume)"),
+                .rejected => self.parseRejected(),
+                .unrouted => {
+                    const expr = self.parseRejected();
+                    return UnroutedExpr{
+                        .event = expr.event,
+                    };
+                },
+                else => @compileError("A route must begin with a method (publish/route/consume/rejected/unrouted)"),
             };
         }
 

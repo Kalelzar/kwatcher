@@ -4,6 +4,7 @@ const kw = @import("../root.zig");
 
 const Client = kw.Client;
 const schema = kw.schema;
+const conftype = kw.config.BaseConfig;
 const cache = kw.cache;
 const mem = kw.mem;
 const InternFmtCache = kw.InternFmtCache;
@@ -18,11 +19,20 @@ const EventPropertiesEx = kw.event.ExtendedProperties;
 const Event = kw.event.Event;
 const MPMCQueue = kw.queue.StaticStrict;
 
+pub const kind = .amqp;
+
 pub const default = @import("amqp/default.zig").default;
 pub const defaultFor = @import("amqp/default.zig").defaultFor;
 pub const Pool = @import("amqp/pool.zig").ClientPool;
 
-pub const Method = enum { publish, consume, reply, provide };
+pub const Method = enum {
+    publish,
+    consume,
+    reply,
+    provide,
+    unrouted,
+    rejected,
+};
 
 pub const Driver = shared.DriverBuilder(DriverBuilder, true);
 
@@ -188,6 +198,7 @@ pub fn DriverBuilder(
     const H = struct {
         pub fn AmqpHandler(comptime block_start: u12) type {
             return struct {
+                pub const ConfigType = conftype;
                 pub const config_path = config;
                 pub const jobs = _jobs;
                 pub const key = driver_key;
@@ -195,6 +206,9 @@ pub fn DriverBuilder(
                 pub const PubRoutes = FilterRoutes(Routes, .publish);
                 pub const PubRouteKeys = shared.EnumerateRoutes(PubRoutes);
                 pub const PubCallContext = shared.UniteCallContext(PubRoutes);
+                pub const UnroutedRoutes = FilterRoutes(Routes, .unrouted);
+                pub const UnroutedRouteKeys = shared.EnumerateRoutes(UnroutedRoutes);
+                pub const UnroutedCallContext = shared.UniteCallContext(UnroutedRoutes);
                 pub const ConsRoutes = FilterRoutes(Routes, .consume) ++ FilterRoutes(Routes, .reply) ++ FilterRoutes(Routes, .provide);
                 pub const ProviderRoutes = FilterRoutes(Routes, .provide);
                 pub const ConsRouteKeys = shared.EnumerateRoutes(ConsRoutes);
@@ -212,6 +226,7 @@ pub fn DriverBuilder(
                 pub const EventType = enum(u12) {
                     send = block_start,
                     recv,
+                    unrouted,
                     __end,
                 };
 
@@ -228,9 +243,21 @@ pub fn DriverBuilder(
                     }
                 };
 
+                const UnroutedData = struct {
+                    publisher_tag: UnroutedRouteKeys,
+                    body: []const u8,
+                    internal: Client.ReturnedMessage,
+
+                    pub fn write(self: UnroutedData, w: *std.Io.Writer) !void {
+                        _ = self;
+                        try w.writeAll(".{ .todo = TODO }");
+                    }
+                };
+
                 pub const EventValues = union(EventType) {
                     send: PublishData,
                     recv: ConsumeData,
+                    unrouted: UnroutedData,
                     __end: struct {},
                 };
 
@@ -351,6 +378,46 @@ pub fn DriverBuilder(
                             }
                         }
 
+                        fn dispatchUnrouted(
+                            k: UnroutedRouteKeys,
+                            inj: *dep.DepCtx,
+                            event: *const UnroutedData,
+                            evprop: EventPropertiesEx,
+                        ) anyerror!void {
+                            defer @constCast(event).internal.deinit();
+                            switch (k) {
+                                inline else => |e| {
+                                    const idx = comptime @intFromEnum(e);
+                                    const R = comptime UnroutedRoutes[idx];
+                                    const RCtx = comptime @FieldType(UnroutedCallContext, @tagName(e));
+                                    const allocator = try inj.require(std.mem.Allocator);
+                                    const rctx = std.json.parseFromSlice(
+                                        RCtx,
+                                        allocator,
+                                        event.body,
+                                        .{},
+                                    ) catch |er| blk: {
+                                        std.log.warn("Error encountered while parsing schema: {}", .{er});
+                                        break :blk try std.json.parseFromSlice(
+                                            RCtx,
+                                            allocator,
+                                            event.body,
+                                            .{
+                                                .duplicate_field_behavior = .use_last,
+                                                .ignore_unknown_fields = true,
+                                            },
+                                        );
+                                    };
+                                    defer rctx.deinit();
+                                    return @call(
+                                        .auto,
+                                        R.call,
+                                        .{ inj, rctx.value, evprop },
+                                    );
+                                },
+                            }
+                        }
+
                         fn dispatchConsume(
                             k: ConsRouteKeys,
                             inj: *dep.DepCtx,
@@ -362,6 +429,7 @@ pub fn DriverBuilder(
                             if (comptime ConsRoutes.len == 0) return;
                             switch (k) {
                                 inline else => |e| {
+                                    std.debug.assert(std.meta.activeTag(event.internal) == .incoming);
                                     const idx = comptime @intFromEnum(e);
                                     const R = comptime ConsRoutes[idx];
                                     const RCtx = comptime @FieldType(ConsCallContext, @tagName(e));
@@ -388,12 +456,12 @@ pub fn DriverBuilder(
                                     if (comptime R.method == .reply) {
                                         var h = try @call(.auto, R.call, .{ inj, rctx.value, evprop });
 
-                                        const route = event.internal.message.basic_properties.get(.reply_to);
+                                        const route = event.internal.incoming.message.basic_properties.reply_to;
 
                                         if (route) |r| {
-                                            h.options.routing_key = r.slice() orelse unreachable;
+                                            h.options.routing_key = r;
                                         } else {
-                                            h.options.routing_key = event.internal.routing_key;
+                                            h.options.routing_key = event.internal.incoming.routing_key;
                                         }
 
                                         if (h.options.correlation_id == null) {
@@ -488,7 +556,7 @@ pub fn DriverBuilder(
                                         continue :outer;
                                     };
                                 }
-                                while (@atomicLoad(bool, &self.should_run, .acquire)) {
+                                inner: while (@atomicLoad(bool, &self.should_run, .acquire)) {
                                     var u: usize = 0;
                                     inline for (ConsRoutes, 0..) |CR, i| {
                                         const r = CR.routing_key.get(inj) catch unreachable;
@@ -554,53 +622,93 @@ pub fn DriverBuilder(
                                         continue :outer;
                                     };
                                     if (msg == null) continue;
-                                    const consumer_tag = std.meta.stringToEnum(ConsRouteKeys, msg.?.consumer_tag);
-                                    if (consumer_tag == null) @panic("Unknown message");
 
-                                    const data = ConsumeData{
-                                        .body = msg.?.message.body,
-                                        .consumer_tag = consumer_tag.?,
-                                        .internal = msg.?,
-                                    };
+                                    switch (msg.?) {
+                                        .returned => |ret| {
+                                            const headers = ret.message.basic_properties.headers;
+                                            if (headers.get("x-publisher-key")) |pub_key| {
+                                                std.log.info("Unrouted to: {s}", .{pub_key});
+                                                const unroute_key = std.meta.stringToEnum(UnroutedRouteKeys, pub_key);
+                                                //FIXME: Validate that the the context is the same as the output of the publisher. This feels like the wrong place for that though.
+                                                if (unroute_key) |k| {
+                                                    const data = UnroutedData{
+                                                        .body = ret.message.body,
+                                                        .publisher_tag = k,
+                                                        .internal = ret,
+                                                    };
+                                                    const correlation_id = ret.message.basic_properties.correlation_id;
+                                                    const val = @unionInit(
+                                                        EV,
+                                                        @tagName(key),
+                                                        .{ .unrouted = data },
+                                                    );
 
-                                    defer client.reset();
-
-                                    const correlation_id = msg.?.envelope.message.properties.get(.correlation_id);
-
-                                    const val = @unionInit(
-                                        EV,
-                                        @tagName(key),
-                                        .{ .recv = data },
-                                    );
-
-                                    self.queue.?.tryPush(.{
-                                        .event_type = .recv,
-                                        .event_data = val,
-                                        .properties = .{
-                                            .correlation_id = if (correlation_id) |c|
-                                                std.fmt.parseInt(u128, c.slice() orelse "0", 10) catch 0
-                                            else
-                                                0,
+                                                    self.queue.?.tryPush(.{
+                                                        .event_type = .unrouted,
+                                                        .event_data = val,
+                                                        .properties = .{
+                                                            .correlation_id = if (correlation_id) |c|
+                                                                std.fmt.parseInt(u128, c, 10) catch 0
+                                                            else
+                                                                0,
+                                                        },
+                                                    }, std.time.ns_per_ms * 1) catch {};
+                                                } else {
+                                                    std.log.warn("Dropping unhandled unrouted message: {s}", .{pub_key});
+                                                    continue :inner;
+                                                }
+                                            }
                                         },
-                                    }, std.time.ns_per_ms * 1) catch {
-                                        client.reject(msg.?.delivery_tag, true, .{}) catch |e| {
-                                            std.log.warn(
-                                                "Encountered an error '{s}' while rejecting a message.",
-                                                .{@errorName(e)},
-                                            );
-                                        };
-                                        msg.?.deinit();
-                                        continue;
-                                    };
+                                        .incoming => |*in| {
+                                            const consumer_tag = std.meta.stringToEnum(ConsRouteKeys, in.consumer_tag);
+                                            if (consumer_tag == null) @panic("Unknown message");
 
-                                    //FIXME: This should happen after a successful publish/consume instead.
-                                    client.ack(msg.?.delivery_tag, .{}) catch |e| {
-                                        std.log.warn(
-                                            "Encountered an error '{s}' while acking a message {d}.",
-                                            .{ @errorName(e), msg.?.delivery_tag },
-                                        );
-                                        continue :outer;
-                                    };
+                                            const data = ConsumeData{
+                                                .body = in.message.body,
+                                                .consumer_tag = consumer_tag.?,
+                                                .internal = msg.?, // FIXME: Maybe this should just pass the MessageResponse so we avoid having to check again in the handler?
+                                            };
+
+                                            defer client.reset();
+
+                                            const correlation_id = in.message.basic_properties.correlation_id;
+
+                                            const val = @unionInit(
+                                                EV,
+                                                @tagName(key),
+                                                .{ .recv = data },
+                                            );
+
+                                            self.queue.?.tryPush(.{
+                                                .event_type = .recv,
+                                                .event_data = val,
+                                                .properties = .{
+                                                    .correlation_id = if (correlation_id) |c|
+                                                        std.fmt.parseInt(u128, c, 10) catch 0
+                                                    else
+                                                        0,
+                                                },
+                                            }, std.time.ns_per_ms * 1) catch {
+                                                client.reject(in.delivery_tag, true, .{}) catch |e| {
+                                                    std.log.warn(
+                                                        "Encountered an error '{s}' while rejecting a message.",
+                                                        .{@errorName(e)},
+                                                    );
+                                                };
+                                                in.deinit();
+                                                continue;
+                                            };
+
+                                            //FIXME: This should happen after a successful publish/consume instead.
+                                            client.ack(in.delivery_tag, .{}) catch |e| {
+                                                std.log.warn(
+                                                    "Encountered an error '{s}' while acking a message {d}.",
+                                                    .{ @errorName(e), in.delivery_tag },
+                                                );
+                                                continue :outer;
+                                            };
+                                        },
+                                    }
                                 }
                             }
                         }
@@ -632,6 +740,11 @@ pub fn DriverBuilder(
                                     ev.recv,
                                     ep,
                                 }),
+                                inline .unrouted => inj.call_first(unrouted, .{
+                                    self,
+                                    ev.unrouted,
+                                    ep,
+                                }),
                                 inline else => @compileError("Invalid handler mapping!"),
                             };
                         }
@@ -640,14 +753,13 @@ pub fn DriverBuilder(
                             self: *@This(),
                             event: PublishData,
                             evprop: EventPropertiesEx,
-                            injector: *dep.DepCtx,
+                            inj: *dep.DepCtx,
                             client: Client,
                         ) anyerror!void {
-                            _ = self;
                             const route = std.meta.activeTag(event);
                             var h = try dispatchPublish(
                                 route,
-                                injector,
+                                inj,
                                 event,
                                 evprop,
                             );
@@ -664,6 +776,58 @@ pub fn DriverBuilder(
                             }
                             // std.log.info("Publish: {t}", .{route});
                             try client.publish(h, .{});
+
+                            const ret = try client.getReturns(0);
+
+                            if (ret == null) return;
+
+                            const headers = ret.?.message.basic_properties.headers;
+                            if (headers.get("x-publisher-key")) |pub_key| {
+                                std.log.info("Unrouted to: {s}", .{pub_key});
+                                const unroute_key = std.meta.stringToEnum(UnroutedRouteKeys, pub_key);
+                                //FIXME: Validate that the the context is the same as the output of the publisher. This feels like the wrong place for that though.
+                                if (unroute_key) |k| {
+                                    const data = UnroutedData{
+                                        .body = ret.?.message.body,
+                                        .publisher_tag = k,
+                                        .internal = ret.?,
+                                    };
+                                    const correlation_id = ret.?.message.basic_properties.correlation_id;
+                                    const val = @unionInit(
+                                        EV,
+                                        @tagName(key),
+                                        .{ .unrouted = data },
+                                    );
+
+                                    self.queue.?.tryPush(.{
+                                        .event_type = .unrouted,
+                                        .event_data = val,
+                                        .properties = .{
+                                            .correlation_id = if (correlation_id) |c|
+                                                std.fmt.parseInt(u128, c, 10) catch 0
+                                            else
+                                                0,
+                                        },
+                                    }, std.time.ns_per_ms * 1) catch {};
+                                } else {
+                                    std.log.warn("Dropping unhandled unrouted message: {s}", .{pub_key});
+                                }
+                            }
+                        }
+
+                        fn unrouted(
+                            self: *@This(),
+                            event: UnroutedData,
+                            evprop: EventPropertiesEx,
+                            injector: *dep.DepCtx,
+                        ) anyerror!void {
+                            _ = self;
+                            try dispatchUnrouted(
+                                event.publisher_tag,
+                                injector,
+                                &event,
+                                evprop,
+                            );
                         }
 
                         fn consume(
@@ -675,7 +839,6 @@ pub fn DriverBuilder(
                         ) anyerror!void {
                             _ = self;
                             const route = event.consumer_tag;
-                            defer @constCast(&event.internal).deinit(); // Yikes.
                             const maybe = dispatchConsume(
                                 route,
                                 injector,
@@ -686,8 +849,11 @@ pub fn DriverBuilder(
                             );
                             // std.log.info("Consume: {t}", .{route});
                             maybe catch |e| {
+                                // HACK: We need a better way to do this.
+                                if (evprop.attempts == 3) @constCast(&event.internal).deinit(); // Yikes.
                                 return e;
                             };
+                            @constCast(&event.internal).deinit(); // Yikes.
                         }
                     };
                 }
@@ -851,6 +1017,7 @@ pub fn RouteParser(comptime Context: type) type {
             exchange: []const u8,
             route: []const u8,
             comptime norecord: bool,
+            comptime pub_key: []const u8,
         ) !schema.SendMessage {
             const ActualResultType =
                 switch (comptime @typeInfo(ResultType)) {
@@ -880,6 +1047,7 @@ pub fn RouteParser(comptime Context: type) type {
                         .correlation_id = opts.correlation_id,
                         .expiration = opts.expiration,
                         .norecord = norecord,
+                        .publisher_key = pub_key,
                     },
                 };
             } else {
@@ -895,6 +1063,7 @@ pub fn RouteParser(comptime Context: type) type {
                         .exchange = exchange,
                         .routing_key = route,
                         .norecord = norecord,
+                        .publisher_key = pub_key,
                     },
                 };
             }
@@ -1009,6 +1178,7 @@ pub fn RouteParser(comptime Context: type) type {
                                 try Base.exchange.get(inj),
                                 try Base.routing_key.get(inj),
                                 pubexpr.norecord,
+                                pubexpr.event.raw,
                             );
                         }
                     };
@@ -1125,7 +1295,91 @@ pub fn RouteParser(comptime Context: type) type {
                 rt_value,
                 H.make,
                 consexpr.event.raw,
-                .send,
+                .recv,
+            );
+
+            return self.extend(RB);
+        }
+
+        fn withUnrouted(
+            comptime self: @This(),
+            comptime expr: AmqpTemplate.UnroutedExpr,
+            comptime f: anytype,
+        ) @This() {
+            const fargs = @typeInfo(@TypeOf(f)).@"fn".params;
+
+            const __CallContext = fargs[0].type.?;
+
+            const __Dependencies = comptime blk: {
+                var deps: [fargs.len - 1]type = undefined;
+                for (fargs[1..fargs.len], 0..) |a, i| {
+                    deps[i] = a.type.?; // TODO: check when this could ever be null. How even?
+                }
+                break :blk deps;
+            };
+
+            const H = struct {
+                pub fn make(comptime Base: type) type {
+                    return struct {
+                        pub const CallContext = __CallContext;
+                        pub const Dependencies = __Dependencies;
+
+                        pub fn name(inj: *dep.DepCtx) ![]const u8 {
+                            const allocator = try inj.require(std.mem.Allocator);
+                            return std.fmt.allocPrint(
+                                allocator,
+                                "ampq: {t} depends on {s},{s}",
+                                .{
+                                    Base.method,
+                                    try Base.exchange.get(inj),
+                                    try Base.routing_key.get(inj),
+                                },
+                            );
+                        }
+
+                        pub fn call(
+                            inj: *dep.DepCtx,
+                            context: CallContext,
+                            evprop: EventPropertiesEx,
+                        ) anyerror!void {
+                            // TODO: If any of the requested types for injection are
+                            // EventProperties we should inject this instead of pushing it to the
+                            // injector.
+                            _ = evprop;
+                            var args: std.meta.ArgsTuple(@TypeOf(f)) = undefined;
+                            if (comptime std.meta.fields(@TypeOf(args)).len == 0) {
+                                @compileError("Unrouted routes need at least one parameter for the unrouted message");
+                            }
+
+                            if (comptime !@hasField(@TypeOf(args[0]), "schema_name") or
+                                !@hasField(@TypeOf(args[0]), "schema_version"))
+                            {
+                                @compileError("The first parameter of an unrouted route has to be a schema.");
+                            }
+
+                            args[0] = context;
+
+                            inline for (1..args.len) |i| {
+                                args[i] = try inj.require(@TypeOf(args[i]));
+                            }
+
+                            if (comptime klib.meta.canBeError(f)) {
+                                try @call(.auto, f, args);
+                            } else {
+                                @call(.auto, f, args);
+                            }
+                        }
+                    };
+                }
+            };
+
+            const RB = RouteBase(
+                .unrouted,
+                shared.LinkedTemplate(expr.event.raw){},
+                shared.LinkedTemplate(expr.event.raw){},
+                H.make,
+                expr.event.raw,
+                .unrouted,
             );
 
             return self.extend(RB);
@@ -1255,7 +1509,7 @@ pub fn RouteParser(comptime Context: type) type {
                 rt_value,
                 H.make,
                 consexpr.event.raw,
-                .send,
+                .recv,
             );
 
             return self.extend(RB);
@@ -1362,6 +1616,7 @@ pub fn RouteParser(comptime Context: type) type {
                                 try Base.exchange.get(inj),
                                 "__placeholder__",
                                 false,
+                                consexpr.event.raw,
                             );
                         }
                     };
@@ -1374,7 +1629,7 @@ pub fn RouteParser(comptime Context: type) type {
                 rt_value,
                 H.make,
                 consexpr.event.raw,
-                .send,
+                .recv,
             );
 
             return self.extend(RB);
@@ -1386,7 +1641,7 @@ pub fn RouteParser(comptime Context: type) type {
             comptime fnname: []const u8,
         ) @This() {
             comptime {
-                @setEvalBranchQuota(10000);
+                @setEvalBranchQuota(20000);
                 var tmpl = AmqpTemplate.Template(Context).init(fnname);
                 const expression = tmpl.parseTokens();
                 const f = @field(Container, fnname);
@@ -1403,6 +1658,13 @@ pub fn RouteParser(comptime Context: type) type {
                     },
                     .reply => {
                         return self.withReply(expression, f);
+                    },
+                    .rejected => {
+                        unreachable;
+                        //return self.withRejected(expression, f);
+                    },
+                    .unrouted => {
+                        return self.withUnrouted(expression, f);
                     },
                 }
             }

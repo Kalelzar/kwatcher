@@ -230,6 +230,11 @@ fn consume(ptr: *anyopaque, timeout_ns: i64) anyerror!?Response {
     return self.executeWithCircuitBreaker(Client.consume, .{timeout_ns});
 }
 
+fn getReturns(ptr: *anyopaque, timeout_ns: i64) anyerror!?Client.ReturnedMessage {
+    const self = getSelf(ptr);
+    return self.executeWithCircuitBreaker(Client.getReturns, .{timeout_ns});
+}
+
 fn publish(
     ptr: *anyopaque,
     message: schema.SendMessage,
@@ -271,6 +276,7 @@ pub fn client(self: *CircuitBreakingClient) Client {
             .openChannel = openChannel,
             .closeChannel = closeChannel,
             .consume = consume,
+            .getReturns = getReturns,
             .publish = publish,
             .reset = reset,
             .declareEphemeralQueue = declareEphemeralQueue,

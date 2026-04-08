@@ -28,6 +28,7 @@ pub fn client(self: *LoggingClient) Client {
             .openChannel = openChannel,
             .closeChannel = closeChannel,
             .consume = consume,
+            .getReturns = getReturns,
             .publish = publish,
             .reset = reset,
             .declareEphemeralQueue = declareEphemeralQueue,
@@ -123,6 +124,14 @@ fn unbind(
 fn consume(ptr: *anyopaque, timeout_ns: i64) anyerror!?Response {
     const self = getSelf(ptr);
     _ = try self.writer.print("consume({})\n", .{timeout_ns});
+    return null;
+}
+
+/// You can't return a message while recording
+// This is a noop and always returns null
+pub fn getReturns(ptr: *anyopaque, timeout_ns: i64) !?Client.ReturnedMessage {
+    const self = getSelf(ptr);
+    _ = try self.writer.print("returns({})\n", .{timeout_ns});
     return null;
 }
 
