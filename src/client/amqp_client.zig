@@ -356,6 +356,8 @@ const Connection = struct {
     }
 
     pub fn getReturns(self: *Connection, timeout: ?i64) !?Client.ReturnedMessage {
+        self.lock.lock();
+        defer self.lock.unlock();
         var timeval = std.c.timeval{
             .sec = 0,
             .usec = @truncate(timeout orelse 0),
@@ -710,7 +712,7 @@ pub fn declareEphemeralQueue(ptr: *anyopaque) ![]const u8 {
         .value = .{
             .kind = amqp.AMQP_FIELD_KIND_UTF8,
             .value = .{
-                .bytes = amqp.bytes_t.init("dlx.direct"),
+                .bytes = amqp.bytes_t.init("kw.grave"),
             },
         },
     };

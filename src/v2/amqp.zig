@@ -230,7 +230,7 @@ pub fn DriverBuilder(
                     __end,
                 };
 
-                const PublishData = PubCallContext;
+                pub const PublishData = PubCallContext;
 
                 const ConsumeData = struct {
                     consumer_tag: ConsRouteKeys,
@@ -384,6 +384,7 @@ pub fn DriverBuilder(
                             event: *const UnroutedData,
                             evprop: EventPropertiesEx,
                         ) anyerror!void {
+                            if (comptime ConsRoutes.len == 0) return;
                             defer @constCast(event).internal.deinit();
                             switch (k) {
                                 inline else => |e| {
@@ -1668,6 +1669,74 @@ pub fn RouteParser(comptime Context: type) type {
                     },
                 }
             }
+        }
+    };
+}
+
+/// Given pre-parsed routes (output of `From()`), filters for publish routes
+/// and builds a type-erased scheduler whose `PublishData` is a union of only
+/// those routes' CallContexts. The resulting type is deterministic from the
+/// routes alone — no consumer types needed.
+pub fn AmqpSchedulerShim(comptime Routes: []const type) type {
+    const PubRoutes = FilterRoutes(Routes, .publish);
+    const ShimPD = shared.UniteCallContext(PubRoutes);
+
+    return struct {
+        pub const PublishData = ShimPD;
+        pub const PublishExtra = struct { inj: ?*dep.DepCtx = null };
+
+        _publishFn: *const fn (*anyopaque, ShimPD, PublishExtra) anyerror!void,
+        _ctx: *anyopaque,
+
+        pub fn publish(self: @This(), data: ShimPD, extra: PublishExtra) !void {
+            return self._publishFn(self._ctx, data, extra);
+        }
+    };
+}
+
+/// Adapts a shim scheduler's PublishData to a real Scheduler's PublishData
+/// by mapping union fields by name. Works because protocol routes are always
+/// included in the real driver (via `kw.protocol.use()`), so the real
+/// PublishData union has fields with the same names and types.
+pub fn SchedulerBridge(comptime Shim: type, comptime RealScheduler: type) type {
+    // Extract the real PublishData type from the Scheduler's publish method signature.
+    const RealPublishData = @typeInfo(@TypeOf(RealScheduler.publish)).@"fn".params[1].type.?;
+
+    return struct {
+        real: RealScheduler,
+
+        fn publishImpl(ctx: *anyopaque, data: Shim.PublishData, extra: Shim.PublishExtra) anyerror!void {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            switch (data) {
+                inline else => |val, tag| {
+                    try self.real.publish(
+                        @unionInit(RealPublishData, @tagName(tag), val),
+                        .{ .inj = extra.inj },
+                    );
+                },
+            }
+        }
+
+        pub fn toShim(self: *@This()) Shim {
+            return .{ ._publishFn = &publishImpl, ._ctx = @ptrCast(self) };
+        }
+    };
+}
+
+/// DI factory wrapper that lazily creates a `SchedulerBridge` on first
+/// request. The factory method depends on `RealScheduler`, which the DI
+/// system resolves from the `SchedulerCtx.schedulerFac` registered by the
+/// Server in `bind()`.
+pub fn BridgeShimCtx(comptime Shim: type, comptime RealScheduler: type) type {
+    const BridgeType = SchedulerBridge(Shim, RealScheduler);
+    return struct {
+        bridge: ?BridgeType = null,
+
+        pub fn shimSchedulerFac(self: *@This(), real_sched: RealScheduler) Shim {
+            if (self.bridge == null) {
+                self.bridge = .{ .real = real_sched };
+            }
+            return self.bridge.?.toShim();
         }
     };
 }
