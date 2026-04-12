@@ -30,6 +30,8 @@ pub const resolver = @import("utils/resolver.zig");
 pub const cron = @import("v2/cron.zig");
 pub const amqp = @import("v2/amqp.zig");
 
+pub const http = @import("v2/http.zig");
+
 pub const middleware = struct {
     pub const latency = @import("middleware/latency.zig").WithLatency;
 };
@@ -37,8 +39,4 @@ pub const middleware = struct {
 comptime {
     const std = @import("std");
     std.testing.refAllDecls(@This());
-    std.testing.refAllDecls(@import("template/Http.zig"));
-    // TODO: remove
-    std.testing.refAllDecls(@import("v2/amqp.zig"));
-    std.testing.refAllDecls(@import("client/amqp_client.zig"));
 }

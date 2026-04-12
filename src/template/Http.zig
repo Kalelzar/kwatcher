@@ -131,6 +131,8 @@ pub const Lexer = struct {
                                             },
                                             else => cursor -= 5,
                                         }
+                                    } else {
+                                        cursor -= 1;
                                     }
                                 },
                                 'u', 'U' => {
@@ -143,6 +145,8 @@ pub const Lexer = struct {
                                             },
                                             else => cursor -= 3,
                                         }
+                                    } else {
+                                        cursor -= 1;
                                     }
                                 },
                                 'o', 'O' => {
@@ -155,6 +159,8 @@ pub const Lexer = struct {
                                             },
                                             else => cursor -= 4,
                                         }
+                                    } else {
+                                        cursor -= 1;
                                     }
                                 },
                                 'r', 'R' => {
@@ -167,6 +173,8 @@ pub const Lexer = struct {
                                             },
                                             else => cursor -= 7,
                                         }
+                                    } else {
+                                        cursor -= 1;
                                     }
                                 },
                                 else => cursor -= 1,
@@ -477,6 +485,16 @@ pub const Lexer = struct {
         try std.testing.expectEqual(Kind.eof, tokens[3].kind);
     }
 
+    test "lex bare root" {
+        const tokens = comptime Lexer.lex("GET /");
+        try std.testing.expectEqual(3, tokens.len);
+        try std.testing.expectEqual(Kind.get, tokens[0].kind);
+        try std.testing.expectEqualStrings("GET", tokens[0].lexeme);
+        try std.testing.expectEqual(Kind.route_separator, tokens[1].kind);
+        try std.testing.expectEqualStrings("/", tokens[1].lexeme);
+        try std.testing.expectEqual(Kind.eof, tokens[2].kind);
+    }
+
     test "complex_post" {
         const tokens = comptime Lexer.lex(
             "PROVIDE POST /api/[a.var0.len]/[...b]/{cap}/{*wild} @test",
@@ -536,19 +554,99 @@ pub const Lexer = struct {
 
         try std.testing.expectEqual(Kind.eof, tokens[24].kind);
     }
+
+    test "identifier starting with pa is not patch" {
+        const tokens = comptime Lexer.lex("GET /path");
+        try std.testing.expectEqual(Kind.get, tokens[0].kind);
+        try std.testing.expectEqual(Kind.route_separator, tokens[1].kind);
+        try std.testing.expectEqual(Kind.identifier, tokens[2].kind);
+        try std.testing.expectEqualStrings("path", tokens[2].lexeme);
+    }
+
+    test "identifier starting with pu is not put" {
+        const tokens = comptime Lexer.lex("GET /push");
+        try std.testing.expectEqual(Kind.get, tokens[0].kind);
+        try std.testing.expectEqual(Kind.route_separator, tokens[1].kind);
+        try std.testing.expectEqual(Kind.identifier, tokens[2].kind);
+        try std.testing.expectEqualStrings("push", tokens[2].lexeme);
+    }
+
+    test "identifier starting with po is not post" {
+        const tokens = comptime Lexer.lex("GET /poll");
+        try std.testing.expectEqual(Kind.get, tokens[0].kind);
+        try std.testing.expectEqual(Kind.route_separator, tokens[1].kind);
+        try std.testing.expectEqual(Kind.identifier, tokens[2].kind);
+        try std.testing.expectEqualStrings("poll", tokens[2].lexeme);
+    }
+
+    test "identifier starting with pr is not provide" {
+        const tokens = comptime Lexer.lex("GET /profile");
+        try std.testing.expectEqual(Kind.get, tokens[0].kind);
+        try std.testing.expectEqual(Kind.route_separator, tokens[1].kind);
+        try std.testing.expectEqual(Kind.identifier, tokens[2].kind);
+        try std.testing.expectEqualStrings("profile", tokens[2].lexeme);
+    }
+
+    test "identifier starting with ge is not get" {
+        const tokens = comptime Lexer.lex("POST /getter");
+        try std.testing.expectEqual(Kind.post, tokens[0].kind);
+        try std.testing.expectEqual(Kind.route_separator, tokens[1].kind);
+        try std.testing.expectEqual(Kind.identifier, tokens[2].kind);
+        try std.testing.expectEqualStrings("getter", tokens[2].lexeme);
+    }
+
+    test "identifier starting with co is not connect" {
+        const tokens = comptime Lexer.lex("GET /config");
+        try std.testing.expectEqual(Kind.get, tokens[0].kind);
+        try std.testing.expectEqual(Kind.route_separator, tokens[1].kind);
+        try std.testing.expectEqual(Kind.identifier, tokens[2].kind);
+        try std.testing.expectEqualStrings("config", tokens[2].lexeme);
+    }
+
+    test "identifier starting with de is not delete" {
+        const tokens = comptime Lexer.lex("GET /deploy");
+        try std.testing.expectEqual(Kind.get, tokens[0].kind);
+        try std.testing.expectEqual(Kind.route_separator, tokens[1].kind);
+        try std.testing.expectEqual(Kind.identifier, tokens[2].kind);
+        try std.testing.expectEqualStrings("deploy", tokens[2].lexeme);
+    }
+
+    test "identifier starting with he is not head" {
+        const tokens = comptime Lexer.lex("GET /health");
+        try std.testing.expectEqual(Kind.get, tokens[0].kind);
+        try std.testing.expectEqual(Kind.route_separator, tokens[1].kind);
+        try std.testing.expectEqual(Kind.identifier, tokens[2].kind);
+        try std.testing.expectEqualStrings("health", tokens[2].lexeme);
+    }
+
+    test "identifier starting with op is not options" {
+        const tokens = comptime Lexer.lex("GET /optimal");
+        try std.testing.expectEqual(Kind.get, tokens[0].kind);
+        try std.testing.expectEqual(Kind.route_separator, tokens[1].kind);
+        try std.testing.expectEqual(Kind.identifier, tokens[2].kind);
+        try std.testing.expectEqualStrings("optimal", tokens[2].lexeme);
+    }
+
+    test "identifier starting with tr is not trace" {
+        const tokens = comptime Lexer.lex("GET /tree");
+        try std.testing.expectEqual(Kind.get, tokens[0].kind);
+        try std.testing.expectEqual(Kind.route_separator, tokens[1].kind);
+        try std.testing.expectEqual(Kind.identifier, tokens[2].kind);
+        try std.testing.expectEqualStrings("tree", tokens[2].lexeme);
+    }
 };
 
-const Parser = struct {
-    const HttpVerb = enum {
+pub const Parser = struct {
+    pub const HttpVerb = enum {
         get,
         head,
-        options,
-        connect,
-        trace,
-        put,
         post,
-        patch,
+        put,
         delete,
+        connect,
+        options,
+        trace,
+        patch,
     };
 
     pub const Mods = packed struct(u8) {
@@ -563,6 +661,7 @@ const Parser = struct {
             path: *const Node,
             identifier: ?[]const u8 = null,
         },
+        root,
         static_path_segment: struct {
             segm: []const u8,
             next: ?*const Node = null,
@@ -791,8 +890,7 @@ const Parser = struct {
             }
 
             const verb = parseVerb(tokens, &cursor, buffer);
-            const path = parsePathSegment(tokens, &cursor, buffer) orelse
-                @compileError("TODO");
+            const path: Node = parsePathSegment(tokens, &cursor, buffer) orelse .root;
 
             const identifier = parseIdentifier(tokens, &cursor, buffer);
 
@@ -815,6 +913,30 @@ const Parser = struct {
         try std.testing.expectEqual(.get, parsed.route.verb);
         try std.testing.expectEqualStrings("api", parsed.route.path.static_path_segment.segm);
         try std.testing.expectEqual(null, parsed.route.path.static_path_segment.next);
+    }
+
+    test "parse root path" {
+        const parsed = comptime Parser.parse("GET /");
+        try std.testing.expect(std.meta.activeTag(parsed) == .route);
+        try std.testing.expectEqual(.get, parsed.route.verb);
+        try std.testing.expectEqual(.root, std.meta.activeTag(parsed.route.path.*));
+    }
+
+    test "parse root path with identifier" {
+        const parsed = comptime Parser.parse("GET / @home");
+        try std.testing.expect(std.meta.activeTag(parsed) == .route);
+        try std.testing.expectEqual(.get, parsed.route.verb);
+        try std.testing.expectEqual(.root, std.meta.activeTag(parsed.route.path.*));
+        try std.testing.expect(parsed.route.identifier != null);
+        try std.testing.expectEqualStrings("home", parsed.route.identifier.?);
+    }
+
+    test "parse root path with modifier" {
+        const parsed = comptime Parser.parse("PROVIDE GET /");
+        try std.testing.expect(std.meta.activeTag(parsed) == .route);
+        try std.testing.expectEqual(.get, parsed.route.verb);
+        try std.testing.expectEqual(true, parsed.route.modifiers.provider);
+        try std.testing.expectEqual(.root, std.meta.activeTag(parsed.route.path.*));
     }
 
     test "parse simple get with identifier" {
@@ -923,7 +1045,7 @@ const Parser = struct {
 };
 
 pub const RouteGen = struct {
-    const Segment = union(enum) {
+    pub const Segment = union(enum) {
         static: []const u8,
         capture: struct {
             type: type,
@@ -938,7 +1060,7 @@ pub const RouteGen = struct {
         compound: []const Segment,
     };
 
-    const Route = struct {
+    pub const Route = struct {
         method: Parser.HttpVerb,
         modifiers: Parser.Mods,
         identifier: []const u8,
@@ -973,6 +1095,7 @@ pub const RouteGen = struct {
 
     fn genRoute(comptime Context: type, comptime Fn: std.builtin.Type.Fn, comptime path: *const Parser.Node, comptime segments: []const Segment) []const Segment {
         switch (path.*) {
+            .root => return segments,
             .static_path_segment => |s| {
                 const next = segments ++ .{Segment{
                     .static = s.segm,
@@ -1058,6 +1181,22 @@ pub const RouteGen = struct {
         try std.testing.expectEqual(3, route.path.len);
     }
 
+    test "Generate root Get route" {
+        const T = struct {};
+
+        const H = struct {
+            pub fn @"GET /"() T {
+                return .{};
+            }
+        };
+
+        const route = gen(struct {}, H, "GET /");
+        try std.testing.expectEqual(.get, route.method);
+        try std.testing.expectEqual(false, route.modifiers.provider);
+        try std.testing.expectEqualStrings("GET /", route.identifier);
+        try std.testing.expectEqual(0, route.path.len);
+    }
+
     test "Generate Get route with captures" {
         const T = struct {};
 
@@ -1072,7 +1211,17 @@ pub const RouteGen = struct {
             }
         };
 
-        _ = gen(struct {}, H, "GET /api/v1/route/{id}");
+        const route = gen(struct {}, H, "GET /api/v1/route/{id}");
+        try std.testing.expectEqual(.get, route.method);
+        try std.testing.expectEqual(false, route.modifiers.provider);
+        try std.testing.expectEqualStrings("GET /api/v1/route/{id}", route.identifier);
+        try std.testing.expectEqual(4, route.path.len);
+        try std.testing.expectEqualStrings("api", route.path[0].static);
+        try std.testing.expectEqualStrings("v1", route.path[1].static);
+        try std.testing.expectEqualStrings("route", route.path[2].static);
+        try std.testing.expectEqualStrings("id", route.path[3].capture.name);
+        try std.testing.expectEqual(u64, route.path[3].capture.type);
+        try std.testing.expectEqual(false, route.path[3].capture.wildcard);
     }
 
     test "Generate Get route with composite captures" {
@@ -1090,7 +1239,25 @@ pub const RouteGen = struct {
             }
         };
 
-        _ = gen(struct {}, H, "GET /api/v1/route/{id}${*action}");
+        const route = gen(struct {}, H, "GET /api/v1/route/{id}${*action}");
+        try std.testing.expectEqual(.get, route.method);
+        try std.testing.expectEqual(false, route.modifiers.provider);
+        try std.testing.expectEqualStrings("GET /api/v1/route/{id}${*action}", route.identifier);
+        try std.testing.expectEqual(4, route.path.len);
+        try std.testing.expectEqualStrings("api", route.path[0].static);
+        try std.testing.expectEqualStrings("v1", route.path[1].static);
+        try std.testing.expectEqualStrings("route", route.path[2].static);
+        const compound = route.path[3].compound;
+        try std.testing.expectEqual(2, compound.len);
+        try std.testing.expectEqualStrings("id", compound[0].capture.name);
+        try std.testing.expectEqual(u64, compound[0].capture.type);
+        try std.testing.expectEqual(false, compound[0].capture.wildcard);
+        const inner = compound[1].compound;
+        try std.testing.expectEqual(2, inner.len);
+        try std.testing.expectEqualStrings("$", inner[0].static);
+        try std.testing.expectEqualStrings("action", inner[1].capture.name);
+        try std.testing.expectEqual([]const u8, inner[1].capture.type);
+        try std.testing.expectEqual(true, inner[1].capture.wildcard);
     }
 
     test "Generate Get route with params" {
@@ -1103,7 +1270,17 @@ pub const RouteGen = struct {
             }
         };
 
-        _ = gen(Context, H, "GET /api/v1/route/[id]");
+        const route = gen(Context, H, "GET /api/v1/route/[id]");
+        try std.testing.expectEqual(.get, route.method);
+        try std.testing.expectEqual(false, route.modifiers.provider);
+        try std.testing.expectEqualStrings("GET /api/v1/route/[id]", route.identifier);
+        try std.testing.expectEqual(4, route.path.len);
+        try std.testing.expectEqualStrings("api", route.path[0].static);
+        try std.testing.expectEqualStrings("v1", route.path[1].static);
+        try std.testing.expectEqualStrings("route", route.path[2].static);
+        try std.testing.expectEqualStrings("id", route.path[3].parameter.name);
+        try std.testing.expectEqual(u64, route.path[3].parameter.type);
+        try std.testing.expectEqual(false, route.path[3].parameter.spread);
     }
 
     test "Generate Get route with compound parameters" {
@@ -1116,7 +1293,188 @@ pub const RouteGen = struct {
             }
         };
 
-        _ = gen(Context, H, "GET /api/v1/route/[user_id]-[...id]/get");
+        const route = gen(Context, H, "GET /api/v1/route/[user_id]-[...id]/get");
+        try std.testing.expectEqual(.get, route.method);
+        try std.testing.expectEqual(false, route.modifiers.provider);
+        try std.testing.expectEqualStrings("GET /api/v1/route/[user_id]-[...id]/get", route.identifier);
+        try std.testing.expectEqual(5, route.path.len);
+        try std.testing.expectEqualStrings("api", route.path[0].static);
+        try std.testing.expectEqualStrings("v1", route.path[1].static);
+        try std.testing.expectEqualStrings("route", route.path[2].static);
+        const compound = route.path[3].compound;
+        try std.testing.expectEqual(2, compound.len);
+        try std.testing.expectEqualStrings("user_id", compound[0].parameter.name);
+        try std.testing.expectEqual([]const u8, compound[0].parameter.type);
+        try std.testing.expectEqual(false, compound[0].parameter.spread);
+        const inner = compound[1].compound;
+        try std.testing.expectEqual(2, inner.len);
+        try std.testing.expectEqualStrings("-", inner[0].static);
+        try std.testing.expectEqualStrings("id", inner[1].parameter.name);
+        try std.testing.expectEqual([]const u64, inner[1].parameter.type);
+        try std.testing.expectEqual(true, inner[1].parameter.spread);
+        try std.testing.expectEqualStrings("get", route.path[4].static);
+    }
+
+    test "Generate Post route" {
+        const T = struct {};
+
+        const H = struct {
+            pub fn @"POST /api/v1/resource"() T {
+                return .{};
+            }
+        };
+
+        const route = gen(struct {}, H, "POST /api/v1/resource");
+        try std.testing.expectEqual(.post, route.method);
+        try std.testing.expectEqual(false, route.modifiers.provider);
+        try std.testing.expectEqualStrings("POST /api/v1/resource", route.identifier);
+        try std.testing.expectEqual(3, route.path.len);
+        try std.testing.expectEqualStrings("api", route.path[0].static);
+        try std.testing.expectEqualStrings("v1", route.path[1].static);
+        try std.testing.expectEqualStrings("resource", route.path[2].static);
+    }
+
+    test "Generate Delete route" {
+        const T = struct {};
+
+        const H = struct {
+            pub fn @"DELETE /api/v1/resource/{id}"(target: struct {
+                captures: struct { id: u64 },
+            }) T {
+                _ = target;
+                return .{};
+            }
+        };
+
+        const route = gen(struct {}, H, "DELETE /api/v1/resource/{id}");
+        try std.testing.expectEqual(.delete, route.method);
+        try std.testing.expectEqual(false, route.modifiers.provider);
+        try std.testing.expectEqual(4, route.path.len);
+        try std.testing.expectEqualStrings("id", route.path[3].capture.name);
+    }
+
+    test "Generate Put route" {
+        const T = struct {};
+
+        const H = struct {
+            pub fn @"PUT /resource"() T {
+                return .{};
+            }
+        };
+
+        const route = gen(struct {}, H, "PUT /resource");
+        try std.testing.expectEqual(.put, route.method);
+    }
+
+    test "Generate Patch route" {
+        const T = struct {};
+
+        const H = struct {
+            pub fn @"PATCH /resource"() T {
+                return .{};
+            }
+        };
+
+        const route = gen(struct {}, H, "PATCH /resource");
+        try std.testing.expectEqual(.patch, route.method);
+    }
+
+    test "Generate route with provide modifier" {
+        const T = struct {};
+
+        const H = struct {
+            pub fn @"PROVIDE GET /api/v1/config"() T {
+                return .{};
+            }
+        };
+
+        const route = gen(struct {}, H, "PROVIDE GET /api/v1/config");
+        try std.testing.expectEqual(.get, route.method);
+        try std.testing.expectEqual(true, route.modifiers.provider);
+        try std.testing.expectEqualStrings("PROVIDE GET /api/v1/config", route.identifier);
+        try std.testing.expectEqual(3, route.path.len);
+    }
+
+    test "Generate route with custom identifier" {
+        const T = struct {};
+
+        const H = struct {
+            pub fn @"GET /api/v1/users @listUsers"() T {
+                return .{};
+            }
+        };
+
+        const route = gen(struct {}, H, "GET /api/v1/users @listUsers");
+        try std.testing.expectEqual(.get, route.method);
+        try std.testing.expectEqualStrings("listUsers", route.identifier);
+        try std.testing.expectEqual(3, route.path.len);
+    }
+
+    test "Generate route with wildcard capture" {
+        const T = struct {};
+
+        const H = struct {
+            pub fn @"GET /files/{*path}"(target: struct {
+                captures: struct { path: []const u8 },
+            }) T {
+                _ = target;
+                return .{};
+            }
+        };
+
+        const route = gen(struct {}, H, "GET /files/{*path}");
+        try std.testing.expectEqual(.get, route.method);
+        try std.testing.expectEqual(2, route.path.len);
+        try std.testing.expectEqualStrings("files", route.path[0].static);
+        try std.testing.expectEqualStrings("path", route.path[1].capture.name);
+        try std.testing.expectEqual([]const u8, route.path[1].capture.type);
+        try std.testing.expectEqual(true, route.path[1].capture.wildcard);
+    }
+
+    test "Generate route with spread parameter" {
+        const T = struct {};
+        const Context = struct { ids: []const u64 };
+
+        const H = struct {
+            pub fn @"GET /api/items/[...ids]"() T {
+                return .{};
+            }
+        };
+
+        const route = gen(Context, H, "GET /api/items/[...ids]");
+        try std.testing.expectEqual(.get, route.method);
+        try std.testing.expectEqual(3, route.path.len);
+        try std.testing.expectEqualStrings("api", route.path[0].static);
+        try std.testing.expectEqualStrings("items", route.path[1].static);
+        try std.testing.expectEqualStrings("ids", route.path[2].parameter.name);
+        try std.testing.expectEqual([]const u64, route.path[2].parameter.type);
+        try std.testing.expectEqual(true, route.path[2].parameter.spread);
+    }
+
+    test "Generate route with mixed captures and parameters" {
+        const T = struct {};
+        const Context = struct { version: []const u8 };
+
+        const H = struct {
+            pub fn @"GET /api/[version]/resource/{id}"(target: struct {
+                captures: struct { id: u64 },
+            }) T {
+                _ = target;
+                return .{};
+            }
+        };
+
+        const route = gen(Context, H, "GET /api/[version]/resource/{id}");
+        try std.testing.expectEqual(.get, route.method);
+        try std.testing.expectEqual(4, route.path.len);
+        try std.testing.expectEqualStrings("api", route.path[0].static);
+        try std.testing.expectEqualStrings("version", route.path[1].parameter.name);
+        try std.testing.expectEqual([]const u8, route.path[1].parameter.type);
+        try std.testing.expectEqual(false, route.path[1].parameter.spread);
+        try std.testing.expectEqualStrings("resource", route.path[2].static);
+        try std.testing.expectEqualStrings("id", route.path[3].capture.name);
+        try std.testing.expectEqual(u64, route.path[3].capture.type);
+        try std.testing.expectEqual(false, route.path[3].capture.wildcard);
     }
 };
 

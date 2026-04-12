@@ -146,6 +146,7 @@ pub fn build(b: *std.Build) !void {
     const zamqp = b.dependency("zamqp", .{ .target = target, .optimize = optimize }).module("zamqp");
     const uuid = b.dependency("uuid", .{ .target = target, .optimize = optimize }).module("uuid");
     const metrics = b.dependency("metrics", .{ .target = target, .optimize = optimize }).module("metrics");
+    const httpz = b.dependency("httpz", .{ .target = target, .optimize = optimize }).module("httpz");
     // Imports:
     // Internal:
     kwatcher_example.addImport("kwatcher", kwatcher_library);
@@ -156,4 +157,6 @@ pub fn build(b: *std.Build) !void {
     kwatcher_library.addImport("zamqp", zamqp);
     kwatcher_library.addImport("uuid", uuid);
     kwatcher_library.addImport("metrics", metrics);
+    kwatcher_library.addImport("httpz", httpz);
+    kwatcher_example.addImport("httpz", httpz);
 }
