@@ -18,7 +18,7 @@ pub const KWEV = struct {
     }
 
     pub fn finalize(self: *KWEV, final_size: usize) !void {
-        try std.posix.ftruncate(self.file.file.handle, final_size);
+        try self.file.truncate(final_size);
     }
 
     pub fn deinit(self: *KWEV) void {
