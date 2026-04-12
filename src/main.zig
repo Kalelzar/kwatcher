@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const kw = @import("kwatcher");
+const httpz = @import("httpz");
 
 pub const std_options = std.Options{
     .log_scope_levels = &[_]std.log.ScopeLevel{
@@ -110,6 +111,86 @@ const CronRoutes = struct {
     }
 };
 
+/// HTTP route handlers.
+/// Function names follow the pattern: "[MODIFIER] VERB /path [@identifier]"
+const HTTPRoutes = struct {
+    // --- /api/v1/users family (shared prefix) ---
+
+    pub fn @"GET /"(_: struct {}) []const HeartbeatMessage {
+        log.info("HELLO FROM SERVER", .{});
+        return &.{};
+    }
+
+    pub fn @"GET /api/v1/users"(_: struct {}) []const HeartbeatMessage {
+        return &.{};
+    }
+
+    pub fn @"POST /api/v1/users"(ctx: struct { body: struct { name: []const u8 } }) HeartbeatMessage {
+        return .{
+            .timestamp = 0,
+            .event = "user_created",
+            .count = 0,
+            .greeting = ctx.body.name,
+        };
+    }
+
+    pub fn @"GET /api/v1/users/{id}"(ctx: struct {
+        captures: struct { id: u64 },
+    }) HeartbeatMessage {
+        _ = ctx;
+        return .{
+            .timestamp = 0,
+            .event = "user_fetched",
+            .count = 0,
+            .greeting = "",
+        };
+    }
+
+    pub fn @"DELETE /api/v1/users/{id}"(ctx: struct {
+        captures: struct { id: u64 },
+    }) []const u8 {
+        _ = ctx;
+        return "";
+    }
+
+    // --- /api/v1/config (shared /api/v1 prefix, different leaf) ---
+
+    pub fn @"PROVIDE GET /api/v1/config"(_: struct {}) AppConfig {
+        return .{};
+    }
+
+    pub fn @"PUT /api/v1/config"(ctx: struct { body: struct { greeting: []const u8, interval_seconds: u32 } }) AppConfig {
+        return .{
+            .greeting = ctx.body.greeting,
+            .interval_seconds = ctx.body.interval_seconds,
+        };
+    }
+
+    // --- /health (no shared prefix with /api) ---
+
+    pub fn @"GET /health @healthCheck"(_: struct {}) struct { status: []const u8 } {
+        return .{ .status = "ok" };
+    }
+
+    // --- /files (wildcard capture, no shared prefix) ---
+
+    pub fn @"GET /files/{*path}"(ctx: struct {
+        captures: struct { path: []const u8 },
+    }) struct { content: []const u8 } {
+        _ = ctx;
+        return .{ .content = "" };
+    }
+};
+
+// const routes = blk: {
+//     const decls = @typeInfo(HTTPRoutes).@"struct".decls;
+//     var result: [decls.len]kw.http.RouteGen.Route = undefined;
+//     for (decls, 0..) |d, i| {
+//         result[i] = kw.http.RouteGen.gen(RouteContext, HTTPRoutes, d.name);
+//     }
+//     break :blk result;
+// };
+
 // ============================================================================
 // Driver Setup
 // ============================================================================
@@ -138,11 +219,20 @@ const cron_driver = kw.cron.Driver
     .routes(kw.cron.From(CronRoutes))
     .build();
 
+const http_driver = kw.http.Driver
+    .new(.http)
+    .config("driver.http")
+    .listen(true)
+    .jobs(1)
+    .routes(kw.http.From(HTTPRoutes, RouteContext))
+    .build();
+
 /// Combined driver registry
 const drivers = kw.DriverRegistry
     .new()
     .registerHandler(cron_driver)
-    .registerHandler(amqp_driver);
+    .registerHandler(amqp_driver)
+    .registerHandler(http_driver);
 
 /// Type alias for the scheduler (used to publish events from cron routes)
 /// SchedulerMap() returns a function that maps driver keys to scheduler types
@@ -154,7 +244,57 @@ const Scheduler = drivers.SchedulerMap();
 
 var config_slot: Config = undefined;
 
+// const router = @import("v2/http/router.zig");
+
+// pub fn Filter(comptime rs: []const kw.http.RouteGen.Route, comptime m: kw.http.Parser.HttpVerb) []const kw.http.RouteGen.Route {
+//     const res: []const kw.http.RouteGen.Route = comptime blk: {
+//         var res: []const kw.http.RouteGen.Route = &.{};
+//         var i: u64 = 0;
+//         for (rs) |r| {
+//             if (r.method == m) {
+//                 res = res ++ .{r};
+//                 i += 1;
+//             }
+//         }
+
+//         break :blk res[0..i];
+//     };
+
+//     return res;
+// }
+
+// const Handler = struct {
+//     pub fn handle(_: *Handler, req: *httpz.Request, res: *httpz.Response) void {
+//         std.log.info("{t} {s}", .{ req.method, req.url.path });
+
+//         const method: kw.http.Parser.HttpVerb = @enumFromInt(@intFromEnum(req.method));
+
+//         switch (method) {
+//             inline else => |m| {
+//                 const f = comptime Filter(&routes, m);
+//                 const match = router.route(f, 0, req.url.path[1..], 0);
+
+//                 res.body = match orelse blk: {
+//                     res.status = 404;
+//                     break :blk "not found";
+//                 };
+//             },
+//         }
+//     }
+// };
+
 pub fn juicyMain(allocator: std.mem.Allocator) !void {
+    // var handler = Handler{};
+    // var server = try httpz.Server(*Handler).init(
+    //     allocator,
+    //     .{ .address = .localhost(2000) },
+    //     &handler,
+    // );
+    // defer server.deinit();
+    // defer server.stop();
+
+    // try server.listen();
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -192,13 +332,14 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
 
     // Create singleton dependencies
     var counter = CounterDependency{};
+    var ctx: RouteContext = .{};
 
     // Build the dependency container
     // The chain of .with() and .static() calls registers dependencies at different lifetimes:
     // - .static(): Lives for the entire application lifetime
     // - .scoped(): Created fresh for each request
     const deps = kw.deps.DependencyContainer(Config)
-        .new(drivers)
+        .new(drivers, allocator)
         // Register default dependencies (allocator pools, user info, client info)
         .with(.all, kw.default.withDefault(&config_slot, .{
             .name = "example",
@@ -209,6 +350,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         // Register AMQP client pool and connection handling
         .with(.amqp, kw.amqp.defaultFor(drivers, RouteContext), allocator)
         // Register our custom counter as a static dependency
+        .static(.http, &ctx, allocator)
         .static(.amqp, &counter, allocator);
 
     // Create and start the server

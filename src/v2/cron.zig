@@ -12,6 +12,8 @@ const CronTemplate = @import("../template/Cron.zig");
 const shared = @import("../utils/shared.zig");
 const MPMCQueue = @import("../utils/queue.zig").StaticStrict;
 
+pub const kind = .cron;
+
 pub const Driver = shared.DriverBuilder(DriverBuilder, false);
 
 pub fn DriverBuilder(
