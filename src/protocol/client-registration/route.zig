@@ -103,7 +103,16 @@ pub fn @"reply:client-reannounce amq.topic/client.requests.reannounce"(
     };
 }
 
-pub fn @"publish!:client-heartbeat amq.direct/client.heartbeat"(client_info: base_schema.ClientInfo) base_schema.Message(schema.Client.Heartbeat.V1) {
+pub fn @"publish!:client-heartbeat amq.direct/client.heartbeat"(
+    client_info: base_schema.ClientInfo,
+    reg: *ClientRegistry,
+    inj: *dep.DepCtx,
+) !?base_schema.Message(schema.Client.Heartbeat.V1) {
+    if (reg.state != .registered) {
+        const scheduler = try inj.require(@import("client_registration.zig").Scheduler);
+        try scheduler.publish(.{ .@"client-announce" = .{} }, .{ .inj = inj });
+        return null;
+    }
     return .{
         .schema = .{ .id = client_info.id },
         .options = .{
@@ -115,6 +124,14 @@ pub fn @"publish!:client-heartbeat amq.direct/client.heartbeat"(client_info: bas
 // pub fn @"rejected:client-heartbeat"(body: schema.Client.Heartbeat.V1) !void {
 //     _ = body;
 // }
+
+pub fn @"consume:client-heartbeat-dead kw.grave/client.heartbeat"(
+    _: schema.Client.Heartbeat.V1,
+    inj: *dep.DepCtx,
+) !void {
+    const scheduler = try inj.require(@import("client_registration.zig").Scheduler);
+    try scheduler.publish(.{ .@"client-announce" = .{} }, .{ .inj = inj });
+}
 
 pub fn @"unrouted:client-heartbeat"(body: schema.Client.Heartbeat.V1) !void {
     _ = body;

@@ -29,6 +29,9 @@ pub fn use(
 
 // NOTE: This assumes that category is the driver key.
 // We should provide an overload for when that is not the case, though the rest of the system does too
+// NOTE: Even though the above is true, we do not use Driver.DriverKeys for the type (even though it is correct),
+// bacause DepHub is untyped and throws a hissy-fit because .all isn't a driver key.
+// The solution is a custom type that just appends all to the keyset but meh.
 pub fn deps(
     comptime drv: Drivers,
     comptime Context: type,
@@ -41,24 +44,31 @@ pub fn deps(
             allocator: std.mem.Allocator,
             comptime Config: type,
         ) Return(category, Config, @TypeOf(dephub)) {
-            const Us = drv.get(category);
             const protocol = @field(Self, @tagName(protocols[0]));
             if (comptime protocols.len == 1) {
-                return protocol.deps.default(Context).value(category, dephub, Config, Us, allocator);
+                return protocol.deps.default(drv, Context).value(category, dephub, Config, allocator);
             } else {
-                const next = protocol.deps.default(Context).value(category, dephub, Context, Config, Us, allocator);
+                const next = protocol.deps.default(drv, Context).value(category, dephub, Context, Config, allocator);
                 return deps(drv, protocols[1..]).apply(next, category, allocator, Config);
             }
         }
 
-        pub fn Return(comptime category: anytype, comptime Config: type, comptime DH: type) type {
+        pub fn Return(
+            comptime category: anytype,
+            comptime Config: type,
+            comptime DH: type,
+        ) type {
             const protocol = @field(Self, @tagName(protocols[0]));
             if (comptime protocols.len == 1) {
-                return protocol.deps.default(Context).Return(category, Config, DH);
+                return protocol.deps.default(drv, Context).Return(category, Config, DH);
             } else {
-                const next = protocol.deps.default(Context).Return(category, Config, DH);
+                const next = protocol.deps.default(drv, Context).Return(category, Config, DH);
                 return deps(drv, protocols[1..])
-                    .Return(category, Config, next);
+                    .Return(
+                    category,
+                    Config,
+                    next,
+                );
             }
         }
     };

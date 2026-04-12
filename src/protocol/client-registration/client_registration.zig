@@ -1,19 +1,40 @@
 pub const schema = @import("schema.zig");
 pub const route = @import("route.zig");
+pub const timers = @import("timers.zig");
 pub const registry = @import("registry.zig");
 pub const deps = @import("deps.zig");
 pub const Config = @import("config.zig");
 
+const amqp = @import("../../v2/amqp.zig");
+const cron = @import("../../v2/cron.zig");
+
+/// Minimal context with just the fields our route templates reference.
+/// The consume route `client.ack.{client.id}` resolves `client.id` against
+/// this context via the Resolver.
+pub const ProtocolContext = struct {
+    client: registry = .{ .assigned_id = null, .state = .unregistered },
+};
+
+/// Protocol routes parsed with our minimal context — enough for template
+/// resolution without needing the consumer's full Context.
+const protocol_routes = amqp.From(route, ProtocolContext);
+
+/// Type-erased scheduler built from only this protocol's publish routes.
+/// Protocol route handlers can inject this type via DI.
+pub const Scheduler = amqp.AmqpSchedulerShim(protocol_routes);
+
 pub const SupportedKinds = enum {
     amqp,
+    cron,
 };
 
 pub fn supports(comptime kind: SupportedKinds) bool {
-    return comptime kind == .amqp;
+    return comptime kind == .amqp or kind == .cron;
 }
 
 pub fn forKind(comptime Context: type, comptime kind: SupportedKinds) []const type {
     switch (kind) {
-        .amqp => return @import("../../v2/amqp.zig").From(route, Context),
+        .amqp => return amqp.From(route, Context),
+        .cron => return cron.From(timers),
     }
 }
