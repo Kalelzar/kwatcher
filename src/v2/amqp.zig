@@ -516,6 +516,7 @@ pub fn DriverBuilder(
                         }
 
                         pub fn watch_inner(self: *@This(), arc: anytype) void {
+                            //FIXME: This is shared by all threads and subsequently the client is shared which causes binding errors. This should not happen.
                             const inj: *dep.DepCtx = &arc.ref().data;
                             defer arc.unref();
 
@@ -544,6 +545,14 @@ pub fn DriverBuilder(
                                     const tag: ConsRouteKeys = comptime @enumFromInt(i);
                                     const static = comptime @tagName(tag);
                                     const dyn = alloc.dupe(u8, static) catch unreachable;
+                                    std.log.info("[{d},{d}] Binding {s}({s}): {s},{s}", .{
+                                        i,
+                                        std.Thread.getCurrentId(),
+                                        static,
+                                        dyn,
+                                        rstr,
+                                        estr,
+                                    });
                                     _ = client.bind(
                                         null,
                                         rstr,
@@ -1642,7 +1651,7 @@ pub fn RouteParser(comptime Context: type) type {
             comptime fnname: []const u8,
         ) @This() {
             comptime {
-                @setEvalBranchQuota(20000);
+                @setEvalBranchQuota(100000);
                 var tmpl = AmqpTemplate.Template(Context).init(fnname);
                 const expression = tmpl.parseTokens();
                 const f = @field(Container, fnname);

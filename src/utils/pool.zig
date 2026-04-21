@@ -75,6 +75,11 @@ pub fn BicyclicBuffer(comptime T: type, comptime Context: type) type {
         pub fn acquire(self: *Self) ?T {
             self.mutex.lock();
             defer self.mutex.unlock();
+            // std.log.info("Pool: {d}/{d} | {d}", .{
+            //     self.a_head,
+            //     self.a_len,
+            //     self.buffer.len,
+            // });
             if (self.a_len == 0 or !self.valid) return null;
 
             const head = self.a_head;

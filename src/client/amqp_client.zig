@@ -768,6 +768,7 @@ pub fn bind(
             try declareEphemeralQueue(self);
 
     const alloc = self.allocator;
+    // log.info("Requested consumer tag: {?s}: {s}/{s}/{?s}", .{ opts.consumer_tag, exchange, route, queue });
     const consumer_tag = opts.consumer_tag orelse try std.fmt.allocPrint(alloc, "{s}-{s}.{s}.{s}-{s}", .{ self.name, declared_queue, route, exchange, opts.channel_name orelse "__consume" });
     errdefer alloc.free(consumer_tag);
 
