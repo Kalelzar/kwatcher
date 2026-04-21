@@ -331,7 +331,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                     };
 
                     err catch |e| {
-                        if (maybe_next.properties.attempts >= 3) {
+                        if (maybe_next.properties.attempts >= 3 or (e == error.Cancelled or e == error.Reject)) {
                             try rec.append(maybe_next);
                             return e;
                         }
