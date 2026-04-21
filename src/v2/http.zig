@@ -5,7 +5,7 @@ const httpz = @import("httpz");
 const kw = @import("../root.zig");
 
 const schema = kw.schema;
-const conftype = kw.config.BaseConfig;
+const conftype = struct {};
 const cache = kw.cache;
 const mem = kw.mem;
 const InternFmtCache = kw.InternFmtCache;
@@ -23,13 +23,16 @@ const Resolver = kw.resolver.Resolver;
 const Router = @import("http/router.zig");
 
 pub const kind = .http;
+pub const data = @import("http/response.zig");
+pub const Response = httpz.Response;
+pub const Request = httpz.Request;
 
 // TODO: pub const default = @import("amqp/default.zig").default;
 // TODO: pub const defaultFor = @import("amqp/default.zig").defaultFor;
 
 pub const Driver = shared.DriverBuilder(DriverBuilder, true);
 
-pub const HttpMessage = struct { body: []const u8 };
+pub const HttpMessage = *anyopaque;
 
 pub fn DriverBuilder(
     comptime driver_key: @Type(.enum_literal),
@@ -154,7 +157,7 @@ pub fn DriverBuilder(
                                 alloc,
                                 .{ .address = .localhost(2000) },
                                 &handler,
-                            ) catch null; //FIXME: BAD
+                            ) catch null;
                             if (_server == null) @panic("Could not start server.");
                             self.server = alloc.create(httpz.Server(*Handler)) catch @panic("panic");
                             self.server.?.* = _server.?;
@@ -245,23 +248,20 @@ pub fn DriverBuilder(
                         ) anyerror!void {
                             _ = self;
                             const route = event.id;
-                            const maybe = dispatchRequest(
+                            dispatchRequest(
                                 route,
                                 injector,
                                 evprop,
                                 @constCast(&event),
-                            );
-                            // std.log.info("Consume: {t}", .{route});
-                            const result = maybe catch |e| {
+                            ) catch |e| {
                                 event.res.status = 500;
                                 event.res.body = @errorName(e);
+                                // FIXME: We should only signal on the last attempt
                                 event.ready.* = true;
                                 event.cond.signal();
                                 return e;
                             };
 
-                            event.res.status = 200;
-                            event.res.body = result.body;
                             event.ready.* = true;
                             event.cond.signal();
                         }
@@ -271,7 +271,7 @@ pub fn DriverBuilder(
                             inj: *dep.DepCtx,
                             evprop: EventPropertiesEx,
                             event: *RequestData,
-                        ) anyerror!HttpMessage {
+                        ) anyerror!void {
                             if (comptime Routes.len == 0) return error.NoRoutes;
                             switch (k) {
                                 inline else => |e| {
@@ -309,11 +309,20 @@ pub fn DriverBuilder(
                                         //TODO: @compileError("Captures are not implemented");
                                     }
 
-                                    return @call(
+                                    const result = try @call(
                                         .auto,
                                         R.call,
                                         .{ inj, rctx, evprop },
                                     );
+
+                                    const typed: *R.Return = @ptrCast(@alignCast(result));
+                                    if (comptime @typeInfo(R.Return) == .@"struct" and
+                                        @hasDecl(R.Return, "write"))
+                                    {
+                                        try typed.write(event.res.writer(), event.res);
+                                    } else {
+                                        try event.res.json(typed, .{});
+                                    }
                                 },
                             }
                         }
@@ -366,6 +375,7 @@ pub fn RouteBase(
     comptime m: HttpTemplate.Parser.HttpVerb,
     comptime route: HttpTemplate.RouteGen.Route,
     comptime HandlerFac: anytype,
+    comptime ReturnType: type,
     comptime ev_id: @Type(.enum_literal),
 ) type {
     return struct {
@@ -377,6 +387,7 @@ pub fn RouteBase(
 
         pub const CallContext = Handler.CallContext;
         pub const Dependencies = Handler.Dependencies;
+        pub const Return = ReturnType;
         pub const call = Handler.call;
         pub const name = Handler.name;
 
@@ -385,6 +396,7 @@ pub fn RouteBase(
                 m,
                 route,
                 NextHandler,
+                Return,
                 event_id,
             );
         }
@@ -394,6 +406,7 @@ pub fn RouteBase(
                 m,
                 route,
                 NextHandlerFac(HandlerFac).make, // FIXME: This is very gross.
+                Return,
                 event_id,
             );
         }
@@ -418,12 +431,14 @@ pub fn RouteBase(
                     mt,
                     route,
                     HandlerFac,
+                    Return,
                     ev_id,
                 ),
                 inline .route => |rt| RouteBase(
                     m,
                     rt,
                     HandlerFac,
+                    Return,
                     ev_id,
                 ),
             };
@@ -562,10 +577,18 @@ pub fn RouteParser(comptime Context: type) type {
                 }
             };
 
+            const ReturnType = klib.meta.Result(f);
+            const ActualResultType =
+                switch (comptime @typeInfo(ReturnType)) {
+                    .optional => |o| o.child,
+                    else => ReturnType,
+                };
+
             const RB = RouteBase(
                 route.method,
                 route,
                 H.make,
+                ActualResultType,
                 .http_recv,
             );
 
@@ -589,15 +612,10 @@ pub fn RouteParser(comptime Context: type) type {
                     else => result,
                 });
 
-            const fmt = std.json.fmt(actual_result, .{});
-            var writer = std.io.Writer.Allocating.init(alloc);
-            defer writer.deinit();
-            const interface = &writer.writer;
-            try fmt.format(interface);
+            const ptr = try alloc.create(ActualResultType);
+            ptr.* = actual_result;
 
-            return .{
-                .body = try writer.toOwnedSlice(),
-            };
+            return @ptrCast(@alignCast(ptr));
         }
 
         pub fn parse(
