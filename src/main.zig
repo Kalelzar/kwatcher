@@ -125,6 +125,38 @@ const HTTPRoutes = struct {
         return &.{};
     }
 
+    pub fn @"GET /api/v1/ok"(_: struct {}) kw.http.data.Json(
+        HeartbeatMessage,
+        &.{"200"},
+    ) {
+        return .{
+            .value = .{
+                .ok = .{
+                    .timestamp = 0,
+                    .event = "ok",
+                    .count = 1,
+                    .greeting = "Hello",
+                },
+            },
+        };
+    }
+
+    pub fn @"GET /api/v1/bad"(_: struct {}) kw.http.data.Json(
+        HeartbeatMessage,
+        &.{"400"},
+    ) {
+        return .{
+            .value = .{
+                .bad_request = .{
+                    .type = error.Bad,
+                    .title = "Bad",
+                    .instance = "HELLO",
+                    .details = "An expected bad request",
+                },
+            },
+        };
+    }
+
     pub fn @"POST /api/v1/users"(ctx: struct { body: struct { name: []const u8 } }) HeartbeatMessage {
         return .{
             .timestamp = 0,
