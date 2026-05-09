@@ -1065,6 +1065,21 @@ pub const RouteGen = struct {
         modifiers: Parser.Mods,
         identifier: []const u8,
         path: []const Segment,
+
+        pub fn canonic(comptime self: Route) []const u8 {
+            comptime var route: []const u8 = "";
+            inline for (self.path) |segm| {
+                comptime {
+                    switch (segm) {
+                        inline .static => |s| route = route ++ "/" ++ s,
+                        inline .capture => |c| route = route ++ "/" ++ if (c.wildcard) "*" else "" ++ c.name,
+                        inline else => |_, s| @compileError("Not implemented: " ++ @tagName(s)),
+                    }
+                }
+            }
+
+            return route;
+        }
     };
 
     pub fn gen(comptime Context: type, comptime Source: type, comptime field_name: []const u8) Route {

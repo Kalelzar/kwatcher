@@ -208,6 +208,28 @@ pub fn SetUnion(comptime T: type, comptime As: []const T, comptime Bs: []const T
     return buf[0..len];
 }
 
+pub fn SetUnionEql(comptime T: type, comptime As: []const T, comptime Bs: []const T, comptime EqlCtx: type) []const T {
+    @setEvalBranchQuota((As.len + Bs.len) * 200);
+    var len: usize = 0;
+    const buf = comptime blk: {
+        var buf: [As.len + Bs.len]T = undefined;
+        for (As, 0..) |A, i| {
+            buf[i] = A;
+            len += 1;
+        }
+        outer: for (Bs) |B| {
+            for (0..len) |j| {
+                if (EqlCtx.eql(buf[j], B)) continue :outer;
+            }
+            buf[len] = B;
+            len += 1;
+        }
+        break :blk buf;
+    };
+
+    return buf[0..len];
+}
+
 pub fn MergeDeps(comptime Routes: []const type, comptime extra: []const type) []const type {
     var len: usize = 0;
     const buf = comptime blk: {

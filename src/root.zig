@@ -34,6 +34,8 @@ pub const http = @import("v2/http.zig");
 
 pub const middleware = struct {
     pub const latency = @import("middleware/latency.zig").WithLatency;
+    pub const cors = @import("middleware/cors.zig").WithCors;
+    pub const Cors = @import("middleware/cors.zig");
 };
 
 comptime {

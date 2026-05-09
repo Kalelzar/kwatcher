@@ -52,10 +52,21 @@ pub fn Json(
                 },
             }
         }
+
+        pub fn Extend(new_statuses: []const []const u8) type {
+            const Eql = struct {
+                pub fn eql(a: []const u8, b: []const u8) bool {
+                    return std.mem.eql(u8, a, b);
+                }
+            };
+            const stats = kw.shared.SetUnionEql([]const u8, expected_statuses, new_statuses, Eql);
+            return Json(Result, stats);
+        }
     };
 }
 
 pub fn Enumize(comptime statuses: []const []const u8) type {
+    @setEvalBranchQuota(20000);
     var fields: [statuses.len]std.builtin.Type.EnumField = undefined;
     for (statuses, 0..) |status, i| {
         const stringly = std.meta.stringToEnum(std.http.Status, status) orelse blk: {
