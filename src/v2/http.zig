@@ -33,6 +33,11 @@ pub const Request = httpz.Request;
 pub const Driver = shared.DriverBuilder(DriverBuilder, true);
 
 pub const HttpMessage = *anyopaque;
+pub const State = enum {
+    waiting,
+    accepted,
+    done,
+};
 
 pub fn DriverBuilder(
     comptime driver_key: @Type(.enum_literal),
@@ -70,7 +75,7 @@ pub fn DriverBuilder(
                     req: *httpz.Request,
                     res: *httpz.Response,
                     cond: *std.Thread.Condition,
-                    ready: *bool,
+                    ready: *State,
 
                     pub fn write(self: RequestData, w: *std.Io.Writer) !void {
                         _ = self;
@@ -186,7 +191,7 @@ pub fn DriverBuilder(
 
                                     var cond = std.Thread.Condition{};
                                     var mut = std.Thread.Mutex{};
-                                    var ready = false;
+                                    var ready = State.waiting;
                                     mut.lock();
                                     defer mut.unlock();
 
@@ -204,7 +209,7 @@ pub fn DriverBuilder(
                                         },
                                     );
 
-                                    self.queue.?.tryPush(
+                                    const slot = self.queue.?.tryPush(
                                         .{
                                             .event_type = .http_recv,
                                             .event_data = val,
@@ -212,8 +217,34 @@ pub fn DriverBuilder(
                                         std.time.ns_per_s * 5,
                                     ) catch return error.QueueFull;
 
-                                    while (!ready) {
-                                        try cond.timedWait(&mut, std.time.ns_per_s * 30);
+                                    const timed_out = blk: {
+                                        while (@atomicLoad(State, &ready, .acquire) != .done) {
+                                            cond.timedWait(&mut, std.time.ns_per_s * 30) catch break :blk true;
+                                        }
+                                        break :blk false;
+                                    };
+
+                                    if (timed_out and
+                                        @atomicLoad(State, &ready, .acquire) == .waiting)
+                                    {
+                                        slot.event_type = .noop;
+                                        return error.Timeout;
+                                    } else if (timed_out and
+                                        @atomicLoad(State, &ready, .acquire) == .accepted)
+                                    {
+                                        while (@atomicLoad(State, &ready, .acquire) != .done) {
+                                            // FIXME: This should also have a timeout
+                                            // as is if the request takes forever to finish
+                                            // we will permanently tie up on of the httpz thread pool
+                                            // threads which can be abused for thread exhaustion and thus
+                                            // lead to DoS.
+                                            //
+                                            // When we migrate to zig 0.16+'s async io we will be able to
+                                            // cleanly cancel the in-flight request after the timeout
+                                            // until then, this is fine so long as we don't introduce
+                                            // routes that take a while.
+                                            cond.wait(&mut);
+                                        }
                                     }
                                 },
                             }
@@ -247,6 +278,7 @@ pub fn DriverBuilder(
                             injector: *dep.DepCtx,
                         ) anyerror!void {
                             _ = self;
+                            @atomicStore(State, event.ready, .accepted, .release);
                             const route = event.id;
                             dispatchRequest(
                                 route,
@@ -256,13 +288,14 @@ pub fn DriverBuilder(
                             ) catch |e| {
                                 event.res.status = 500;
                                 event.res.body = @errorName(e);
+                                event.res.content_type = .TEXT;
                                 // FIXME: We should only signal on the last attempt
-                                event.ready.* = true;
+                                @atomicStore(State, event.ready, .done, .release);
                                 event.cond.signal();
                                 return e;
                             };
 
-                            event.ready.* = true;
+                            @atomicStore(State, event.ready, .done, .release);
                             event.cond.signal();
                         }
 
