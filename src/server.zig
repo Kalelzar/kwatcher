@@ -194,7 +194,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
             }
             for (0..self.consumers) |_| {
                 log.debug("Poison", .{});
-                self.queue.push(.{
+                _ = self.queue.push(.{
                     .event_type = .shutdown,
                     .event_data = .{ .internal = .{ .shutdown = .{} } },
                 });
@@ -271,7 +271,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
         ) !void {
             var maybe_next = if (is_draining) self.queue.tryPop(std.time.ns_per_ms * 5) orelse return else self.queue.pop();
 
-            handle: switch (maybe_next.event_type) {
+            switch (maybe_next.event_type) {
                 .noop => {
                     log.debug("Noop :)", .{});
                 },
@@ -281,7 +281,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                         return error.ShutdownImminent;
                     } else {
                         log.debug("Draining. :)", .{});
-                        self.queue.push(maybe_next);
+                        _ = self.queue.push(maybe_next);
                     }
                 },
                 inline else => |ev| {
@@ -331,26 +331,8 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                     };
 
                     err catch |e| {
-                        if (maybe_next.properties.attempts >= 3 or (e == error.Cancelled or e == error.Reject)) {
-                            try rec.append(maybe_next);
-                            return e;
-                        }
-
-                        log.warn(
-                            "[{d}/3] Route {s} failed with error '{}'. Retrying...",
-                            .{ maybe_next.properties.attempts + 1, @tagName(ev), e },
-                        );
-
-                        maybe_next.properties.attempts += 1;
-                        self.queue.tryPush(
-                            maybe_next,
-                            std.time.ns_per_ms * 1,
-                        ) catch |e2| switch (e2) {
-                            error.WouldBlock => {
-                                continue :handle ev;
-                            },
-                            else => return e,
-                        };
+                        try rec.append(maybe_next);
+                        return e;
                     };
                 },
             }

@@ -239,7 +239,7 @@ pub fn DriverBuilder(
                                             },
                                         });
                                         while (true) {
-                                            self.queue.?.push(.{
+                                            _ = self.queue.?.push(.{
                                                 .event_type = .trigger_job,
                                                 .event_data = data,
                                             });
@@ -249,7 +249,7 @@ pub fn DriverBuilder(
                                     },
                                     .event => |event| {
                                         while (true) {
-                                            self.queue.?.push(event);
+                                            _ = self.queue.?.push(event);
                                             break;
                                         }
                                         log.info("Event {s} queued successfully.", .{name});

@@ -298,7 +298,7 @@ pub fn DriverBuilder(
                                     ev.properties.correlation_id = p.correlation_id;
                                 }
 
-                                self.parent.queue.?.tryPush(
+                                _ = self.parent.queue.?.tryPush(
                                     ev,
                                     std.time.ns_per_ms * 1,
                                 ) catch |e| switch (e) {
@@ -809,7 +809,7 @@ pub fn DriverBuilder(
                                         .{ .unrouted = data },
                                     );
 
-                                    self.queue.?.tryPush(.{
+                                    _ = self.queue.?.tryPush(.{
                                         .event_type = .unrouted,
                                         .event_data = val,
                                         .properties = .{
