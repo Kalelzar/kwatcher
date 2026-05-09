@@ -116,16 +116,16 @@ const CronRoutes = struct {
 const HTTPRoutes = struct {
     // --- /api/v1/users family (shared prefix) ---
 
-    pub fn @"GET /"(_: struct {}) []const HeartbeatMessage {
+    pub fn @"GET /"(_: kw.http.data.Request(null)) []const HeartbeatMessage {
         log.info("HELLO FROM SERVER", .{});
         return &.{};
     }
 
-    pub fn @"GET /api/v1/users"(_: struct {}) []const HeartbeatMessage {
+    pub fn @"GET /api/v1/users"(_: kw.http.data.Request(null)) []const HeartbeatMessage {
         return &.{};
     }
 
-    pub fn @"GET /api/v1/ok"(_: struct {}) kw.http.data.Json(
+    pub fn @"GET /api/v1/ok"(_: kw.http.data.Request(null)) kw.http.data.Json(
         HeartbeatMessage,
         &.{"200"},
     ) {
@@ -141,7 +141,7 @@ const HTTPRoutes = struct {
         };
     }
 
-    pub fn @"GET /api/v1/bad"(_: struct {}) kw.http.data.Json(
+    pub fn @"GET /api/v1/bad"(_: kw.http.data.Request(null)) kw.http.data.Json(
         HeartbeatMessage,
         &.{"400"},
     ) {
@@ -157,7 +157,7 @@ const HTTPRoutes = struct {
         };
     }
 
-    pub fn @"POST /api/v1/users"(ctx: struct { body: struct { name: []const u8 } }) HeartbeatMessage {
+    pub fn @"POST /api/v1/users"(ctx: kw.http.data.Request(struct { name: []const u8 })) HeartbeatMessage {
         return .{
             .timestamp = 0,
             .event = "user_created",
@@ -167,6 +167,8 @@ const HTTPRoutes = struct {
     }
 
     pub fn @"GET /api/v1/users/{id}"(ctx: struct {
+        request: *kw.http.Request,
+        response: *kw.http.Response,
         captures: struct { id: u64 },
     }) HeartbeatMessage {
         _ = ctx;
@@ -179,6 +181,8 @@ const HTTPRoutes = struct {
     }
 
     pub fn @"DELETE /api/v1/users/{id}"(ctx: struct {
+        request: *kw.http.Request,
+        response: *kw.http.Response,
         captures: struct { id: u64 },
     }) []const u8 {
         _ = ctx;
@@ -187,11 +191,13 @@ const HTTPRoutes = struct {
 
     // --- /api/v1/config (shared /api/v1 prefix, different leaf) ---
 
-    pub fn @"PROVIDE GET /api/v1/config"(_: struct {}) AppConfig {
+    pub fn @"PROVIDE GET /api/v1/config"(_: kw.http.data.Request(null)) AppConfig {
         return .{};
     }
 
-    pub fn @"PUT /api/v1/config"(ctx: struct { body: struct { greeting: []const u8, interval_seconds: u32 } }) AppConfig {
+    pub fn @"PUT /api/v1/config"(ctx: kw.http.data.Request(
+        struct { greeting: []const u8, interval_seconds: u32 },
+    )) AppConfig {
         return .{
             .greeting = ctx.body.greeting,
             .interval_seconds = ctx.body.interval_seconds,
@@ -200,28 +206,21 @@ const HTTPRoutes = struct {
 
     // --- /health (no shared prefix with /api) ---
 
-    pub fn @"GET /health @healthCheck"(_: struct {}) struct { status: []const u8 } {
+    pub fn @"GET /health @healthCheck"(_: kw.http.data.Request(null)) struct { status: []const u8 } {
         return .{ .status = "ok" };
     }
 
     // --- /files (wildcard capture, no shared prefix) ---
 
     pub fn @"GET /files/{*path}"(ctx: struct {
+        request: *kw.http.Request,
+        response: *kw.http.Response,
         captures: struct { path: []const u8 },
     }) struct { content: []const u8 } {
         _ = ctx;
         return .{ .content = "" };
     }
 };
-
-// const routes = blk: {
-//     const decls = @typeInfo(HTTPRoutes).@"struct".decls;
-//     var result: [decls.len]kw.http.RouteGen.Route = undefined;
-//     for (decls, 0..) |d, i| {
-//         result[i] = kw.http.RouteGen.gen(RouteContext, HTTPRoutes, d.name);
-//     }
-//     break :blk result;
-// };
 
 // ============================================================================
 // Driver Setup
