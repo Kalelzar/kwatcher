@@ -1,6 +1,7 @@
 *.json
 *.dll
 zig-out/
+zig-pkg/
 .zig-cache/
 *.~undo-tree~
 callgrind.out.*
