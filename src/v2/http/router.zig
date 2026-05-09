@@ -99,8 +99,11 @@ pub fn route(
 ) ?[]const u8 {
     const terminal, const nonterminal = terminalSegments(routes, offs);
     if (comptime terminal.len > 1) {
-        @compileLog(terminal);
-        @compileError("Conflicting routes");
+        comptime var affected: []const u8 = "";
+        inline for (terminal) |T| {
+            affected = affected ++ "\n\t" ++ T.id;
+        }
+        @compileError("Conflicting routes:" ++ affected);
     }
 
     if (comptime terminal.len == 1) {
