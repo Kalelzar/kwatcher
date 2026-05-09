@@ -22,27 +22,30 @@ pub fn StaticStrict(comptime T: type) type {
             };
         }
 
-        pub fn push(self: *Self, data: T) void {
+        pub fn push(self: *Self, data: T) *T {
             self.free.wait();
             defer self.used.post();
 
-            self.pushOne(data);
+            const i = self.pushOne(data);
+            return &self.buffer[i];
         }
 
-        pub fn tryPush(self: *Self, data: T, timeout_ns: u64) !void {
+        pub fn tryPush(self: *Self, data: T, timeout_ns: u64) !*T {
             self.free.timedWait(timeout_ns) catch return error.WouldBlock;
             defer self.used.post();
 
-            self.pushOne(data);
+            const i = self.pushOne(data);
+            return &self.buffer[i];
         }
 
-        fn pushOne(self: *Self, data: T) void {
+        fn pushOne(self: *Self, data: T) u64 {
             const bitmask: u64 = 0 -% @as(u64, 1);
             const old = @atomicRmw(u128, &self.header, .Add, 1, .acq_rel);
             const len: u128 = (old & bitmask);
             const head: u128 = (old & (@as(u128, bitmask) << 64)) >> 64;
             const index: u64 = @intCast((head + len) % self.buffer.len);
             self.buffer[index] = data;
+            return index;
         }
 
         pub fn pop(self: *Self) T {
