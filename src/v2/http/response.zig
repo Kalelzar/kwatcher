@@ -124,3 +124,42 @@ pub fn Unionize(
         },
     });
 }
+
+pub fn Request(comptime Body: ?type) type {
+    const S = std.builtin.Type.StructField;
+    comptime var fields: []const S = &.{};
+    fields = fields ++ .{S{
+        .name = "request",
+        .type = *kw.http.Request,
+        .is_comptime = false,
+        .alignment = @alignOf(*kw.http.Request),
+        .default_value_ptr = null,
+    }};
+    fields = fields ++ .{S{
+        .name = "response",
+        .type = *kw.http.Response,
+        .is_comptime = false,
+        .alignment = @alignOf(*kw.http.Response),
+        .default_value_ptr = null,
+    }};
+    if (Body) |B| {
+        fields = fields ++ .{S{
+            .name = "body",
+            .type = B,
+            .is_comptime = false,
+            .alignment = @alignOf(B),
+            .default_value_ptr = null,
+        }};
+    }
+
+    return @Type(
+        .{
+            .@"struct" = .{
+                .decls = &.{},
+                .fields = fields,
+                .is_tuple = false,
+                .layout = .auto,
+            },
+        },
+    );
+}

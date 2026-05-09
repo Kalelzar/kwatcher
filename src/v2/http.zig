@@ -314,6 +314,10 @@ pub fn DriverBuilder(
                                     var rctx: RCtx = undefined;
 
                                     const allocator: std.mem.Allocator = event.res.arena;
+
+                                    rctx.request = event.req;
+                                    rctx.response = event.res;
+
                                     if (comptime @hasField(RCtx, "body")) {
                                         const Body = @FieldType(RCtx, "body");
                                         if (comptime @hasDecl(Body, "read")) {
@@ -396,12 +400,14 @@ pub fn FilterRoutes(comptime Rs: []const type, comptime method: HttpTemplate.Par
 pub const CapabilityType = enum {
     method,
     route,
+    response,
     // TODO: query, captures, parameters?
 };
 
 pub const Capability = union(CapabilityType) {
     method: HttpTemplate.Parser.HttpVerb,
     route: HttpTemplate.RouteGen.Route,
+    response: type,
 };
 
 pub fn RouteBase(
@@ -445,7 +451,7 @@ pub fn RouteBase(
         }
 
         pub fn requires(comptime ct: anytype) void {
-            if (comptime !shared.hasKey(CapabilityType, ct)) {
+            if (comptime !meta.hasKey(CapabilityType, ct)) {
                 @compileError(
                     "Required capability '" ++ @tagName(ct) ++ "' is not supported by HTTP routes.",
                 );
@@ -474,10 +480,17 @@ pub fn RouteBase(
                     Return,
                     ev_id,
                 ),
+                inline .response => |Resp| RouteBase(
+                    m,
+                    route,
+                    HandlerFac,
+                    Resp,
+                    ev_id,
+                ),
             };
         }
 
-        pub fn query(comptime ct: anytype) @field(
+        pub fn query(comptime ct: anytype) @FieldType(
             Capability,
             @tagName(ct),
         ) {
@@ -485,6 +498,7 @@ pub fn RouteBase(
             return switch (ct) {
                 .method => m,
                 .route => route,
+                .response => Return,
                 else => unreachable,
             };
         }
@@ -535,6 +549,22 @@ pub fn RouteParser(comptime Context: type) type {
 
             const __CallContext = fargs[0].type orelse
                 @compileError("HTTP routes NEED to pass a context parameter.");
+
+            if (comptime !@hasField(__CallContext, "request")) {
+                @compileError("HTTP routes NEED to accept a `request: " ++ @typeName(Request) ++ "`\n\tRoute: " ++ route.identifier);
+            }
+
+            if (comptime @FieldType(__CallContext, "request") != *Request) {
+                @compileError("HTTP routes expect their `request` context parameter to be of type `" ++ @typeName(Request) ++ "`\n\tRoute: " ++ route.identifier);
+            }
+
+            if (comptime !@hasField(__CallContext, "response")) {
+                @compileError("HTTP routes NEED to accept a `response: " ++ @typeName(Response) ++ "`\n\tRoute: " ++ route.identifier);
+            }
+
+            if (comptime @FieldType(__CallContext, "response") != *Response) {
+                @compileError("HTTP routes expect their `response` context parameter to be of type `" ++ @typeName(Response) ++ "`\n\tRoute: " ++ route.identifier);
+            }
 
             const __Dependencies = comptime blk: {
                 var deps: [fargs.len - 1]type = undefined;
