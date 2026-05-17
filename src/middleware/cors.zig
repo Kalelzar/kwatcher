@@ -22,8 +22,8 @@ const Statuses = packed struct(u9) {
 pub const Config = struct { allowed_origins: []const []const u8 };
 
 const RType = response.Json(struct {}, &.{
-    "204",
-    "400",
+    .no_content,
+    .bad_request,
 });
 
 const PreflightRouteHandlers = struct {

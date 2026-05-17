@@ -16,7 +16,7 @@ pub const ProblemDetails = struct {
 pub fn ApiResult(
     comptime Result: type,
     comptime Error: type,
-    comptime expected_statuses: []const []const u8,
+    comptime expected_statuses: anytype,
 ) type {
     const StatusEnum = Enumize(expected_statuses);
     const StatusUnion = Unionize(
@@ -31,7 +31,7 @@ pub fn ApiResult(
 
 pub fn Json(
     comptime Result: type,
-    comptime expected_statuses: []const []const u8,
+    comptime expected_statuses: anytype,
 ) type {
     const StatusEnum = Enumize(expected_statuses);
     return struct {
@@ -65,36 +65,58 @@ pub fn Json(
     };
 }
 
-pub fn Enumize(comptime statuses: []const []const u8) type {
-    @setEvalBranchQuota(20000);
-    var fields: [statuses.len]std.builtin.Type.EnumField = undefined;
-    for (statuses, 0..) |status, i| {
-        const stringly = std.meta.stringToEnum(std.http.Status, status) orelse blk: {
+fn toStatus(status: anytype) std.http.Status {
+    const S = @TypeOf(status);
+    const res: std.http.Status = sw: switch (S) {
+        []const u8, []u8 => std.meta.stringToEnum(std.http.Status, status) orelse blk: {
             const int = std.fmt.parseInt(u10, status, 10) catch {
                 @compileError("Expected status to be either the canonical name or a status code.");
             };
             const numerically: std.http.Status = @enumFromInt(int);
             break :blk numerically;
-        };
-
-        fields[i] = .{
-            .name = @tagName(stringly),
-            .value = @intFromEnum(stringly),
-        };
-    }
-
-    return @Type(.{
-        .@"enum" = .{
-            .decls = &.{},
-            .fields = &fields,
-            .tag_type = u10,
-            .is_exhaustive = true,
         },
-    });
+        usize, u64, u32, u16, isize, i64, i32, i16, comptime_int => @enumFromInt(status),
+        @Type(.enum_literal) => @field(std.http.Status, @tagName(status)),
+        else => {
+            const ti = @typeInfo(S);
+            switch (ti) {
+                .array => |a| {
+                    if (a.child == u8) {
+                        continue :sw []const u8;
+                    }
+                },
+                else => @compileError("Unsupported status type: " ++ @typeName(S)),
+            }
+        },
+    };
+    return res;
+}
+
+pub fn Enumize(comptime statuses: anytype) type {
+    @setEvalBranchQuota(20000);
+    comptime {
+        var fields: [statuses.len]std.builtin.Type.EnumField = undefined;
+        for (statuses, 0..) |status, i| {
+            const stringly = toStatus(status);
+            fields[i] = .{
+                .name = @tagName(stringly),
+                .value = @intFromEnum(stringly),
+            };
+        }
+
+        return @Type(.{
+            .@"enum" = .{
+                .decls = &.{},
+                .fields = &fields,
+                .tag_type = u10,
+                .is_exhaustive = true,
+            },
+        });
+    }
 }
 
 pub fn Unionize(
-    comptime statuses: []const []const u8,
+    comptime statuses: anytype,
     comptime Tag: type,
     comptime Result: type,
     comptime Error: type,
@@ -102,13 +124,7 @@ pub fn Unionize(
     @setEvalBranchQuota(5000);
     var fields: [statuses.len]std.builtin.Type.UnionField = undefined;
     for (statuses, 0..) |status, i| {
-        const stringly = std.meta.stringToEnum(std.http.Status, status) orelse blk: {
-            const int = std.fmt.parseInt(u10, status, 10) catch {
-                @compileError("Expected status to be either the canonical name or a status code.");
-            };
-            const numerically: std.http.Status = @enumFromInt(int);
-            break :blk numerically;
-        };
+        const stringly = toStatus(status);
 
         // God only knows if this is correct
         const T = switch (@intFromEnum(stringly)) {
@@ -137,6 +153,10 @@ pub fn Unionize(
 }
 
 pub fn Request(comptime Body: ?type) type {
+    return FullRequest(Body, null);
+}
+
+pub fn FullRequest(comptime Body: ?type, comptime Query: ?type) type {
     const S = std.builtin.Type.StructField;
     comptime var fields: []const S = &.{};
     fields = fields ++ .{S{
@@ -159,6 +179,15 @@ pub fn Request(comptime Body: ?type) type {
             .type = B,
             .is_comptime = false,
             .alignment = @alignOf(B),
+            .default_value_ptr = null,
+        }};
+    }
+    if (Query) |Q| {
+        fields = fields ++ .{S{
+            .name = "query",
+            .type = Q,
+            .is_comptime = false,
+            .alignment = @alignOf(Q),
             .default_value_ptr = null,
         }};
     }

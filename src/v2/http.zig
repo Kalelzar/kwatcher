@@ -336,10 +336,49 @@ pub fn DriverBuilder(
                                     }
                                     if (comptime @hasField(RCtx, "query")) {
                                         const Query = @FieldType(RCtx, "query");
-                                        _ = Query;
-                                        var it = event.req.query().iterator();
-                                        while (it.next()) |kv| {
-                                            _ = kv;
+                                        rctx.query = std.mem.zeroInit(Query, .{});
+                                        const required_params = comptime blk: {
+                                            var i = 0;
+                                            for (@typeInfo(Query).@"struct".fields) |field| {
+                                                const is_required = field.defaultValue() == null;
+                                                i += if (is_required) 1 else 0;
+                                            }
+                                            break :blk i;
+                                        };
+                                        var set_params: usize = 0;
+                                        var q = try event.req.query();
+                                        if (q.len < required_params) {
+                                            // TODO: Better error messaging.
+                                            return error.BadQuery;
+                                        }
+                                        var it = q.iterator();
+                                        outer: while (it.next()) |kv| {
+                                            inline for (std.meta.fields(Query)) |field| {
+                                                if (std.mem.eql(u8, field.name, kv.key)) {
+                                                    switch (field.type) {
+                                                        []const u8, []u8 => {
+                                                            @field(rctx.query, field.name) = kv.value;
+                                                            set_params += 1;
+                                                            continue :outer;
+                                                        },
+                                                        else => |t| {
+                                                            if (comptime @hasDecl(t, "deserialize")) {
+                                                                @field(rctx.query, field.name) = t.deserialize(kv.value);
+                                                                set_params += 1;
+                                                                continue :outer;
+                                                            } else {
+                                                                @compileError("(TODO better error): Invalid query type. Not serializable.");
+                                                            }
+                                                        },
+                                                    }
+                                                }
+                                            }
+                                            // TODO: better error
+                                            return error.InvalidQueryParameter;
+                                        }
+                                        if (set_params < required_params) {
+                                            // TODO: better error
+                                            return error.BadQuery;
                                         }
                                     }
                                     if (comptime @hasField(RCtx, "captures")) {
