@@ -130,7 +130,7 @@ const HTTPRoutes = struct {
 
     pub fn @"GET /api/v1/ok"(_: kw.http.data.Request(null)) kw.http.data.Json(
         HeartbeatMessage,
-        &.{"200"},
+        .{.ok},
     ) {
         return .{
             .value = .{
@@ -146,7 +146,7 @@ const HTTPRoutes = struct {
 
     pub fn @"GET /api/v1/bad"(_: kw.http.data.Request(null)) kw.http.data.Json(
         HeartbeatMessage,
-        &.{"400"},
+        &.{400},
     ) {
         return .{
             .value = .{
@@ -194,8 +194,36 @@ const HTTPRoutes = struct {
 
     // --- /api/v1/config (shared /api/v1 prefix, different leaf) ---
 
-    pub fn @"PROVIDE GET /api/v1/config"(_: kw.http.data.Request(null)) AppConfig {
-        return .{};
+    pub fn @"PROVIDE GET /api/v1/config"(
+        rq: kw.http.data.FullRequest(
+            null,
+            struct { key: []const u8 },
+        ),
+    ) kw.http.data.Json(
+        struct { key: []const u8, value: []const u8 },
+        &.{ .ok, .bad_request },
+    ) {
+        if (rq.query.key.len == 0) {
+            return .{
+                .value = .{
+                    .bad_request = .{
+                        .type = error.EmptyQueryParam,
+                        .title = "Empty query parameter",
+                        .details = "Parameter 'key' is empty",
+                        .instance = "TODO",
+                    },
+                },
+            };
+        }
+
+        return .{
+            .value = .{
+                .ok = .{
+                    .key = rq.query.key,
+                    .value = "value",
+                },
+            },
+        };
     }
 
     pub fn @"PUT /api/v1/config"(ctx: kw.http.data.Request(
