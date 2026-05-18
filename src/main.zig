@@ -174,13 +174,30 @@ const HTTPRoutes = struct {
         response: *kw.http.Response,
         captures: struct { id: u64 },
     }) HeartbeatMessage {
-        _ = ctx;
         return .{
             .timestamp = 0,
             .event = "user_fetched",
-            .count = 0,
+            .count = ctx.captures.id,
             .greeting = "",
         };
+    }
+
+    pub fn @"GET /api/v1/users/{id}/name"(ctx: struct {
+        request: *kw.http.Request,
+        response: *kw.http.Response,
+        captures: struct { id: u64 },
+    }) []const u8 {
+        _ = ctx;
+        return "TODO";
+    }
+
+    pub fn @"GET /api/v1/users/{id}/id"(ctx: struct {
+        request: *kw.http.Request,
+        response: *kw.http.Response,
+        captures: struct { id: u64 },
+    }) []const u8 {
+        _ = ctx;
+        return "TODO";
     }
 
     pub fn @"DELETE /api/v1/users/{id}"(ctx: struct {
@@ -194,7 +211,7 @@ const HTTPRoutes = struct {
 
     // --- /api/v1/config (shared /api/v1 prefix, different leaf) ---
 
-    pub fn @"PROVIDE GET /api/v1/config"(
+    pub fn @"GET /api/v1/config"(
         rq: kw.http.data.FullRequest(
             null,
             struct { key: []const u8 },
