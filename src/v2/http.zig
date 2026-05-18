@@ -74,6 +74,7 @@ pub fn DriverBuilder(
                     id: RouteKeys,
                     req: *httpz.Request,
                     res: *httpz.Response,
+                    captures: []const []const u8,
                     cond: *std.Thread.Condition,
                     ready: *State,
 
@@ -180,14 +181,22 @@ pub fn DriverBuilder(
                             switch (method) {
                                 inline else => |m| {
                                     const f = comptime FilterRoutes(Routes, m);
-                                    const match = Router.route(f, 0, req.url.path[1..], 0);
+                                    var buf: [16][]const u8 = undefined;
+                                    const match = Router.route(
+                                        f,
+                                        0,
+                                        &buf,
+                                        0,
+                                        req.url.path[1..],
+                                        0,
+                                    );
 
                                     if (match == null) {
                                         return error.NotFound;
                                     }
 
                                     // FIXME: This will be returned as an enum directly after the rest of the refactor
-                                    const id = std.meta.stringToEnum(RouteKeys, match.?).?;
+                                    const id = std.meta.stringToEnum(RouteKeys, match.?.key).?;
 
                                     var cond = std.Thread.Condition{};
                                     var mut = std.Thread.Mutex{};
@@ -203,6 +212,8 @@ pub fn DriverBuilder(
                                                 .req = req,
                                                 .res = res,
                                                 .id = id,
+                                                // FIXME: Yikes
+                                                .captures = try res.arena.dupe([]const u8, match.?.captures),
                                                 .cond = &cond,
                                                 .ready = &ready,
                                             },
@@ -382,7 +393,49 @@ pub fn DriverBuilder(
                                         }
                                     }
                                     if (comptime @hasField(RCtx, "captures")) {
-                                        //TODO: @compileError("Captures are not implemented");
+                                        const Captures = @FieldType(RCtx, "captures");
+                                        rctx.captures = std.mem.zeroInit(Captures, .{});
+                                        const inner = R.inner;
+                                        comptime var set_captures: usize = 0;
+                                        outer: inline for (inner.path) |segment| {
+                                            switch (segment) {
+                                                .capture => |c| {
+                                                    const CType = @FieldType(Captures, c.name);
+                                                    switch (CType) {
+                                                        []const u8, []u8 => {
+                                                            @field(rctx.captures, c.name) = event.captures[set_captures];
+                                                            set_captures += 1;
+                                                            continue :outer;
+                                                        },
+                                                        u64,
+                                                        u32,
+                                                        u16,
+                                                        u8,
+                                                        i64,
+                                                        i32,
+                                                        i16,
+                                                        i8,
+                                                        usize,
+                                                        isize,
+                                                        => |t| {
+                                                            @field(rctx.captures, c.name) = try std.fmt.parseInt(t, event.captures[set_captures], 10);
+                                                            set_captures += 1;
+                                                            continue :outer;
+                                                        },
+                                                        else => |t| {
+                                                            if (comptime @hasDecl(t, "deserialize")) {
+                                                                @field(rctx.query, c.name) = t.deserialize(event.captures[set_captures]);
+                                                                set_captures += 1;
+                                                                continue :outer;
+                                                            } else {
+                                                                @compileError("(TODO better error): Invalid query type. Not serializable.");
+                                                            }
+                                                        },
+                                                    }
+                                                },
+                                                else => {},
+                                            }
+                                        }
                                     }
 
                                     const result = try @call(

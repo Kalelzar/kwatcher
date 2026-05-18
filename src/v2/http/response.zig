@@ -53,13 +53,13 @@ pub fn Json(
             }
         }
 
-        pub fn Extend(new_statuses: []const []const u8) type {
+        pub fn Extend(new_statuses: anytype) type {
             const Eql = struct {
-                pub fn eql(a: []const u8, b: []const u8) bool {
-                    return std.mem.eql(u8, a, b);
+                pub fn eql(a: anytype, b: anytype) bool {
+                    return toStatus(a) == toStatus(b);
                 }
             };
-            const stats = kw.shared.SetUnionEql([]const u8, expected_statuses, new_statuses, Eql);
+            const stats = kw.shared.SetUnionEql(@TypeOf(expected_statuses[0]), expected_statuses, new_statuses, Eql);
             return Json(Result, stats);
         }
     };
