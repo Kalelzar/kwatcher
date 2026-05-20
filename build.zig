@@ -79,6 +79,7 @@ pub fn build(b: *std.Build) !void {
 
     const tests = b.addTest(.{
         .root_module = kwatcher_library,
+        .use_llvm = true,
     });
 
     // Artifacts:
@@ -95,6 +96,7 @@ pub fn build(b: *std.Build) !void {
         .name = "kwatcher",
         .root_module = kwatcher_library,
         .linkage = .static,
+        .use_llvm = true,
     });
     if (build_static_library) {
         b.installArtifact(lib);
@@ -126,11 +128,14 @@ pub fn build(b: *std.Build) !void {
 
     const test_step = b.step("test", "Run the unit tests.");
     test_step.dependOn(&run_tests.step);
+    lib.step.dependOn(&run_tests.step);
+
     // - fmt
     const fmt_step = b.step("fmt", "Check formatting");
     fmt_step.dependOn(&fmt.step);
     check.dependOn(fmt_step);
     b.getInstallStep().dependOn(fmt_step);
+
     // - docs
     const docs_step = b.step("docs", "Generate docs");
     docs_step.dependOn(&install_docs.step);

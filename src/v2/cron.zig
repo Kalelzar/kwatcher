@@ -109,13 +109,13 @@ pub fn DriverBuilder(
                                     error.WouldBlock => {
                                         // FIXME: Words
                                         // Ideally we would want to be able to do:
+                                        // self.parent.handle(.trigger_job, ev, ???);
                                         // But we can't get an injector for our handler at the
                                         // moment.
                                         // We could accept an injector from outside but there
                                         // is no gurantee that it was built for our invariant.
                                         // The dependency system should allow us to request injectors for other uses.
                                         // That's the fix.
-                                        // self.parent.handle(.trigger_job, ev, ???);
                                         @panic("Preemptive execution is not implemented!");
                                     },
                                     else => return e,
@@ -201,60 +201,84 @@ pub fn DriverBuilder(
                         }
 
                         fn watch_inner(self: *@This()) void {
+                            var reserve: ?Schedule = null;
                             while (@atomicLoad(bool, &self.should_run, .acquire)) {
-                                self.mutex.lock();
-                                var sch = self.schedules.removeOrNull();
+                                self.watch_failing(&reserve) catch |e| {
+                                    log.err("Cron loop failed with: {t}", .{e});
+                                };
+                            }
+                        }
+
+                        fn watch_failing(self: *@This(), reserve: *?Schedule) !void {
+                            self.mutex.lock();
+                            var sch = self.schedules.removeOrNull();
+                            {
+                                defer self.mutex.unlock();
                                 if (sch == null) {
                                     self.cond.wait(&self.mutex);
+                                    return;
+                                } else {
+                                    if (reserve.*) |r| {
+                                        defer reserve.* = null;
+                                        self.schedules.add(r) catch @panic("Potential unsynchronized write. Cron queue was filled while under lock.");
+                                    }
                                 }
-                                self.mutex.unlock();
+                            }
 
-                                var now = std.time.timestamp();
-                                const name = switch (sch.?.target) {
-                                    .route => |r| @tagName(r),
-                                    .event => |e| @tagName(e.event_type),
+                            var now = std.time.timestamp();
+                            const name = switch (sch.?.target) {
+                                .route => |r| @tagName(r),
+                                .event => |e| @tagName(e.event_type),
+                            };
+                            while (now < sch.?.run_at) {
+                                log.info("Job '{s}' to fire in {d} seconds.", .{ name, @max(0, sch.?.run_at - now) });
+                                self.mutex.lock();
+                                self.cond.timedWait(&self.mutex, @as(u64, @intCast(@max(0, sch.?.run_at - now))) * std.time.ns_per_s) catch {
+                                    // We are using timeout to signal when we should run next rather than an error condition
                                 };
-                                while (now < sch.?.run_at) {
-                                    log.info("Job '{s}' to fire in {d} seconds.", .{ name, @max(0, sch.?.run_at - now) });
-                                    self.mutex.lock();
-                                    self.cond.timedWait(&self.mutex, @as(u64, @intCast(@max(0, sch.?.run_at - now))) * std.time.ns_per_s) catch {};
-                                    self.mutex.unlock();
-                                    if (!@atomicLoad(bool, &self.should_run, .acquire))
-                                        return;
-                                    now = std.time.timestamp();
-                                }
-                                if (!sch.?.oneshot) {
-                                    const next = calcNext(@max(now, sch.?.run_at), sch.?.schedule);
-                                    log.info("Scheduling job '{s}' to fire in {d} seconds.", .{ name, @max(0, next - now) });
-                                    sch.?.run_at = next;
-                                    self.mutex.lock();
-                                    self.schedules.add(sch.?) catch unreachable; //FIXME: Yikes
-                                    self.mutex.unlock();
-                                }
-                                switch (sch.?.target) {
-                                    .route => |route| {
-                                        const data = @unionInit(EV, @tagName(key), .{
-                                            .trigger_job = .{
-                                                .route = route,
-                                            },
-                                        });
-                                        while (true) {
-                                            _ = self.queue.?.push(.{
-                                                .event_type = .trigger_job,
-                                                .event_data = data,
-                                            });
-                                            break;
-                                        }
-                                        log.info("Job {s} queued successfully.", .{name});
+                                // FIXME: We have to add the schedule back and get a new one.
+                                // We might ahve been woken up because a new schedule was added and that one might need to fire sooner
+                                self.mutex.unlock();
+                                if (!@atomicLoad(bool, &self.should_run, .acquire))
+                                    return;
+                                now = std.time.timestamp();
+                            }
+                            if (!sch.?.oneshot) {
+                                const next = calcNext(@max(now, sch.?.run_at), sch.?.schedule);
+                                log.info("Scheduling job '{s}' to fire in {d} seconds.", .{ name, @max(0, next - now) });
+                                sch.?.run_at = next;
+                                self.mutex.lock();
+                                defer self.mutex.unlock();
+                                // This can OOM but is unlikely
+                                // because we should have the original slot left
+                                // so long as it hasn't been filled with a oneshot.
+                                // That said, dropping a schedule is not an option here.
+                                // We are going to pop another one off right after
+                                // so space will be created that we can reuse.
+                                self.schedules.add(sch.?) catch |e| switch (e) {
+                                    error.OutOfMemory => {
+                                        reserve.* = sch;
                                     },
-                                    .event => |event| {
-                                        while (true) {
-                                            _ = self.queue.?.push(event);
-                                            break;
-                                        }
-                                        log.info("Event {s} queued successfully.", .{name});
-                                    },
-                                }
+                                    else => return e,
+                                };
+                            }
+                            switch (sch.?.target) {
+                                .route => |route| {
+                                    const data = @unionInit(EV, @tagName(key), .{
+                                        .trigger_job = .{
+                                            .route = route,
+                                        },
+                                    });
+                                    _ = self.queue.?.push(.{
+                                        .event_type = .trigger_job,
+                                        .event_data = data,
+                                    });
+                                    log.info("Job {s} queued successfully.", .{name});
+                                },
+                                .event => |event| {
+                                    _ = self.queue.?.push(event);
+                                    log.info("Event {s} queued successfully.", .{name});
+                                },
                             }
                         }
 
@@ -336,7 +360,7 @@ pub fn RouteBase(
         pub fn wrap(comptime NextHandlerFac: anytype) type {
             return RouteBase(
                 schedule,
-                NextHandlerFac(HandlerFac).make, // FIXME: This is very gross.
+                NextHandlerFac(HandlerFac).make,
                 parsed_id,
             );
         }
@@ -529,8 +553,78 @@ test "Calculate next: 0 */5 * * * *" {
     );
 }
 
+test "Calculate next: 30 */5 * * * * (second-level offset)" {
+    const template = comptime CronTemplate.Lexer.lex("job 30 */5 * * * *");
+    const ast = comptime CronTemplate.Parser.parse(template);
+    const schedule = comptime CronTemplate.VM.evalToplevel(ast);
+
+    // Second 30 of minute 0
+    try std.testing.expectEqual(
+        30,
+        calcNext(0, schedule),
+    );
+
+    // Second 30 of minute 5
+    try std.testing.expectEqual(
+        330,
+        calcNext(30, schedule),
+    );
+
+    // From middle of minute 5, still lands on second 30
+    try std.testing.expectEqual(
+        330,
+        calcNext(300, schedule),
+    );
+
+    // Second 30 of minute 10
+    try std.testing.expectEqual(
+        630,
+        calcNext(330, schedule),
+    );
+}
+
+test "Calculate next: 0 0 0 1 * * (monthly on the 1st)" {
+    const template = comptime CronTemplate.Lexer.lex("job 0 0 0 1 * *");
+    const ast = comptime CronTemplate.Parser.parse(template);
+    const schedule = comptime CronTemplate.VM.evalToplevel(ast);
+
+    const jan1: i64 = 0;
+    const feb1: i64 = 31 * 24 * 3600;
+    const mar1: i64 = (31 + 28) * 24 * 3600;
+    const apr1: i64 = (31 + 28 + 31) * 24 * 3600;
+
+    // Jan 1 00:00:00 → Feb 1 00:00:00
+    try std.testing.expectEqual(feb1, calcNext(jan1, schedule));
+
+    // Feb 1 00:00:00 → Mar 1 00:00:00
+    try std.testing.expectEqual(mar1, calcNext(feb1, schedule));
+
+    // Mar 1 00:00:00 → Apr 1 00:00:00
+    try std.testing.expectEqual(apr1, calcNext(mar1, schedule));
+
+    // Jan 31 23:59:59 → Feb 1 00:00:00
+    try std.testing.expectEqual(feb1, calcNext(feb1 - 1, schedule));
+}
+
+test "Calculate next: 0 0 12 * * * (daily at noon)" {
+    const template = comptime CronTemplate.Lexer.lex("job 0 0 12 * * *");
+    const ast = comptime CronTemplate.Parser.parse(template);
+    const schedule = comptime CronTemplate.VM.evalToplevel(ast);
+
+    const noon: i64 = 12 * 3600;
+
+    // Midnight → same day noon
+    try std.testing.expectEqual(noon, calcNext(0, schedule));
+
+    // Noon → next day noon
+    try std.testing.expectEqual(noon + 24 * 3600, calcNext(noon, schedule));
+
+    // 1pm → next day noon
+    try std.testing.expectEqual(noon + 24 * 3600, calcNext(13 * 3600, schedule));
+}
+
 fn nextOffset(schedule: CronTemplate.VM.Schedule, timestamp: i64) i64 {
-    // FIXME: This is probably incorrect. But my brain hurty.
+    // NOTE: This is probably incorrect. But my brain hurty.
     const epoch = std.time.epoch.EpochSeconds{
         .secs = @intCast(timestamp),
     };
@@ -571,7 +665,7 @@ fn nextOffset(schedule: CronTemplate.VM.Schedule, timestamp: i64) i64 {
         // All months have at least 28 days so this is safe.
         // This lets us hone in on the correct date with the next iteration without
         // complex date calculations.
-        const total = @as(i64, 28) * mthoffset;
+        const total = @as(i64, 28) * mthoffset * 24 * 60 * 60;
 
         return total - @as(i64, day) * 24 * 60 * 60 - @as(i64, hour) * 60 * 60 - @as(i64, minute) * 60 - @as(i64, second);
     }
@@ -581,7 +675,7 @@ fn nextOffset(schedule: CronTemplate.VM.Schedule, timestamp: i64) i64 {
     }
 
     if (doffset >= daysInMonth) {
-        return (@as(i64, daysInMonth) + 1 - day) * 24 * 60 * 60;
+        return (@as(i64, daysInMonth) - day) * 24 * 60 * 60;
     }
 
     if (hoffset >= 23) {
