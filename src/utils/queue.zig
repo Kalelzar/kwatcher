@@ -9,14 +9,17 @@ pub fn StaticStrict(comptime T: type) type {
         free: std.Thread.Semaphore,
         buffer: []T,
         header: u128 align(16), // head u64 | len u64
+        occupancy: []u1,
 
         const Self = @This();
 
         /// Initialize a new queue backed by a buffer.
-        pub fn init(buffer: []T) Self {
+        pub fn init(buffer: []T, occupancy_buffer: []u1) Self {
+            std.debug.assert(buffer.len == occupancy_buffer.len);
             return .{
                 .header = 0,
                 .buffer = buffer,
+                .occupancy = occupancy_buffer,
                 .used = .{ .permits = 0 },
                 .free = .{ .permits = buffer.len },
             };
@@ -44,8 +47,12 @@ pub fn StaticStrict(comptime T: type) type {
             const len: u128 = (old & bitmask);
             const head: u128 = (old & (@as(u128, bitmask) << 64)) >> 64;
             const index: u64 = @intCast((head + len) % self.buffer.len);
-            self.buffer[index] = data;
-            return index;
+            while (true) {
+                if (@atomicLoad(u1, &self.occupancy[index], .acquire) == 1) continue;
+                self.buffer[index] = data;
+                @atomicStore(u1, &self.occupancy[index], 1, .release);
+                return index;
+            }
         }
 
         pub fn pop(self: *Self) T {
@@ -68,12 +75,15 @@ pub fn StaticStrict(comptime T: type) type {
             while (true) {
                 const len: u128 = old & bitmask;
                 const head: u128 = (old & (@as(u128, bitmask) << 64)) >> 64;
-                const slot = self.buffer[@intCast(head % self.buffer.len)];
+                const index: usize = @intCast(head % self.buffer.len);
+                if (@atomicLoad(u1, &self.occupancy[index], .acquire) == 0) continue;
+                const slot = self.buffer[index];
                 const new = (len - 1) | ((head +% 1) << 64);
                 if (@cmpxchgWeak(u128, &self.header, old, new, .acq_rel, .acquire)) |next| {
                     old = next;
                     continue;
                 }
+                @atomicStore(u1, &self.occupancy[index], 0, .release);
                 return slot;
             }
         }

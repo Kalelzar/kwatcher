@@ -80,14 +80,15 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
             const fs = try kwev.inscribe(&f, D);
             try f.finalize(fs);
 
+            const size = 1024;
             return .{
                 .should_run = true,
                 .allocator = alloc,
                 .queue = .init(try alloc.alignedAlloc(
                     E,
                     std.mem.Alignment.@"16",
-                    1024,
-                )),
+                    size,
+                ), try alloc.alloc(u1, size)),
                 .deps = context.become(Deps),
                 .consumers = consumers,
             };
