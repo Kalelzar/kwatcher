@@ -99,6 +99,8 @@ pub fn DriverBuilder(
                     const E = Event(ET, EV);
                     return struct {
                         queue: ?*MPMCQueue(E) = null,
+                        //TODO: This should be replaced with a custom event loop as httpz does not support
+                        // our use case very well and requires some ugly cludges.
                         server: ?*httpz.Server(*Handler) = null,
 
                         const Handler = struct {
@@ -176,12 +178,32 @@ pub fn DriverBuilder(
                         }
 
                         pub fn handleRequest(self: *@This(), req: *httpz.Request, res: *httpz.Response) !void {
-                            const method: HttpTemplate.Parser.HttpVerb = @enumFromInt(@intFromEnum(req.method));
+                            const method: HttpTemplate.Parser.HttpVerb = switch (req.method) {
+                                .CONNECT => .connect,
+                                .DELETE => .delete,
+                                .GET => .get,
+                                .HEAD => .head,
+                                .OPTIONS => .options,
+                                .OTHER => {
+                                    //FIXME: TRACE
+                                    return error.MethodNotAllowed;
+                                },
+                                .PATCH => .patch,
+                                .POST => .post,
+                                .PUT => .put,
+                            };
 
                             switch (method) {
                                 inline else => |m| {
                                     const f = comptime FilterRoutes(Routes, m);
-                                    var buf: [16][]const u8 = undefined;
+                                    const depth = comptime blk: {
+                                        var max: u64 = 0;
+                                        for (f) |route| {
+                                            max = @max(max, route.inner.path.len); // Over-allocating but reduces backwards branches. FIXME: This can be improved by shrink-fitting
+                                        }
+                                        break :blk max;
+                                    };
+                                    var buf: [depth][]const u8 = undefined;
                                     const match = Router.route(
                                         f,
                                         0,
@@ -228,21 +250,17 @@ pub fn DriverBuilder(
                                         std.time.ns_per_s * 5,
                                     ) catch return error.QueueFull;
 
-                                    const timed_out = blk: {
-                                        while (@atomicLoad(State, &ready, .acquire) != .done) {
-                                            cond.timedWait(&mut, std.time.ns_per_s * 30) catch break :blk true;
-                                        }
-                                        break :blk false;
-                                    };
+                                    //FIXME: This should be able to time out.
+                                    while (@atomicLoad(State, &ready, .acquire) != .done) {
+                                        cond.wait(&mut);
+                                    }
 
-                                    if (timed_out and
-                                        @atomicLoad(State, &ready, .acquire) == .waiting)
-                                    {
+                                    if (@atomicLoad(State, &ready, .acquire) == .waiting) {
+                                        @branchHint(.cold); // Right now this will never happen
                                         slot.event_type = .noop;
                                         return error.Timeout;
-                                    } else if (timed_out and
-                                        @atomicLoad(State, &ready, .acquire) == .accepted)
-                                    {
+                                    } else if (@atomicLoad(State, &ready, .acquire) == .accepted) {
+                                        @branchHint(.cold); // Right now this will never happen
                                         while (@atomicLoad(State, &ready, .acquire) != .done) {
                                             // FIXME: This should also have a timeout
                                             // as is if the request takes forever to finish
@@ -418,17 +436,17 @@ pub fn DriverBuilder(
                                                         usize,
                                                         isize,
                                                         => |t| {
-                                                            @field(rctx.captures, c.name) = try std.fmt.parseInt(t, event.captures[set_captures], 10);
+                                                            @field(rctx.captures, c.name) = std.fmt.parseInt(t, event.captures[set_captures], 10) catch return error.NotFound;
                                                             set_captures += 1;
                                                             continue :outer;
                                                         },
                                                         else => |t| {
                                                             if (comptime @hasDecl(t, "deserialize")) {
-                                                                @field(rctx.query, c.name) = t.deserialize(event.captures[set_captures]);
+                                                                @field(rctx.captures, c.name) = t.deserialize(event.captures[set_captures]) catch return error.NotFound;
                                                                 set_captures += 1;
                                                                 continue :outer;
                                                             } else {
-                                                                @compileError("(TODO better error): Invalid query type. Not serializable.");
+                                                                @compileError("(TODO better error): Invalid capture type. Not serializable.");
                                                             }
                                                         },
                                                     }

@@ -133,10 +133,10 @@ pub fn route(
 
     if (comptime terminal.len == 1) {
         if (runtime_offs >= incoming.len) {
-            std.log.debug("Matched: {s}", .{terminal[0].inner.identifier});
-            for (0..capture_index) |i| {
-                std.log.debug("\t Capture {d}: {s}", .{ i, capture_buffer[i] });
-            }
+            // std.log.debug("Matched: {s}", .{terminal[0].inner.identifier});
+            // for (0..capture_index) |i| {
+            //     // std.log.debug("\t Capture {d}: {s}", .{ i, capture_buffer[i] });
+            // }
             return .{
                 .key = terminal[0].inner.identifier,
                 .captures = capture_buffer[0..capture_index],
@@ -145,7 +145,7 @@ pub fn route(
     }
 
     if (runtime_offs >= incoming.len) {
-        std.log.debug("Reached end of url without match", .{});
+        // std.log.debug("Reached end of url without match", .{});
         return null;
     }
 
@@ -156,12 +156,12 @@ pub fn route(
     const state: RouteState = .static;
     branch: switch (state) {
         .static => {
-            inline for (groups.static) |g| {
-                std.log.debug("[{d}] Group: {s}", .{ g.routes.len, g.prefix });
-            }
+            // inline for (groups.static) |g| {
+            //     // std.log.debug("[{d}] Group: {s}", .{ g.routes.len, g.prefix });
+            // }
 
-            if (groups.static.len == 0) {
-                std.log.debug("No more static groups. Bailing...", .{});
+            if (comptime groups.static.len == 0) {
+                // std.log.debug("No more static groups. Bailing...", .{});
                 continue :branch .capture;
             }
 
@@ -169,16 +169,16 @@ pub fn route(
 
             const match = map.get(raw);
             if (match == null) {
-                std.log.debug(
-                    "[{d}..{d}]Could not match {s} | Tried segment {s}",
-                    .{ runtime_offs, boundary_offs, incoming, raw },
-                );
+                // std.log.debug(
+                //     "[{d}..{d}]Could not match {s} | Tried segment {s}",
+                //     .{ runtime_offs, boundary_offs, incoming, raw },
+                // );
                 continue :branch .capture;
             }
 
             switch (match.?) {
                 inline else => |m| {
-                    std.log.debug("Segment {d} matched against {t}", .{ offs, m });
+                    // std.log.debug("Segment {d} matched against {t}", .{ offs, m });
                     const g = @intFromEnum(m) -| 1;
                     return route(
                         groups.static[g].routes,
@@ -187,18 +187,18 @@ pub fn route(
                         capture_index,
                         incoming,
                         runtime_offs + groups.static[g].prefix.len + 1,
-                    );
+                    ) orelse continue :branch .capture;
                 },
             }
         },
         .capture => {
-            std.log.debug(
-                "[{d}] Capture Group: {s}",
-                .{ groups.capture.len, raw },
-            );
+            // std.log.debug(
+            //     "[{d}] Capture Group: {s}",
+            //     .{ groups.capture.len, raw },
+            // );
 
-            if (groups.capture.len == 0) {
-                std.log.debug("No more captures. Bailing...", .{});
+            if (comptime groups.capture.len == 0) {
+                // std.log.debug("No more captures. Bailing...", .{});
                 return null;
             }
 
