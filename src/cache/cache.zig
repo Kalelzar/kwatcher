@@ -196,7 +196,6 @@ pub fn autoCacheWithContexts(
                 break :blk hashingStrategy(InvList, 0, in.*);
             };
 
-            // FIXME: Do not require the contexts twice.
             inline for (0..Context.len) |i| {
                 var ctx = C.contexts[i] orelse blk: {
                     @branchHint(.cold);

@@ -323,57 +323,7 @@ const Scheduler = drivers.SchedulerMap();
 
 var config_slot: Config = undefined;
 
-// const router = @import("v2/http/router.zig");
-
-// pub fn Filter(comptime rs: []const kw.http.RouteGen.Route, comptime m: kw.http.Parser.HttpVerb) []const kw.http.RouteGen.Route {
-//     const res: []const kw.http.RouteGen.Route = comptime blk: {
-//         var res: []const kw.http.RouteGen.Route = &.{};
-//         var i: u64 = 0;
-//         for (rs) |r| {
-//             if (r.method == m) {
-//                 res = res ++ .{r};
-//                 i += 1;
-//             }
-//         }
-
-//         break :blk res[0..i];
-//     };
-
-//     return res;
-// }
-
-// const Handler = struct {
-//     pub fn handle(_: *Handler, req: *httpz.Request, res: *httpz.Response) void {
-//         std.log.info("{t} {s}", .{ req.method, req.url.path });
-
-//         const method: kw.http.Parser.HttpVerb = @enumFromInt(@intFromEnum(req.method));
-
-//         switch (method) {
-//             inline else => |m| {
-//                 const f = comptime Filter(&routes, m);
-//                 const match = router.route(f, 0, req.url.path[1..], 0);
-
-//                 res.body = match orelse blk: {
-//                     res.status = 404;
-//                     break :blk "not found";
-//                 };
-//             },
-//         }
-//     }
-// };
-
 pub fn juicyMain(allocator: std.mem.Allocator) !void {
-    // var handler = Handler{};
-    // var server = try httpz.Server(*Handler).init(
-    //     allocator,
-    //     .{ .address = .localhost(2000) },
-    //     &handler,
-    // );
-    // defer server.deinit();
-    // defer server.stop();
-
-    // try server.listen();
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -435,7 +385,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
 
     // Create and start the server
     var server = try kw.server.Server(@TypeOf(deps), drivers)
-        .init(allocator, deps, 2); // 2 consumer threads
+        .init(allocator, deps, 4); // 2 consumer threads
     defer server.deinit();
 
     log.info("Starting example server...", .{});
