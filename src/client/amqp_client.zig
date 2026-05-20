@@ -378,11 +378,11 @@ const Connection = struct {
 
                             return .{
                                 .allocator = self.allocator,
-                                .exchange = try self.allocator.dupe(u8, meta.exchange.slice() orelse unreachable),
-                                .routing_key = try self.allocator.dupe(u8, meta.routing_key.slice() orelse unreachable),
+                                .exchange = try self.allocator.dupe(u8, meta.exchange.slice() orelse return error.MissingExchange),
+                                .routing_key = try self.allocator.dupe(u8, meta.routing_key.slice() orelse return error.MissingRoutingKey),
                                 .message = .{
                                     .basic_properties = try dupeProperties(self.allocator, &message.properties),
-                                    .body = try self.allocator.dupe(u8, message.body.slice() orelse unreachable),
+                                    .body = try self.allocator.dupe(u8, message.body.slice() orelse return error.MissingBody),
                                 },
                             };
                         }
