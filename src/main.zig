@@ -28,6 +28,7 @@ const log = std.log.scoped(.example);
 pub const Config = struct {
     driver: struct {
         amqp: kw.config.BaseConfig,
+        http: kw.http.Config,
     },
     middleware: struct {
         cors: kw.middleware.Cors.Config,
@@ -304,6 +305,7 @@ const http_driver = kw.http.Driver
     .listen(true)
     .jobs(1)
     .routes(kw.middleware.cors(kw.http.From(HTTPRoutes, RouteContext)))
+    .error_handler(kw.http.DefaultErrorHandler)
     .build();
 
 /// Combined driver registry
@@ -379,6 +381,8 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         .with(.http, kw.default.config(kw.middleware.Cors.Config, "middleware.cors"), allocator)
         // Register AMQP client pool and connection handling
         .with(.amqp, kw.amqp.defaultFor(drivers, RouteContext), allocator)
+        // TODO: create a kw.http.defaultFor
+        .with(.http, kw.default.config(kw.http.Config, "driver.http"), allocator)
         // Register our custom counter as a static dependency
         .static(.http, &ctx, allocator)
         .static(.amqp, &counter, allocator);
