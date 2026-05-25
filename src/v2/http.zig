@@ -5,7 +5,6 @@ const httpz = @import("httpz");
 const kw = @import("../root.zig");
 
 const schema = kw.schema;
-const conftype = struct {};
 const cache = kw.cache;
 const mem = kw.mem;
 const InternFmtCache = kw.InternFmtCache;
@@ -26,6 +25,7 @@ pub const kind = .http;
 pub const data = @import("http/response.zig");
 pub const Response = httpz.Response;
 pub const Request = httpz.Request;
+pub const DefaultErrorHandler = @import("http/default_error_handler.zig").DefaultErrorHandler;
 
 // TODO: pub const default = @import("amqp/default.zig").default;
 // TODO: pub const defaultFor = @import("amqp/default.zig").defaultFor;
@@ -39,17 +39,22 @@ pub const State = enum {
     done,
 };
 
+pub const Config = struct {
+    port: u16 = 2000,
+};
+
 pub fn DriverBuilder(
     comptime driver_key: @Type(.enum_literal),
     comptime config: []const u8,
     comptime listen: bool,
     comptime _jobs: comptime_int,
     comptime Routes: []const type,
+    comptime ErrorHandler: type,
 ) *const fn (comptime u12) type {
     const H = struct {
         pub fn HttpHandler(comptime block_start: u12) type {
             return struct {
-                pub const ConfigType = conftype;
+                pub const ConfigType = Config;
                 pub const config_path = config;
                 pub const jobs = _jobs;
                 pub const key = driver_key;
@@ -57,7 +62,7 @@ pub fn DriverBuilder(
                 pub const CallContext = shared.UniteCallContext(Routes);
                 pub const Dependencies = shared.MergeDeps(
                     Routes,
-                    &.{std.mem.Allocator},
+                    &.{ std.mem.Allocator, *ConfigType },
                 );
 
                 //pub const Provides = ConstructProviders(ProviderRoutes);
@@ -80,7 +85,7 @@ pub fn DriverBuilder(
 
                     pub fn write(self: RequestData, w: *std.Io.Writer) !void {
                         _ = self;
-                        try w.writeAll(".{ .todo = TODO }");
+                        try w.writeAll(".{ .type = HTTP }");
                     }
                 };
 
@@ -107,8 +112,7 @@ pub fn DriverBuilder(
                             self: *Self,
                             pub fn handle(this: *Handler, req: *httpz.Request, res: *httpz.Response) void {
                                 this.self.handleRequest(req, res) catch |e| {
-                                    res.status = 500;
-                                    res.body = @errorName(e);
+                                    ErrorHandler.preQueue(e, req, res);
                                 };
                             }
                         };
@@ -159,11 +163,12 @@ pub fn DriverBuilder(
                             const inj: *dep.DepCtx = &arc.ref().data;
                             defer arc.unref();
                             const alloc = inj.require(std.mem.Allocator) catch unreachable;
+                            const conf = inj.require(*Config) catch unreachable;
 
                             var handler = Handler{ .self = self };
                             const _server = httpz.Server(*Handler).init(
                                 alloc,
-                                .{ .address = .localhost(2000) },
+                                .{ .address = .localhost(conf.port) },
                                 &handler,
                             ) catch null;
                             if (_server == null) @panic("Could not start server.");
@@ -193,7 +198,7 @@ pub fn DriverBuilder(
                                 .PUT => .put,
                             };
 
-                            switch (method) {
+                            const match = out: switch (method) {
                                 inline else => |m| {
                                     const f = comptime FilterRoutes(Routes, m);
                                     const depth = comptime blk: {
@@ -217,65 +222,72 @@ pub fn DriverBuilder(
                                         return error.NotFound;
                                     }
 
-                                    // FIXME: This will be returned as an enum directly after the rest of the refactor
-                                    const id = std.meta.stringToEnum(RouteKeys, match.?.key).?;
-
-                                    var cond = std.Thread.Condition{};
-                                    var mut = std.Thread.Mutex{};
-                                    var ready = State.waiting;
-                                    mut.lock();
-                                    defer mut.unlock();
-
-                                    const val = @unionInit(
-                                        EV,
-                                        @tagName(key),
-                                        .{
-                                            .http_recv = .{
-                                                .req = req,
-                                                .res = res,
-                                                .id = id,
-                                                // FIXME: Yikes
-                                                .captures = try res.arena.dupe([]const u8, match.?.captures),
-                                                .cond = &cond,
-                                                .ready = &ready,
-                                            },
-                                        },
-                                    );
-
-                                    const slot = self.queue.?.tryPush(
-                                        .{
-                                            .event_type = .http_recv,
-                                            .event_data = val,
-                                        },
-                                        std.time.ns_per_s * 5,
-                                    ) catch return error.QueueFull;
-
-                                    //FIXME: This should be able to time out.
-                                    while (@atomicLoad(State, &ready, .acquire) != .done) {
-                                        cond.wait(&mut);
-                                    }
-
-                                    if (@atomicLoad(State, &ready, .acquire) == .waiting) {
-                                        @branchHint(.cold); // Right now this will never happen
-                                        slot.event_type = .noop;
-                                        return error.Timeout;
-                                    } else if (@atomicLoad(State, &ready, .acquire) == .accepted) {
-                                        @branchHint(.cold); // Right now this will never happen
-                                        while (@atomicLoad(State, &ready, .acquire) != .done) {
-                                            // FIXME: This should also have a timeout
-                                            // as is if the request takes forever to finish
-                                            // we will permanently tie up on of the httpz thread pool
-                                            // threads which can be abused for thread exhaustion and thus
-                                            // lead to DoS.
-                                            //
-                                            // When we migrate to zig 0.16+'s async io we will be able to
-                                            // cleanly cancel the in-flight request after the timeout
-                                            // until then, this is fine so long as we don't introduce
-                                            // routes that take a while.
-                                            cond.wait(&mut);
-                                        }
-                                    }
+                                    break :out match;
                                 },
+                            };
+
+                            // FIXME: This will be returned as an enum directly after the rest of the refactor
+                            const id = std.meta.stringToEnum(RouteKeys, match.?.key).?;
+
+                            var cond = std.Thread.Condition{};
+                            var mut = std.Thread.Mutex{};
+                            var ready = State.waiting;
+                            mut.lock();
+                            defer mut.unlock();
+
+                            const val = @unionInit(
+                                EV,
+                                @tagName(key),
+                                .{
+                                    .http_recv = .{
+                                        .req = req,
+                                        .res = res,
+                                        .id = id,
+                                        // FIXME: Yikes
+                                        .captures = try res.arena.dupe([]const u8, match.?.captures),
+                                        .cond = &cond,
+                                        .ready = &ready,
+                                    },
+                                },
+                            );
+
+                            const correlation = req.header("x-correlation-id");
+
+                            const slot = self.queue.?.tryPush(
+                                .{
+                                    .event_type = .http_recv,
+                                    .event_data = val,
+                                    .properties = .{
+                                        .correlation_id = if (correlation) |c| std.fmt.parseInt(u128, c, 10) catch 0 else 0,
+                                    },
+                                },
+                                std.time.ns_per_s * 5,
+                            ) catch return error.QueueFull;
+
+                            //FIXME: This should be able to time out.
+                            while (@atomicLoad(State, &ready, .acquire) != .done) {
+                                cond.wait(&mut);
+                            }
+
+                            if (@atomicLoad(State, &ready, .acquire) == .waiting) {
+                                @branchHint(.cold); // Right now this will never happen
+                                slot.event_type = .noop;
+                                return error.Timeout;
+                            } else if (@atomicLoad(State, &ready, .acquire) == .accepted) {
+                                @branchHint(.cold); // Right now this will never happen
+                                while (@atomicLoad(State, &ready, .acquire) != .done) {
+                                    // FIXME: This should also have a timeout
+                                    // as is if the request takes forever to finish
+                                    // we will permanently tie up on of the httpz thread pool
+                                    // threads which can be abused for thread exhaustion and thus
+                                    // lead to DoS.
+                                    //
+                                    // When we migrate to zig 0.16+'s async io we will be able to
+                                    // cleanly cancel the in-flight request after the timeout
+                                    // until then, this is fine so long as we don't introduce
+                                    // routes that take a while.
+                                    cond.wait(&mut);
+                                }
                             }
                         }
 
@@ -309,23 +321,23 @@ pub fn DriverBuilder(
                             _ = self;
                             @atomicStore(State, event.ready, .accepted, .release);
                             const route = event.id;
+                            // FIXME: We should only signal on the last attempt
+                            defer {
+                                @atomicStore(State, event.ready, .done, .release);
+                                event.cond.signal();
+                            }
+
+                            event.res.header("x-correlation-id", try std.fmt.allocPrint(event.res.arena, "{d}", .{evprop.correlation_id}));
+
                             dispatchRequest(
                                 route,
                                 injector,
                                 evprop,
                                 @constCast(&event),
                             ) catch |e| {
-                                event.res.status = 500;
-                                event.res.body = @errorName(e);
-                                event.res.content_type = .TEXT;
-                                // FIXME: We should only signal on the last attempt
-                                @atomicStore(State, event.ready, .done, .release);
-                                event.cond.signal();
+                                ErrorHandler.postQueue(e, event.req, event.res);
                                 return e;
                             };
-
-                            @atomicStore(State, event.ready, .done, .release);
-                            event.cond.signal();
                         }
 
                         fn dispatchRequest(
