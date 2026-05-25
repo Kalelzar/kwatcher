@@ -194,7 +194,9 @@ pub fn DriverBuilder(
     comptime listen: bool,
     comptime _jobs: comptime_int,
     comptime Routes: []const type,
+    comptime ErrorHandler: type,
 ) *const fn (comptime u12) type {
+    _ = ErrorHandler;
     const H = struct {
         pub fn AmqpHandler(comptime block_start: u12) type {
             return struct {
@@ -239,7 +241,7 @@ pub fn DriverBuilder(
 
                     pub fn write(self: ConsumeData, w: *std.Io.Writer) !void {
                         _ = self;
-                        try w.writeAll(".{ .todo = TODO }");
+                        try w.writeAll(".{ .type = AmqpConsume }");
                     }
                 };
 
@@ -250,7 +252,7 @@ pub fn DriverBuilder(
 
                     pub fn write(self: UnroutedData, w: *std.Io.Writer) !void {
                         _ = self;
-                        try w.writeAll(".{ .todo = TODO }");
+                        try w.writeAll(".{ .type = AmqpUnrouted }");
                     }
                 };
 

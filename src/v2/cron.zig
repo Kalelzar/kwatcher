@@ -21,7 +21,9 @@ pub fn DriverBuilder(
     comptime listen: bool,
     comptime _jobs: comptime_int,
     comptime Routes: []const type,
+    comptime ErrorHandler: type,
 ) *const fn (comptime u12) type {
+    _ = ErrorHandler;
     if (comptime _jobs > 1) @compileError("More than 1 watch job is useless for the cron driver.");
     const H = struct {
         pub fn CronHandler(comptime block_start: u12) type {
