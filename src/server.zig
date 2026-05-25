@@ -96,6 +96,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
 
         pub fn deinit(self: *Self) void {
             self.allocator.free(self.queue.buffer);
+            self.allocator.free(self.queue.occupancy);
             self.deps.deinit(self.allocator);
             inline for (Handlers, 0..) |_, i| {
                 self.handlers[i].deinit(self.allocator);
@@ -245,6 +246,10 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                         log.debug("T{d} has exited", .{std.Thread.getCurrentId()});
                         return;
                     },
+                    error.Shutdown => {
+                        log.debug("T{d} has been shutdown", .{std.Thread.getCurrentId()});
+                        return;
+                    },
                     else => log.err("Failure: {t}", .{e}),
                 };
             }
@@ -259,8 +264,9 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                         log.err("Caught error while draining: {s}", .{@errorName(e)});
                     };
                     log.debug("T{d}: Drained 1", .{std.Thread.getCurrentId()});
+                } else {
+                    return;
                 }
-                return;
             }
         }
 
