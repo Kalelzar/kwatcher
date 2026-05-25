@@ -14,6 +14,7 @@ pub const DriverOptions = union(enum) {
     listen: bool,
     jobs: comptime_int,
     routes: []const type,
+    error_handler: type,
 };
 
 pub fn DriverBuilder(comptime Driver: anytype, comptime requires_config: bool) type {
@@ -65,6 +66,10 @@ pub fn DriverBuilder(comptime Driver: anytype, comptime requires_config: bool) t
             return self.extend(.{ .routes = v });
         }
 
+        pub fn error_handler(comptime self: Self, comptime v: type) Self {
+            return self.extend(.{ .error_handler = v });
+        }
+
         pub fn build(comptime self: Self) *const fn (comptime u12) type {
             var has_key = false;
             var k: @Type(.enum_literal) = .none;
@@ -73,6 +78,7 @@ pub fn DriverBuilder(comptime Driver: anytype, comptime requires_config: bool) t
             var j: comptime_int = 0;
             var ltn = false;
             var rts: []const type = &.{};
+            var eh: type = void;
 
             comptime {
                 for (self.opts) |opts| {
@@ -88,6 +94,7 @@ pub fn DriverBuilder(comptime Driver: anytype, comptime requires_config: bool) t
                         .listen => |l| ltn = l,
                         .jobs => |jb| j = jb,
                         .routes => |r| rts = rts ++ r,
+                        .error_handler => |e| eh = e,
                     }
                 }
 
@@ -116,9 +123,9 @@ pub fn DriverBuilder(comptime Driver: anytype, comptime requires_config: bool) t
                 }
 
                 if (requires_config) {
-                    return Driver(k, config_path, ltn, j, rts);
+                    return Driver(k, config_path, ltn, j, rts, eh);
                 } else {
-                    return Driver(k, ltn, j, rts);
+                    return Driver(k, ltn, j, rts, eh);
                 }
             }
         }

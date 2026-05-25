@@ -431,10 +431,8 @@ pub const Analyser = struct {
 };
 
 const reserved_declarations_map = std.StaticStringMap(void).initComptime(.{
-    .{"deconstruct"},
     .{"deinit"},
     .{"init"},
-    .{"preconfigure"}, //FIXME: This does need to be checked
 });
 
 pub fn DCategory(
@@ -667,6 +665,7 @@ pub const DepCtx = struct {
     pub fn require(self: *DepCtx, comptime T: type) !T {
         // std.log.info("Getting {s}.", .{@typeName(T)});
         if (T == *DepCtx) return self;
+
         const tid = comptime klib.meta.typeId(T);
         const res = self.cache.get(tid);
         if (res == null) {
