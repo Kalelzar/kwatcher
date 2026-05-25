@@ -51,6 +51,7 @@ pub fn build(b: *std.Build) !void {
     // Options
     const build_all = b.option(bool, "all", "Build all components. You can still disable individual components") orelse false;
     const build_example = b.option(bool, "example", "Build the example application") orelse build_all;
+    const build_kwev = b.option(bool, "kwev", "Build the kwev tooling ") orelse build_all;
     const build_static_library = b.option(bool, "lib", "Build a static library object") orelse build_all;
     const include_metrics = b.option(bool, "metrics", "Include metrics generation in code.") orelse true;
 
@@ -77,6 +78,15 @@ pub fn build(b: *std.Build) !void {
         .omit_frame_pointer = false,
     });
 
+    const kwatcher_kwev = b.createModule(.{
+        .root_source_file = b.path("src/kwev.zig"),
+        .target = target,
+        .optimize = optimize,
+        .dwarf_format = .@"64",
+        .link_libc = false,
+        .omit_frame_pointer = false,
+    });
+
     const tests = b.addTest(.{
         .root_module = kwatcher_library,
         .use_llvm = true,
@@ -90,6 +100,15 @@ pub fn build(b: *std.Build) !void {
     });
     if (build_example) {
         b.installArtifact(example);
+    }
+
+    const kwev = b.addExecutable(.{
+        .name = "kwev",
+        .root_module = kwatcher_kwev,
+        .use_llvm = true, // Due to https://github.com/ziglang/zig/issues/24181
+    });
+    if (build_kwev) {
+        b.installArtifact(kwev);
     }
 
     const lib = b.addLibrary(.{
@@ -125,6 +144,7 @@ pub fn build(b: *std.Build) !void {
     const check = b.step("check", "Build without generating artifacts.");
     check.dependOn(&lib.step);
     check.dependOn(&example.step);
+    check.dependOn(&kwev.step);
 
     const test_step = b.step("test", "Run the unit tests.");
     test_step.dependOn(&run_tests.step);
@@ -147,17 +167,22 @@ pub fn build(b: *std.Build) !void {
     // Dependencies:
     // 1st Party:
     const klib = b.dependency("klib", .{ .target = target, .optimize = optimize }).module("klib");
+
     // 3rd Party:
     const zamqp = b.dependency("zamqp", .{ .target = target, .optimize = optimize }).module("zamqp");
     const uuid = b.dependency("uuid", .{ .target = target, .optimize = optimize }).module("uuid");
     const metrics = b.dependency("metrics", .{ .target = target, .optimize = optimize }).module("metrics");
     const httpz = b.dependency("httpz", .{ .target = target, .optimize = optimize }).module("httpz");
+
     // Imports:
     // Internal:
     kwatcher_example.addImport("kwatcher", kwatcher_library);
+    kwatcher_kwev.addImport("kwatcher", kwatcher_library);
+
     // 1st Party:
     kwatcher_library.addImport("klib", klib);
     kwatcher_example.addImport("klib", klib);
+
     // 3rd Party:
     kwatcher_library.addImport("zamqp", zamqp);
     kwatcher_library.addImport("uuid", uuid);

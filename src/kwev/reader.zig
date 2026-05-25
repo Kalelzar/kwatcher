@@ -9,7 +9,10 @@ pub const Reader = struct {
     pub fn readMagic(self: *Reader) Error!void {
         var buf: [4]u8 = undefined;
         try self.reader.readSliceAll(&buf);
-        if (!std.mem.eql(u8, &buf, "KWEV")) return error.NotKWEV;
+        if (!std.mem.eql(u8, &buf, "KWEV")) {
+            std.log.err("Expected: KWEV, found: {s}", .{buf});
+            return error.NotKWEV;
+        }
     }
 
     pub fn readAll(self: *Reader, allocator: std.mem.Allocator) (Error || error{OutOfMemory})![]const kwev.ChunkData {
@@ -31,11 +34,13 @@ pub const Reader = struct {
             std.log.err("Unrecognised chunk type: {s}", .{name});
             return error.UnknownChunk;
         }
+        std.log.info("Reading {s}", .{name});
         const size = try self.reader.takeInt(u64, .big);
         switch (ctype.?) {
             .eof => {
                 const crc = try self.reader.takeInt(u32, .big);
 
+                std.log.err("EOF! chunk has bad CRC: {d}", .{crc});
                 if (crc != 0xAAAAAAAA) return error.CRCMismatch;
                 if (size != self.reader.seek) return error.FileCorrupt;
 
@@ -48,7 +53,12 @@ pub const Reader = struct {
             .event_type => try self.readEventTypes(chunk, allocator),
             .link => try self.readLink(chunk),
         }
+
         const end = self.reader.seek;
+        if (end < size - 12) {
+            std.log.err("Expected to read at least {d}, actually {d}", .{ size + 12, end });
+            return error.FileCorrupt;
+        }
         const start = end - size - 12;
         var crc = std.hash.crc.Crc32Iscsi.init();
         // CRC includes chuck name (4 bytes) and the chunk length (8 bytes) in addition to
@@ -56,7 +66,10 @@ pub const Reader = struct {
         crc.update(self.reader.buffer[start..end]);
         const actual = crc.final();
         const expected = try self.reader.takeInt(u32, .big);
-        if (expected != actual) return error.CRCMismatch;
+        if (expected != actual) {
+            std.log.err("BAD CRC: {d:04}, expected {d:04}", .{ actual, expected });
+            return error.CRCMismatch;
+        }
     }
 
     pub fn readHeaderA(self: *Reader, chunk: *kwev.ChunkData) Error!void {
@@ -101,6 +114,7 @@ pub const Reader = struct {
         var d = std.ArrayList(kwev.Event.EventData){};
         errdefer d.deinit(allocator);
         const size = try self.reader.takeInt(u16, .big);
+        std.log.info("Event size: {d}", .{size});
         try d.ensureUnusedCapacity(allocator, size);
         for (0..size) |_| {
             var next = d.addOneAssumeCapacity();

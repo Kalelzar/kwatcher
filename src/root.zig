@@ -25,6 +25,7 @@ pub const meta = @import("utils/meta.zig");
 pub const shared = @import("utils/shared.zig");
 pub const queue = @import("utils/queue.zig");
 pub const resolver = @import("utils/resolver.zig");
+pub const kwev = @import("kwev/kwev.zig");
 
 // v2
 pub const cron = @import("v2/cron.zig");
