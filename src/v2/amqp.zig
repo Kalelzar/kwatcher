@@ -951,7 +951,7 @@ pub fn RouteBase(
         }
 
         pub fn requires(comptime ct: anytype) void {
-            if (comptime !shared.hasKey(CapabilityType, ct)) {
+            if (comptime !meta.hasKey(CapabilityType, ct)) {
                 @compileError(
                     "Required capability '" ++ @tagName(ct) ++ "' is not supported by AMQP routes.",
                 );
@@ -959,7 +959,7 @@ pub fn RouteBase(
         }
 
         pub fn satisfies(comptime ct: anytype) bool {
-            return shared.hasKey(CapabilityType, ct);
+            return meta.hasKey(CapabilityType, ct);
         }
 
         pub fn mod(
@@ -1750,4 +1750,16 @@ pub fn BridgeShimCtx(comptime Shim: type, comptime RealScheduler: type) type {
             return self.bridge.?.toShim();
         }
     };
+}
+
+comptime {
+    const Drv = Driver
+        .new(.amqp)
+        .config("null")
+        .listen(false)
+        .jobs(0)
+        .routes(&.{})
+        .build();
+
+    kw.driver.AssertDriver(Drv, .amqp);
 }

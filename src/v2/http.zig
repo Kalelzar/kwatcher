@@ -581,7 +581,7 @@ pub fn RouteBase(
         }
 
         pub fn satisfies(comptime ct: anytype) bool {
-            return shared.hasKey(CapabilityType, ct);
+            return meta.hasKey(CapabilityType, ct);
         }
 
         pub fn mod(
@@ -821,4 +821,17 @@ pub fn RouteParser(comptime Context: type) type {
             }
         }
     };
+}
+
+comptime {
+    const Drv = Driver
+        .new(.http)
+        .config("null")
+        .error_handler(DefaultErrorHandler)
+        .jobs(1)
+        .listen(true)
+        .routes(&.{})
+        .build();
+
+    kw.driver.AssertDriver(Drv, .http);
 }

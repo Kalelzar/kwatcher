@@ -10,6 +10,8 @@ const Event = @import("../event.zig").Event;
 const CronTemplate = @import("../template/Cron.zig");
 
 const shared = @import("../utils/shared.zig");
+const meta = @import("../utils/meta.zig");
+
 const MPMCQueue = @import("../utils/queue.zig").StaticStrict;
 
 pub const kind = .cron;
@@ -368,7 +370,7 @@ pub fn RouteBase(
         }
 
         pub fn requires(comptime ct: anytype) void {
-            if (comptime !shared.hasKey(CapabilityType, ct)) {
+            if (comptime !meta.hasKey(CapabilityType, ct)) {
                 @compileError(
                     "Required capability '" ++ @tagName(ct) ++ "' is not supported by CRON routes.",
                 );
@@ -376,7 +378,7 @@ pub fn RouteBase(
         }
 
         pub fn satisfies(comptime ct: anytype) bool {
-            return shared.hasKey(CapabilityType, ct);
+            return meta.hasKey(CapabilityType, ct);
         }
 
         pub fn mod(
@@ -693,4 +695,15 @@ fn nextOffset(schedule: CronTemplate.VM.Schedule, timestamp: i64) i64 {
     }
 
     return 0;
+}
+
+comptime {
+    const Drv = Driver
+        .new(.cron)
+        .listen(false)
+        .jobs(0)
+        .routes(&.{})
+        .build();
+
+    @import("../driver.zig").AssertDriver(Drv, .cron);
 }
