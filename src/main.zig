@@ -115,6 +115,14 @@ const CronRoutes = struct {
     }
 };
 
+/// Action route handlers.
+/// Function names are the route id verbatim; the first tuple param is the call context.
+const ActionRoutes = struct {
+    pub fn greet(ctx: struct { []const u8 }) void {
+        log.info("[action:greet] {s}", .{ctx.@"0"});
+    }
+};
+
 /// HTTP route handlers.
 /// Function names follow the pattern: "[MODIFIER] VERB /path [@identifier]"
 const HTTPRoutes = struct {
@@ -129,10 +137,12 @@ const HTTPRoutes = struct {
         return &.{};
     }
 
-    pub fn @"GET /api/v1/ok"(_: kw.http.data.Request(null)) kw.http.data.Json(
+    pub fn @"GET /api/v1/ok"(_: kw.http.data.Request(null), inj: *kw.deps.DepCtx) !kw.http.data.Json(
         HeartbeatMessage,
         .{.ok},
     ) {
+        const action = try inj.require(Scheduler(.action));
+        try action.callImmediate(.{ .greet = .{"hello from /ok"} }, inj);
         return .{
             .value = .{
                 .ok = .{
@@ -308,12 +318,21 @@ const http_driver = kw.http.Driver
     .error_handler(kw.http.DefaultErrorHandler)
     .build();
 
+/// Action driver configuration (never listens; routes are just functions to call)
+const action_driver = kw.action.Driver
+    .new(.action)
+    .listen(false)
+    .jobs(0)
+    .routes(kw.action.From(ActionRoutes))
+    .build();
+
 /// Combined driver registry
 const drivers = kw.DriverRegistry
     .new()
     .registerHandler(cron_driver)
     .registerHandler(amqp_driver)
-    .registerHandler(http_driver);
+    .registerHandler(http_driver)
+    .registerHandler(action_driver);
 
 /// Type alias for the scheduler (used to publish events from cron routes)
 /// SchedulerMap() returns a function that maps driver keys to scheduler types

@@ -6,6 +6,7 @@ pub const deps = @import("dep.zig");
 pub const cache = @import("cache/cache.zig");
 pub const event = @import("event.zig");
 pub const DriverRegistry = @import("driver.zig").Drivers;
+pub const driver = @import("driver.zig");
 pub const default = @import("default.zig");
 
 // client
@@ -32,6 +33,7 @@ pub const cron = @import("v2/cron.zig");
 pub const amqp = @import("v2/amqp.zig");
 
 pub const http = @import("v2/http.zig");
+pub const action = @import("v2/action.zig");
 
 pub const middleware = struct {
     pub const latency = @import("middleware/latency.zig").WithLatency;
