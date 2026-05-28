@@ -194,7 +194,7 @@ pub fn Mod(comptime T: type, comptime i: usize, comptime As: []const T, comptime
 }
 
 pub fn SetUnion(comptime T: type, comptime As: []const T, comptime Bs: []const T) []const T {
-    @setEvalBranchQuota((As.len + Bs.len) * 200);
+    @setEvalBranchQuota((As.len + Bs.len) * 300);
     var len: usize = 0;
     const buf = comptime blk: {
         var buf: [As.len + Bs.len]T = undefined;

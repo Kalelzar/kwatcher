@@ -244,3 +244,90 @@ pub const Drivers = struct {
         return handlers;
     }
 };
+
+pub fn AssertDriver(comptime Drv: anytype, comptime expected_key: @Type(.enum_literal)) void {
+    const DrvT = @TypeOf(Drv.*);
+    const drv_ti: std.builtin.Type = @typeInfo(DrvT);
+    switch (drv_ti) {
+        .@"fn" => |f| {
+            const first: std.builtin.Type.Fn.Param = f.params[0];
+            if (comptime first.type != u12) {
+                @compileError("Expected first parameter to be a comptime u12: Is " ++ @typeName(first.type.?));
+            }
+        },
+        inline else => |_, t| @compileError("Expected driver builder to be a comptime function accepting a block as the first parameter. Got: " ++ @tagName(t)),
+    }
+
+    const Builder = Drv(0);
+
+    if (comptime !@hasDecl(Builder, "__block_end")) {
+        @compileError("Missing function declaration on builder: __block_end");
+    }
+
+    if (comptime !@hasDecl(Builder, "EventType")) {
+        @compileError("Missing type declaration on builder: EventType");
+    }
+
+    const EType = Builder.EventType;
+    if (comptime @typeInfo(EType) != .@"enum") {
+        @compileError("Expected EventType to be an enum");
+    }
+
+    if (comptime !@hasField(EType, "__end")) {
+        @compileError("EventType is missing the block-end sentinel field: __end");
+    }
+
+    if (comptime !@hasDecl(Builder, "EventValues")) {
+        @compileError("Missing type declaration on builder: EventValues");
+    }
+
+    const EValues = Builder.EventValues;
+    if (comptime @typeInfo(EValues) != .@"union") {
+        @compileError("Expected EventValues to be a union");
+    }
+
+    if (comptime !@hasDecl(Builder, "key")) {
+        @compileError("Missing const declaration on builder: key");
+    }
+
+    const driver_key = Builder.key;
+    if (comptime driver_key != expected_key) {
+        @compileError("Expected driver key to match the key from the builder");
+    }
+
+    if (comptime !@hasDecl(Builder, "jobs")) {
+        @compileError("Missing const declaration on builder: jobs");
+    }
+
+    if (comptime !@hasDecl(Builder, "Yield")) {
+        @compileError("Missing function declaration on builder: Yield");
+    }
+
+    if (comptime @hasDecl(Builder, "ConfigType")) {
+        if (comptime @typeInfo(Builder.ConfigType) != .@"struct") {
+            @compileError("Expected ConfigType to be a struct: Is " ++ @typeName(Builder.ConfigType));
+        }
+    }
+
+    const Handler = Builder.Yield(Builder.EventType, Builder.EventValues);
+
+    inline for (.{
+        "Scheduler",
+        "accepts",
+        "init",
+        "deinit",
+        "bind",
+        "scheduler",
+        "watch",
+        "stop",
+        "handle",
+    }) |decl| {
+        if (comptime !@hasDecl(Handler, decl)) {
+            @compileError("Missing declaration on handler: " ++ decl);
+        }
+    }
+
+    if (comptime @TypeOf(Handler.Scheduler) != type) {
+        @compileError("Expected Scheduler to be a type");
+    }
+}
