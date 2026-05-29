@@ -1,0 +1,26 @@
+.{
+    .name = .kw_protocol,
+    .version = "0.1.2",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0xceed3f32358890c,
+    .dependencies = .{
+        .kw_core = .{
+            .path = "../core",
+        },
+        .kw_amqp = .{
+            .path = "../amqp",
+        },
+        .kw_cron = .{
+            .path = "../cron",
+        },
+        .klib = .{
+            .url = "git+https://github.com/Kalelzar/klib.git#a81bd4406c9517ad18bfea391733df29fc85a8ca",
+            .hash = "klib-0.0.0-vum4ZE-TAAAQBM7CM-zftirjIOFLrms-j6bzgaWdMPF-",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

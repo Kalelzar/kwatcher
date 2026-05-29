@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const kw = @import("kwatcher");
+const kwev = @import("kw-kwev");
 
 pub fn main() !void {
     if (comptime builtin.mode == .Debug) {
@@ -66,7 +66,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
 
     var fixed = std.Io.Reader.fixed(buf);
 
-    var kwev_reader = kw.kwev.Reader{ .reader = &fixed };
+    var kwev_reader = kwev.Reader{ .reader = &fixed };
 
     const chunks = try kwev_reader.readAll(arena.allocator());
     for (chunks, 0..) |c, i| {

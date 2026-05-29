@@ -1,0 +1,30 @@
+.{
+    .name = .kw_amqp,
+    .version = "0.1.2",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0x1d0d539c4fe4ddc3,
+    .dependencies = .{
+        .kw_core = .{
+            .path = "../core",
+        },
+        .kw_cache = .{
+            .path = "../cache",
+        },
+        .klib = .{
+            .url = "git+https://github.com/Kalelzar/klib.git#a81bd4406c9517ad18bfea391733df29fc85a8ca",
+            .hash = "klib-0.0.0-vum4ZE-TAAAQBM7CM-zftirjIOFLrms-j6bzgaWdMPF-",
+        },
+        .zamqp = .{
+            .path = "../../vendor/zamqp",
+        },
+        .uuid = .{
+            .url = "git+https://github.com/r4gus/uuid-zig.git#93f35b4abbef52db7b48fd20084e73d3c6e20ee0",
+            .hash = "uuid-0.4.0-oOieIR2AAAChAUVBY4ABjYI1XN0EbVALmiN0JIlggC3i",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

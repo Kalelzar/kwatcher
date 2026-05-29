@@ -1,7 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const kw = @import("kwatcher");
+const core = @import("kw-core");
+const kwatcher = @import("kwatcher");
+const amqp = @import("kw-amqp");
+const http = @import("kw-http");
+const cron = @import("kw-cron");
+const action = @import("kw-action");
 const httpz = @import("httpz");
 
 pub const std_options = std.Options{
@@ -27,11 +32,11 @@ const log = std.log.scoped(.example);
 /// This maps to a JSON config file (e.g., example.json)
 pub const Config = struct {
     driver: struct {
-        amqp: kw.config.BaseConfig,
-        http: kw.http.Config,
+        amqp: core.config.BaseConfig,
+        http: http.Config,
     },
     middleware: struct {
-        cors: kw.middleware.Cors.Config,
+        cors: http.middleware.Cors.Config,
     },
     app: AppConfig,
 };
@@ -103,7 +108,7 @@ const AmqpRoutes = struct {
 /// Function names follow the pattern: "job_name schedule"
 const CronRoutes = struct {
     /// Triggers every 5 seconds (second minute hour day month weekday)
-    pub fn @"heartbeat_tick */5 * * * * *"(inj: *kw.deps.DepCtx) !void {
+    pub fn @"heartbeat_tick */5 * * * * *"(inj: *core.deps.DepCtx) !void {
         const scheduler = try inj.require(Scheduler(.amqp));
         const timestamp = std.time.microTimestamp();
 
@@ -128,21 +133,21 @@ const ActionRoutes = struct {
 const HTTPRoutes = struct {
     // --- /api/v1/users family (shared prefix) ---
 
-    pub fn @"GET /"(_: kw.http.data.Request(null)) []const HeartbeatMessage {
+    pub fn @"GET /"(_: http.data.Request(null)) []const HeartbeatMessage {
         log.info("HELLO FROM SERVER", .{});
         return &.{};
     }
 
-    pub fn @"GET /api/v1/users"(_: kw.http.data.Request(null)) []const HeartbeatMessage {
+    pub fn @"GET /api/v1/users"(_: http.data.Request(null)) []const HeartbeatMessage {
         return &.{};
     }
 
-    pub fn @"GET /api/v1/ok"(_: kw.http.data.Request(null), inj: *kw.deps.DepCtx) !kw.http.data.Json(
+    pub fn @"GET /api/v1/ok"(_: http.data.Request(null), inj: *core.deps.DepCtx) !http.data.Json(
         HeartbeatMessage,
         .{.ok},
     ) {
-        const action = try inj.require(Scheduler(.action));
-        try action.callImmediate(.{ .greet = .{"hello from /ok"} }, inj);
+        const act = try inj.require(Scheduler(.action));
+        try act.callImmediate(.{ .greet = .{"hello from /ok"} }, inj);
         return .{
             .value = .{
                 .ok = .{
@@ -155,7 +160,7 @@ const HTTPRoutes = struct {
         };
     }
 
-    pub fn @"GET /api/v1/bad"(_: kw.http.data.Request(null)) kw.http.data.Json(
+    pub fn @"GET /api/v1/bad"(_: http.data.Request(null)) http.data.Json(
         HeartbeatMessage,
         &.{400},
     ) {
@@ -171,7 +176,7 @@ const HTTPRoutes = struct {
         };
     }
 
-    pub fn @"POST /api/v1/users"(ctx: kw.http.data.Request(struct { name: []const u8 })) HeartbeatMessage {
+    pub fn @"POST /api/v1/users"(ctx: http.data.Request(struct { name: []const u8 })) HeartbeatMessage {
         return .{
             .timestamp = 0,
             .event = "user_created",
@@ -181,8 +186,8 @@ const HTTPRoutes = struct {
     }
 
     pub fn @"GET /api/v1/users/{id}"(ctx: struct {
-        request: *kw.http.Request,
-        response: *kw.http.Response,
+        request: *http.Request,
+        response: *http.Response,
         captures: struct { id: u64 },
     }) HeartbeatMessage {
         return .{
@@ -194,8 +199,8 @@ const HTTPRoutes = struct {
     }
 
     pub fn @"GET /api/v1/users/{id}/name"(ctx: struct {
-        request: *kw.http.Request,
-        response: *kw.http.Response,
+        request: *http.Request,
+        response: *http.Response,
         captures: struct { id: u64 },
     }) []const u8 {
         _ = ctx;
@@ -203,8 +208,8 @@ const HTTPRoutes = struct {
     }
 
     pub fn @"GET /api/v1/users/{id}/id"(ctx: struct {
-        request: *kw.http.Request,
-        response: *kw.http.Response,
+        request: *http.Request,
+        response: *http.Response,
         captures: struct { id: u64 },
     }) []const u8 {
         _ = ctx;
@@ -212,8 +217,8 @@ const HTTPRoutes = struct {
     }
 
     pub fn @"DELETE /api/v1/users/{id}"(ctx: struct {
-        request: *kw.http.Request,
-        response: *kw.http.Response,
+        request: *http.Request,
+        response: *http.Response,
         captures: struct { id: u64 },
     }) []const u8 {
         _ = ctx;
@@ -223,11 +228,11 @@ const HTTPRoutes = struct {
     // --- /api/v1/config (shared /api/v1 prefix, different leaf) ---
 
     pub fn @"GET /api/v1/config"(
-        rq: kw.http.data.FullRequest(
+        rq: http.data.FullRequest(
             null,
             struct { key: []const u8 },
         ),
-    ) kw.http.data.Json(
+    ) http.data.Json(
         struct { key: []const u8, value: []const u8 },
         &.{ .ok, .bad_request },
     ) {
@@ -254,7 +259,7 @@ const HTTPRoutes = struct {
         };
     }
 
-    pub fn @"PUT /api/v1/config"(ctx: kw.http.data.Request(
+    pub fn @"PUT /api/v1/config"(ctx: http.data.Request(
         struct { greeting: []const u8, interval_seconds: u32 },
     )) AppConfig {
         return .{
@@ -265,15 +270,15 @@ const HTTPRoutes = struct {
 
     // --- /health (no shared prefix with /api) ---
 
-    pub fn @"GET /health @healthCheck"(_: kw.http.data.Request(null)) struct { status: []const u8 } {
+    pub fn @"GET /health @healthCheck"(_: http.data.Request(null)) struct { status: []const u8 } {
         return .{ .status = "ok" };
     }
 
     // --- /files (wildcard capture, no shared prefix) ---
 
     pub fn @"GET /files/{*path}"(ctx: struct {
-        request: *kw.http.Request,
-        response: *kw.http.Response,
+        request: *http.Request,
+        response: *http.Response,
         captures: struct { path: []const u8 },
     }) struct { content: []const u8 } {
         _ = ctx;
@@ -291,43 +296,43 @@ const RouteContext = struct {
 };
 
 /// AMQP driver configuration
-const amqp_driver = kw.amqp.Driver
+const amqp_driver = amqp.Driver
     .new(.amqp)
     .config("driver.amqp")
     .listen(false) // Don't consume, only publish
     .jobs(0) // No consumer jobs when not listening
-    .routes(kw.meta.flatten(&.{
-        kw.amqp.From(AmqpRoutes, RouteContext),
+    .routes(core.meta.flatten(&.{
+        amqp.From(AmqpRoutes, RouteContext),
     }))
     .build();
 
 /// Cron driver configuration
-const cron_driver = kw.cron.Driver
+const cron_driver = cron.Driver
     .new(.cron)
     .listen(true)
     .jobs(1)
-    .routes(kw.cron.From(CronRoutes))
+    .routes(cron.From(CronRoutes))
     .build();
 
-const http_driver = kw.http.Driver
+const http_driver = http.Driver
     .new(.http)
     .config("driver.http")
     .listen(true)
     .jobs(1)
-    .routes(kw.middleware.cors(kw.http.From(HTTPRoutes, RouteContext)))
-    .error_handler(kw.http.DefaultErrorHandler)
+    .routes(http.middleware.cors(http.From(HTTPRoutes, RouteContext)))
+    .error_handler(http.DefaultErrorHandler)
     .build();
 
 /// Action driver configuration (never listens; routes are just functions to call)
-const action_driver = kw.action.Driver
+const action_driver = action.Driver
     .new(.action)
     .listen(false)
     .jobs(0)
-    .routes(kw.action.From(ActionRoutes))
+    .routes(action.From(ActionRoutes))
     .build();
 
 /// Combined driver registry
-const drivers = kw.DriverRegistry
+const drivers = core.DriverRegistry
     .new()
     .registerHandler(cron_driver)
     .registerHandler(amqp_driver)
@@ -349,11 +354,11 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     defer arena.deinit();
 
     // Initialize metrics (optional)
-    try kw.metrics.initialize(allocator, "example", "1.0.0", "example-client", .{});
-    defer kw.metrics.deinitialize();
+    try core.metrics.initialize(allocator, "example", "1.0.0", "example-client", .{});
+    defer core.metrics.deinitialize();
 
     // Load configuration from file
-    config_slot = try kw.config.findConfigFile(Config, arena.allocator(), "example") orelse {
+    config_slot = try core.config.findConfigFile(Config, arena.allocator(), "example") orelse {
         std.log.err("Could not load config! Create 'example.json' with the required fields.", .{});
         std.log.err("Example config:", .{});
         std.log.err(
@@ -388,26 +393,26 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     // The chain of .with() and .static() calls registers dependencies at different lifetimes:
     // - .static(): Lives for the entire application lifetime
     // - .scoped(): Created fresh for each request
-    const deps = kw.deps.DependencyContainer(Config)
+    const deps = core.deps.DependencyContainer(Config)
         .new(drivers, allocator)
         // Register default dependencies (allocator pools, user info, client info)
-        .with(.all, kw.default.withDefault(&config_slot, .{
+        .with(.all, kwatcher.default.withDefault(&config_slot, .{
             .name = "example",
             .version = "1.0.0",
         }), allocator)
         // Register app-specific config resolver
-        .with(.all, kw.default.config(AppConfig, "app"), allocator)
-        .with(.http, kw.default.config(kw.middleware.Cors.Config, "middleware.cors"), allocator)
+        .with(.all, kwatcher.default.config(AppConfig, "app"), allocator)
+        .with(.http, kwatcher.default.config(http.middleware.Cors.Config, "middleware.cors"), allocator)
         // Register AMQP client pool and connection handling
-        .with(.amqp, kw.amqp.defaultFor(drivers, RouteContext), allocator)
-        // TODO: create a kw.http.defaultFor
-        .with(.http, kw.default.config(kw.http.Config, "driver.http"), allocator)
+        .with(.amqp, amqp.defaultFor(drivers, RouteContext), allocator)
+        // TODO: create a http.defaultFor
+        .with(.http, kwatcher.default.config(http.Config, "driver.http"), allocator)
         // Register our custom counter as a static dependency
         .static(.http, &ctx, allocator)
         .static(.amqp, &counter, allocator);
 
     // Create and start the server
-    var server = try kw.server.Server(@TypeOf(deps), drivers)
+    var server = try kwatcher.server.Server(@TypeOf(deps), drivers)
         .init(allocator, deps, 4); // 2 consumer threads
     defer server.deinit();
 

@@ -1,0 +1,16 @@
+.{
+    .name = .kw_kwev,
+    .version = "0.1.2",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0xa4cce73e51d94f0d,
+    .dependencies = .{
+        .kw_core = .{
+            .path = "../core",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
