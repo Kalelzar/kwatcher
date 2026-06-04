@@ -655,7 +655,7 @@ pub fn DriverBuilder(
                                                         .{ .unrouted = data },
                                                     );
 
-                                                    self.queue.?.tryPush(.{
+                                                    _ = self.queue.?.tryPush(.{
                                                         .event_type = .unrouted,
                                                         .event_data = val,
                                                         .properties = .{
@@ -691,7 +691,7 @@ pub fn DriverBuilder(
                                                 .{ .recv = data },
                                             );
 
-                                            self.queue.?.tryPush(.{
+                                            _ = self.queue.?.tryPush(.{
                                                 .event_type = .recv,
                                                 .event_data = val,
                                                 .properties = .{
@@ -820,7 +820,7 @@ pub fn DriverBuilder(
                                             else
                                                 0,
                                         },
-                                    }, std.time.ns_per_ms * 1) catch {};
+                                    }, std.time.ns_per_ms * 1) catch unreachable;
                                 } else {
                                     std.log.warn("Dropping unhandled unrouted message: {s}", .{pub_key});
                                 }
