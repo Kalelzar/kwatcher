@@ -74,6 +74,7 @@ pub fn DepMap(comptime _Categories: []const type, _Lifetime: type) type {
         }
 
         pub fn find(comptime tag: anytype, comptime lifetime: Lifetime) ?struct { type, usize } {
+            @setEvalBranchQuota(Categories.len * 500);
             inline for (Categories, 0..) |Cs, i| {
                 if (Cs.Tag == tag and Cs.Lifetime == lifetime) return .{ Cs, i };
             }
