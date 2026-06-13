@@ -1,0 +1,369 @@
+//! Driver template — a minimal, non-listening kwatcher driver.
+//!
+//! To start a new driver, copy this folder and replace the name token everywhere
+//! it appears (package name, module name, `kind`, `key`, the self-check below).
+//! Replace both the lowercase token and the capitalized one (`PlaceholderHandler`):
+//!
+//!     cp -r packages/template packages/<driver>
+//!     cd packages/<driver>
+//!     rg -i "placeholder" --files-with-matches | xargs -L1 \
+//!         sed -i -e 's/placeholder/<driver>/g' -e 's/Placeholder/<Driver>/g'
+//!
+//! The source file is intentionally named `driver.zig` (not `placeholder.zig`) so a
+//! content-only `sed` never needs to rename a file.
+//!
+//! This template mirrors `packages/action` — the simplest reference driver: it never
+//! listens (no background loop, `jobs(0)`) and needs no config. For a driver that runs a
+//! background `watch` loop or reads config, see `packages/amqp` / `packages/http`. The
+//! contract every driver must satisfy is enforced at comptime by
+//! `packages/core/src/driver.zig` → `AssertDriver` (and checked in the `comptime` block
+//! at the bottom of this file).
+
+const std = @import("std");
+const klib = @import("klib");
+
+const log = std.log.scoped(.placeholder);
+
+const dep = @import("kw-core").deps;
+const server = @import("kw-core");
+const Event = @import("kw-core").event.Event;
+const EventProperties = @import("kw-core").event.Properties;
+
+const meta = @import("kw-core").meta;
+const shared = @import("kw-core").shared;
+const MPMCQueue = @import("kw-core").queue.StaticStrict;
+
+pub const kind = .placeholder;
+
+pub const Driver = shared.DriverBuilder(DriverBuilder, false);
+
+pub fn DriverBuilder(
+    comptime driver_key: anytype,
+    comptime listen: bool,
+    comptime _jobs: comptime_int,
+    comptime Routes: []const type,
+    comptime ErrorHandler: type,
+) *const fn (comptime u12) type {
+    _ = listen;
+    _ = ErrorHandler;
+    const H = struct {
+        pub fn PlaceholderHandler(comptime block_start: u12) type {
+            return struct {
+                pub const jobs = _jobs;
+                pub const key = driver_key;
+                pub const RouteKeys = shared.EnumerateRoutes(Routes);
+                pub const CallContext = shared.UniteCallContext(Routes);
+                pub const Dependencies = shared.MergeDeps(Routes, &.{std.mem.Allocator});
+                pub const map = shared.RouteMap(Routes);
+
+                pub const EventType = enum(u12) {
+                    call = block_start,
+                    __end,
+                };
+
+                pub const EventValues = union(EventType) {
+                    call: CallContext,
+                    __end: struct {},
+                };
+
+                pub inline fn __block_end() u12 {
+                    comptime {
+                        return @intFromEnum(@This().EventType.__end);
+                    }
+                }
+
+                pub fn Yield(comptime ET: type, comptime EV: type) type {
+                    const E = Event(ET, EV);
+                    return struct {
+                        const Self = @This();
+
+                        queue: ?*MPMCQueue(E) = null,
+
+                        pub const accepts = server.genAccepts(ET, EventType);
+
+                        pub const Scheduler = struct {
+                            parent: *Self,
+
+                            pub fn call(self: @This(), data: CallContext, extra: struct { inj: ?*dep.DepCtx = null }) !void {
+                                const value = @unionInit(
+                                    EV,
+                                    @tagName(key),
+                                    .{
+                                        .call = data,
+                                    },
+                                );
+
+                                var ev = E{
+                                    .event_data = value,
+                                    .event_type = .call,
+                                };
+
+                                if (extra.inj) |inj| {
+                                    const p = try inj.require(EventProperties);
+                                    ev.properties.correlation_id = p.correlation_id;
+                                }
+
+                                _ = self.parent.queue.?.tryPush(
+                                    ev,
+                                    std.time.ns_per_ms * 1,
+                                ) catch |e| switch (e) {
+                                    error.WouldBlock => {
+                                        @panic("Preemptive execution is not implemented!");
+                                    },
+                                    else => return e,
+                                };
+                            }
+
+                            pub fn callLater(self: @This(), data: CallContext) E {
+                                _ = self;
+                                const value = @unionInit(
+                                    EV,
+                                    @tagName(key),
+                                    .{
+                                        .call = data,
+                                    },
+                                );
+
+                                return E{
+                                    .event_data = value,
+                                    .event_type = .call,
+                                };
+                            }
+
+                            pub fn callImmediate(self: @This(), data: CallContext, inj: *dep.DepCtx) anyerror!void {
+                                _ = self;
+                                return dispatch(data, inj);
+                            }
+                        };
+
+                        fn dispatch(data: CallContext, inj: *dep.DepCtx) anyerror!void {
+                            switch (data) {
+                                inline else => |rctx, tag| {
+                                    const R = comptime Routes[@intFromEnum(tag)];
+                                    try R.call(inj, rctx);
+                                },
+                            }
+                        }
+
+                        pub fn init() @This() {
+                            return .{};
+                        }
+
+                        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+                            _ = self;
+                            _ = allocator;
+                        }
+
+                        pub fn bind(self: *@This(), queue: *MPMCQueue(E)) void {
+                            self.queue = queue;
+                        }
+
+                        pub fn scheduler(self: *@This()) Scheduler {
+                            return .{
+                                .parent = self,
+                            };
+                        }
+
+                        pub fn watch(
+                            self: *@This(),
+                            wg: *std.Thread.WaitGroup,
+                            pool: *std.Thread.Pool,
+                            arc: anytype,
+                        ) anyerror!void {
+                            _ = self;
+                            _ = wg;
+                            _ = pool;
+                            // This template never listens: it has no background loop.
+                            arc.deinit();
+                        }
+
+                        pub fn stop(self: *@This()) void {
+                            _ = self;
+                        }
+
+                        pub fn handle(self: *@This(), comptime ehint: ET, event: E, inj: *dep.DepCtx) anyerror!void {
+                            const et: EventType = comptime @enumFromInt(@intFromEnum(ehint));
+                            const ev: EventValues = @field(event.event_data, @tagName(key));
+                            _ = self;
+
+                            switch (et) {
+                                inline .call => try dispatch(ev.call, inj),
+                                else => @compileError("Invalid handler mapping!"),
+                            }
+                        }
+                    };
+                }
+            };
+        }
+    };
+
+    return H.PlaceholderHandler;
+}
+
+pub fn From(comptime Container: type) []type {
+    comptime {
+        var rp = RouteParser(){ .routes = &.{} };
+        for (std.meta.declarations(Container)) |d| {
+            if (@typeInfo(@TypeOf(@field(Container, d.name))) != .@"fn") continue;
+            rp = rp.parse(Container, d.name);
+        }
+        return rp.routes;
+    }
+}
+
+pub const CapabilityType = enum { name };
+
+pub const Capability = union(CapabilityType) {
+    name: []const u8,
+};
+
+pub fn RouteBase(comptime HandlerFac: anytype, comptime parsed_id: []const u8) type {
+    return struct {
+        pub const Handler = HandlerFac(@This());
+        pub const id = parsed_id;
+
+        pub const CallContext = Handler.CallContext;
+        pub const Dependencies = Handler.Dependencies;
+        pub const call = Handler.call;
+        pub const name = Handler.name;
+
+        pub fn swap(comptime NextHandler: anytype) type {
+            return RouteBase(NextHandler, parsed_id);
+        }
+
+        pub fn wrap(comptime NextHandlerFac: anytype) type {
+            return RouteBase(NextHandlerFac(HandlerFac).make, parsed_id);
+        }
+
+        pub fn requires(comptime ct: anytype) void {
+            if (comptime !meta.hasKey(CapabilityType, ct)) {
+                @compileError(
+                    "Required capability '" ++ @tagName(ct) ++ "' is not supported by PLACEHOLDER routes.",
+                );
+            }
+        }
+
+        pub fn satisfies(comptime ct: anytype) bool {
+            return meta.hasKey(CapabilityType, ct);
+        }
+
+        pub fn mod(
+            comptime capability: Capability,
+        ) type {
+            return switch (capability) {
+                inline .name => |n| RouteBase(HandlerFac, n),
+            };
+        }
+
+        pub fn query(comptime ct: anytype) @FieldType(
+            Capability,
+            @tagName(ct),
+        ) {
+            requires(ct);
+            return switch (ct) {
+                .name => parsed_id,
+                else => unreachable,
+            };
+        }
+    };
+}
+
+pub fn RouteParser() type {
+    return struct {
+        routes: []type,
+
+        fn extend(comptime self: @This(), comptime Other: type) @This() {
+            comptime {
+                const routes = blk: {
+                    var routes: [self.routes.len + 1]type = undefined;
+                    for (self.routes, 0..) |o, i| {
+                        routes[i] = o;
+                    }
+                    routes[self.routes.len] = Other;
+                    break :blk routes;
+                };
+                return .{
+                    .routes = @constCast(&routes),
+                };
+            }
+        }
+
+        pub fn parse(
+            comptime self: @This(),
+            comptime Container: type,
+            comptime fnname: []const u8,
+        ) @This() {
+            comptime {
+                const f = @field(Container, fnname);
+
+                const fargs = @typeInfo(@TypeOf(f)).@"fn".params;
+                const has_context = fargs.len > 0 and blk: {
+                    const ti = @typeInfo(fargs[0].type.?);
+                    switch (ti) {
+                        .@"struct" => |s| break :blk s.is_tuple,
+                        else => break :blk false,
+                    }
+                };
+
+                const di_start_idx = if (has_context) 1 else 0;
+                const __CallContext = if (has_context) fargs[0].type.? else struct {};
+
+                const __Dependencies = blk: {
+                    var deps: [fargs.len - di_start_idx]type = undefined;
+                    for (fargs[di_start_idx..fargs.len], 0..) |a, i| {
+                        deps[i] = a.type.?;
+                    }
+                    break :blk deps;
+                };
+
+                const H = struct {
+                    pub fn make(comptime Base: type) type {
+                        _ = Base;
+                        return struct {
+                            pub const CallContext = __CallContext;
+                            pub const Dependencies = __Dependencies;
+
+                            pub fn name(inj: *dep.DepCtx) ![]const u8 {
+                                const allocator = try inj.require(std.mem.Allocator);
+                                return std.fmt.allocPrint(allocator, "placeholder: {s}", .{fnname});
+                            }
+
+                            pub fn call(inj: *dep.DepCtx, context: CallContext) anyerror!void {
+                                var args: std.meta.ArgsTuple(@TypeOf(f)) = undefined;
+
+                                inline for (0..di_start_idx) |i| {
+                                    args[i] = context;
+                                }
+
+                                inline for (di_start_idx..args.len) |i| {
+                                    args[i] = try inj.require(@TypeOf(args[i]));
+                                }
+                                const maybe_result = @call(.auto, f, args);
+
+                                switch (comptime @typeInfo(klib.meta.Return(f))) {
+                                    .error_union => try maybe_result,
+                                    else => {},
+                                }
+                            }
+                        };
+                    }
+                };
+
+                const RB = RouteBase(H.make, fnname);
+
+                return self.extend(RB);
+            }
+        }
+    };
+}
+
+comptime {
+    const Drv = Driver
+        .new(.placeholder)
+        .listen(false)
+        .jobs(0)
+        .routes(&.{})
+        .build();
+
+    @import("kw-core").driver.AssertDriver(Drv, .placeholder);
+}

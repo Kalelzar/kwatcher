@@ -1,0 +1,22 @@
+.{
+    .name = .kw_placeholder,
+    .version = "0.1.2",
+    .minimum_zig_version = "0.15.2",
+    // the fingerprint encodes the package name; after renaming, `zig build` will
+    // reject this value and print the correct one to paste in here.
+    .fingerprint = 0x5575c4c6bfde77d,
+    .dependencies = .{
+        .kw_core = .{
+            .path = "../core",
+        },
+        .klib = .{
+            .url = "git+https://github.com/Kalelzar/klib.git#a81bd4406c9517ad18bfea391733df29fc85a8ca",
+            .hash = "klib-0.0.0-vum4ZE-TAAAQBM7CM-zftirjIOFLrms-j6bzgaWdMPF-",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
