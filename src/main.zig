@@ -7,6 +7,7 @@ const amqp = @import("kw-amqp");
 const http = @import("kw-http");
 const cron = @import("kw-cron");
 const action = @import("kw-action");
+const signal = @import("kw-signal");
 const httpz = @import("httpz");
 
 pub const std_options = std.Options{
@@ -125,6 +126,25 @@ const CronRoutes = struct {
 const ActionRoutes = struct {
     pub fn greet(ctx: struct { []const u8 }) void {
         log.info("[action:greet] {s}", .{ctx.@"0"});
+    }
+};
+
+/// Signal route handlers.
+/// Function names follow the pattern: "SIG @identifier" (e.g. "INT @shutdown").
+/// The first parameter is always the siginfo; any further params are injected deps.
+/// Multiple handlers may target the same signal — all of them run.
+const SignalRoutes = struct {
+    pub fn @"INT @log"(info: signal.SignalInfo) void {
+        log.info("[signal] SIGINT caught (signo={d})", .{info.signo});
+    }
+
+    /// A second handler on the same signal, demonstrating multi-handler dispatch.
+    pub fn @"INT @note"(_: signal.SignalInfo) void {
+        log.info("[signal] second SIGINT handler ran too", .{});
+    }
+
+    pub fn @"TERM @log"(info: signal.SignalInfo) void {
+        log.info("[signal] SIGTERM caught (signo={d})", .{info.signo});
     }
 };
 
@@ -331,13 +351,22 @@ const action_driver = action.Driver
     .routes(action.From(ActionRoutes))
     .build();
 
+/// Signal driver configuration (always listens on a dedicated sigtimedwait thread)
+const signal_driver = signal.Driver
+    .new(.signal)
+    .listen(true)
+    .jobs(1)
+    .routes(signal.From(SignalRoutes))
+    .build();
+
 /// Combined driver registry
 const drivers = core.DriverRegistry
     .new()
     .registerHandler(cron_driver)
     .registerHandler(amqp_driver)
     .registerHandler(http_driver)
-    .registerHandler(action_driver);
+    .registerHandler(action_driver)
+    .registerHandler(signal_driver);
 
 /// Type alias for the scheduler (used to publish events from cron routes)
 /// SchedulerMap() returns a function that maps driver keys to scheduler types
@@ -350,6 +379,16 @@ const Scheduler = drivers.SchedulerMap();
 var config_slot: Config = undefined;
 
 pub fn juicyMain(allocator: std.mem.Allocator) !void {
+    // Block the signals owned by the signal driver process-wide BEFORE any thread
+    // spawns, so every runtime thread inherits the block and the driver's dedicated
+    // sigtimedwait thread is their sole consumer. Keep this set in sync with SignalRoutes.
+    if (comptime builtin.os.tag == .linux) {
+        var mask = std.posix.sigemptyset();
+        std.posix.sigaddset(&mask, std.posix.SIG.INT);
+        std.posix.sigaddset(&mask, std.posix.SIG.TERM);
+        std.posix.sigprocmask(std.posix.SIG.BLOCK, &mask, null);
+    }
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 

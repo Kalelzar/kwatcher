@@ -121,6 +121,7 @@ pub fn build(b: *std.Build) !void {
     const kw_http = b.dependency("kw_http", .{ .target = target, .optimize = optimize }).module("kw-http");
     const kw_cron = b.dependency("kw_cron", .{ .target = target, .optimize = optimize }).module("kw-cron");
     const kw_action = b.dependency("kw_action", .{ .target = target, .optimize = optimize }).module("kw-action");
+    const kw_signal = b.dependency("kw_signal", .{ .target = target, .optimize = optimize }).module("kw-signal");
     const kw_kwev = b.dependency("kw_kwev", .{ .target = target, .optimize = optimize }).module("kw-kwev");
 
     // 3rd Party:
@@ -134,6 +135,7 @@ pub fn build(b: *std.Build) !void {
     kwatcher_example.addImport("kw-http", kw_http);
     kwatcher_example.addImport("kw-cron", kw_cron);
     kwatcher_example.addImport("kw-action", kw_action);
+    kwatcher_example.addImport("kw-signal", kw_signal);
     kwatcher_example.addImport("httpz", httpz);
 
     // kwev tooling:

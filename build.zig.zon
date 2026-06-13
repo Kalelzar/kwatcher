@@ -22,6 +22,9 @@
         .kw_action = .{
             .path = "packages/action",
         },
+        .kw_signal = .{
+            .path = "packages/signal",
+        },
         .kw_kwev = .{
             .path = "packages/kwev",
         },
