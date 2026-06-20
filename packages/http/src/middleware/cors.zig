@@ -225,6 +225,8 @@ pub fn WithCors(comptime routes: []const type) []const type {
                 var new_route = route;
                 new_route.method = .options;
                 new_route.identifier = "[CORS] " ++ route.identifier;
+                new_route.raw = "";
+
                 nroutes[count] = R.swap(PreflightRouteHandlers.create(cache).make)
                     .mod(.{ .method = .options })
                     .mod(.{ .route = new_route })

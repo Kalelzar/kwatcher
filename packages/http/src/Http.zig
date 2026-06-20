@@ -1064,6 +1064,7 @@ pub const RouteGen = struct {
         method: Parser.HttpVerb,
         modifiers: Parser.Mods,
         identifier: []const u8,
+        raw: []const u8 = "",
         path: []const Segment,
 
         pub fn canonic(comptime self: Route) []const u8 {
@@ -1100,6 +1101,7 @@ pub const RouteGen = struct {
                     .method = method,
                     .modifiers = modifiers,
                     .identifier = identifier,
+                    .raw = field_name,
                     .path = Segments,
                 };
                 return R;

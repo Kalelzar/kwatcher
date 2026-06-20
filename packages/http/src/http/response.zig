@@ -2,8 +2,10 @@ const std = @import("std");
 const http = @import("../http.zig");
 const core = @import("kw-core");
 
+/// An RFC 7807 problem-details payload describing an error response.
 pub const ProblemDetails = struct {
     type: anyerror,
+    /// A short, human-readable summary of the problem.
     title: []const u8,
     details: ?[]const u8 = null,
     instance: []const u8,
