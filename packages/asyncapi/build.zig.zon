@@ -1,0 +1,16 @@
+.{
+    .name = .kw_asyncapi,
+    .version = "0.1.2",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0x11351690a3756c49,
+    .dependencies = .{
+        .kw_docgen = .{
+            .path = "../docgen",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
