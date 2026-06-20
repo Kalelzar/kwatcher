@@ -55,7 +55,7 @@ pub fn DriverBuilder(
     comptime config: []const u8,
     comptime listen: bool,
     comptime _jobs: comptime_int,
-    comptime Routes: []const type,
+    comptime _Routes: []const type,
     comptime ErrorHandler: type,
 ) *const fn (comptime u12) type {
     const H = struct {
@@ -66,6 +66,7 @@ pub fn DriverBuilder(
                 pub const kind = Root.kind;
                 pub const jobs = _jobs;
                 pub const key = driver_key;
+                pub const Routes = _Routes;
                 pub const RouteKeys = shared.EnumerateRoutes(Routes);
                 pub const CallContext = shared.UniteCallContext(Routes);
                 pub const Dependencies = shared.MergeDeps(

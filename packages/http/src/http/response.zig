@@ -37,6 +37,7 @@ pub fn Json(
     const StatusEnum = Enumize(expected_statuses);
     return struct {
         const statuses = StatusEnum;
+        pub const ContentType = "application/json";
         value: ApiResult(Result, ProblemDetails, expected_statuses),
 
         pub fn write(self: *const @This(), writer: *std.Io.Writer, res: *http.Response) !void {
