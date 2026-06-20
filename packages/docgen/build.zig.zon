@@ -1,0 +1,19 @@
+.{
+    .name = .kw_docgen,
+    .version = "0.1.2",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0x15bbf125395b4269,
+    .dependencies = .{
+        .kw_core = .{
+            .path = "../core",
+        },
+        .kwatcher = .{
+            .path = "../runtime",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
