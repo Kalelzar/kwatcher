@@ -360,17 +360,19 @@ const signal_driver = signal.Driver
     .build();
 
 /// Combined driver registry
-const drivers = core.DriverRegistry
-    .new()
-    .registerHandler(cron_driver)
-    .registerHandler(amqp_driver)
-    .registerHandler(http_driver)
-    .registerHandler(action_driver)
-    .registerHandler(signal_driver);
+pub const drivers = struct {
+    pub const drivers = core.DriverRegistry
+        .new()
+        .registerHandler(cron_driver)
+        .registerHandler(amqp_driver)
+        .registerHandler(http_driver)
+        .registerHandler(action_driver)
+        .registerHandler(signal_driver);
+};
 
 /// Type alias for the scheduler (used to publish events from cron routes)
 /// SchedulerMap() returns a function that maps driver keys to scheduler types
-const Scheduler = drivers.SchedulerMap();
+const Scheduler = drivers.drivers.SchedulerMap();
 
 // ============================================================================
 // Main Application
@@ -433,7 +435,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     // - .static(): Lives for the entire application lifetime
     // - .scoped(): Created fresh for each request
     const deps = core.deps.DependencyContainer(Config)
-        .new(drivers, allocator)
+        .new(drivers.drivers, allocator)
         // Register default dependencies (allocator pools, user info, client info)
         .with(.all, kwatcher.default.withDefault(&config_slot, .{
             .name = "example",
@@ -443,7 +445,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         .with(.all, kwatcher.default.config(AppConfig, "app"), allocator)
         .with(.http, kwatcher.default.config(http.middleware.Cors.Config, "middleware.cors"), allocator)
         // Register AMQP client pool and connection handling
-        .with(.amqp, amqp.defaultFor(drivers, RouteContext), allocator)
+        .with(.amqp, amqp.defaultFor(drivers.drivers, RouteContext), allocator)
         // TODO: create a http.defaultFor
         .with(.http, kwatcher.default.config(http.Config, "driver.http"), allocator)
         // Register our custom counter as a static dependency
@@ -451,7 +453,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         .static(.amqp, &counter, allocator);
 
     // Create and start the server
-    var server = try kwatcher.server.Server(@TypeOf(deps), drivers)
+    var server = try kwatcher.server.Server(@TypeOf(deps), drivers.drivers)
         .init(allocator, deps, 4); // 2 consumer threads
     defer server.deinit();
 
