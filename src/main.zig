@@ -71,7 +71,9 @@ pub const HeartbeatMessage = struct {
     pub const schema_name = "heartbeat";
     pub const schema_version = 1;
 
+    /// Unix timestamp (seconds) when the heartbeat was produced.
     timestamp: i64,
+    /// The name of the event that triggered this heartbeat.
     event: []const u8,
     count: u64,
     greeting: []const u8,
@@ -153,6 +155,9 @@ const SignalRoutes = struct {
 const HTTPRoutes = struct {
     // --- /api/v1/users family (shared prefix) ---
 
+    /// Get the root index.
+    /// This is a placeholder that just returns an empty object
+    /// @200 An empty placeholder
     pub fn @"GET / @index"(_: http.data.Request(null)) []const HeartbeatMessage {
         log.info("HELLO FROM SERVER", .{});
         return &.{};
@@ -205,6 +210,7 @@ const HTTPRoutes = struct {
         };
     }
 
+    /// Fetch a single user by id. Returns a heartbeat snapshot for that user.
     pub fn @"GET /api/v1/users/{id} @getUser"(ctx: struct {
         request: *http.Request,
         response: *http.Response,

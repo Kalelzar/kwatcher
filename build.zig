@@ -117,6 +117,15 @@ pub fn build(b: *std.Build) !void {
 
     const modgen_path = modgen.addOutputDirectoryArg("kw-modgen");
     const docgen_path = docgen.addOutputDirectoryArg("kw-docgen");
+    // Source roots for doc-comment mining (kw-docindex), walked at generation time.
+    // The app's own sources, plus every package in the build graph (transitive,
+    // path- and fetched-deps alike) so routes/types defined in dependencies are
+    // documented too.
+    docgen.addArg(b.pathFromRoot("src"));
+    inline for (@typeInfo(@import("root").dependencies.packages).@"struct".decls) |decl| {
+        const pkg = @field(@import("root").dependencies.packages, decl.name);
+        if (@hasDecl(pkg, "build_root")) docgen.addArg(pkg.build_root);
+    }
 
     example.step.dependOn(&docgen.step);
 
