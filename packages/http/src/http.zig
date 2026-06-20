@@ -21,6 +21,8 @@ const MPMCQueue = core.queue.StaticStrict;
 const Resolver = core.resolver.Resolver;
 const Router = @import("http/router.zig");
 
+const Root = @This();
+
 pub const kind = .http;
 pub const data = @import("http/response.zig");
 pub const Response = httpz.Response;
@@ -61,6 +63,7 @@ pub fn DriverBuilder(
             return struct {
                 pub const ConfigType = Config;
                 pub const config_path = config;
+                pub const kind = Root.kind;
                 pub const jobs = _jobs;
                 pub const key = driver_key;
                 pub const RouteKeys = shared.EnumerateRoutes(Routes);

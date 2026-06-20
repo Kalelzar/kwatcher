@@ -36,6 +36,8 @@ pub const Method = enum {
     rejected,
 };
 
+const Root = @This();
+
 pub const Driver = shared.DriverBuilder(DriverBuilder, true);
 
 pub fn Provided(comptime T: type) type {
@@ -205,6 +207,7 @@ pub fn DriverBuilder(
                 pub const ConfigType = conftype;
                 pub const config_path = config;
                 pub const jobs = _jobs;
+                pub const kind = Root.kind;
                 pub const key = driver_key;
                 pub const RouteKeys = shared.EnumerateRoutes(Routes);
                 pub const PubRoutes = FilterRoutes(Routes, .publish);

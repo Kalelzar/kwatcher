@@ -13,6 +13,7 @@ const shared = @import("kw-core").shared;
 const MPMCQueue = @import("kw-core").queue.StaticStrict;
 
 pub const kind = .signal;
+const Root = @This();
 
 pub const Driver = shared.DriverBuilder(DriverBuilder, false);
 
@@ -103,6 +104,7 @@ pub fn DriverBuilder(
             return struct {
                 pub const jobs = _jobs;
                 pub const key = driver_key;
+                pub const kind = Root.kind;
                 pub const RouteKeys = shared.EnumerateRoutes(Routes);
                 pub const CallContext = shared.UniteCallContext(Routes);
                 pub const Dependencies = shared.MergeDeps(Routes, &.{std.mem.Allocator});
