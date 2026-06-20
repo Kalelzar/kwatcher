@@ -5,12 +5,14 @@ pub fn build(b: *std.Build) !void {
     const build_all = b.option(bool, "all", "Build all components. You can still disable individual components") orelse false;
     const build_static_library = b.option(bool, "lib", "Build a static library object") orelse build_all;
     const include_metrics = b.option(bool, "metrics", "Include metrics generation in code.") orelse true;
+    const openapi_version = b.option([]const u8, "openapi_version", "Target OpenAPI version to emit.") orelse "3.2.0";
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
     const o = b.addOptions();
     o.addOption(bool, "enable_metrics", include_metrics);
+    o.addOption([]const u8, "openapi_version", openapi_version);
 
     const kw_docgen_http = b.addModule("kw-docgen--http", .{
         .root_source_file = b.path("src/root.zig"),
