@@ -50,7 +50,7 @@ pub fn build(b: *std.Build) !void {
     const exe = b.addExecutable(.{
         .name = if (module_only) "kw-modgen" else "kw-docgen",
         .root_module = kw_docgen,
-        .linkage = .static,
+        .linkage = .dynamic,
         .use_llvm = true,
     });
 
