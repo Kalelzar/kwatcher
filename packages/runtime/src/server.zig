@@ -82,7 +82,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
             // TODO: deinit schedulers
         }
 
-        pub fn bind(self: *Self) !void {
+        fn bind(self: *Self) !void {
             var od = self.deps.become(_Deps);
             self.handlers = try D.initAll(self.allocator, &od, EventType, EventValues);
             inline for (Handlers, 0..) |_, i| {
@@ -93,7 +93,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
             }
         }
 
-        pub fn watch(self: *Self) !void {
+        fn watch(self: *Self) !void {
             const pool = try self.allocator.create(std.Thread.Pool);
             defer self.allocator.destroy(pool);
             const jobs = comptime blk: {
@@ -146,14 +146,14 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
             pool.waitAndWork(&wg);
         }
 
-        pub fn EventOf(comptime ev: EventType) ?struct { type, usize } {
+        fn EventOf(comptime ev: EventType) ?struct { type, usize } {
             inline for (Handlers, 0..) |H, i| {
                 if (comptime H.accepts(ev)) return .{ H, i };
             }
             return null;
         }
 
-        pub fn begin(self: *Self) !void {
+        fn begin(self: *Self) !void {
             const pool = try self.allocator.create(std.Thread.Pool);
             defer self.allocator.destroy(pool);
             try std.Thread.Pool.init(pool, .{ .allocator = self.allocator, .n_jobs = self.consumers });
@@ -181,7 +181,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
             }
         }
 
-        pub fn stopHandler(self: *Self, comptime addr: **anyopaque) std.posix.Sigaction.handler_fn {
+        fn stopHandler(self: *Self, comptime addr: **anyopaque) std.posix.Sigaction.handler_fn {
             const H = struct {
                 pub fn shutdown(_: c_int) callconv(.c) void {
                     const s: *Self = @ptrCast(@alignCast(addr.*));
