@@ -476,3 +476,7 @@ pub fn main() !void {
         try juicyMain(alloc);
     }
 }
+
+comptime {
+    std.testing.refAllDecls(@This());
+}

@@ -1,52 +1,5 @@
 const std = @import("std");
 
-pub fn benchmarks(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    lib_mod: *std.Build.Module,
-) !*std.Build.Step {
-    const name: []const []const u8 = &.{
-        "memCacheN",
-        "memCacheNFull",
-        "memCacheNFullLinear",
-        "memCacheNFullRandom",
-        "memCacheNWithLRU",
-        "memCacheNWithTTL",
-        "memCacheNWithLRUThenTTL",
-        "memGetNLinear",
-        "memGetNLinearWithLRU",
-        "memGetNRandom",
-        "memGetNRandomWithLRU",
-        "fileCacheN",
-        "fileCacheNWithLRU",
-        "tierCacheN",
-    };
-    const step = b.step("benchmark", "Builds various benchmarks.");
-
-    inline for (name) |n| {
-        const file = "src/benchmark/cache/" ++ n ++ ".zig";
-        const bench_mod = b.createModule(.{
-            .root_source_file = b.path(file),
-            .target = target,
-            .optimize = optimize,
-        });
-
-        bench_mod.addImport("kwatcher", lib_mod);
-
-        const bench_exe = b.addExecutable(.{
-            .name = n,
-            .root_module = bench_mod,
-        });
-
-        const install = b.addInstallArtifact(bench_exe, .{});
-
-        step.dependOn(&install.step);
-    }
-
-    return step;
-}
-
 pub fn build(b: *std.Build) !void {
     // Options
     const build_all = b.option(bool, "all", "Build all components. You can still disable individual components") orelse false;
@@ -140,8 +93,4 @@ pub fn build(b: *std.Build) !void {
 
     // kwev tooling:
     kwatcher_kwev.addImport("kw-kwev", kw_kwev);
-
-    // Benchmarks (not migrated to v2; wired as before, excluded from `check`):
-    const bench_step = try benchmarks(b, target, optimize, kwatcher);
-    _ = bench_step;
 }
