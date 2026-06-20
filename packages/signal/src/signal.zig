@@ -288,9 +288,9 @@ pub fn From(comptime Container: type) []type {
     }
 }
 
-pub const CapabilityType = enum { name };
+pub const CapabilityType = enum { name, signal };
 
-pub const Capability = union(CapabilityType) { name: []const u8, signal: Signal, s };
+pub const Capability = union(CapabilityType) { name: []const u8, signal: Signal };
 
 pub fn RouteBase(
     comptime HandlerFac: anytype,
@@ -477,4 +477,49 @@ comptime {
         .build();
 
     @import("kw-core").driver.AssertDriver(Drv, .signal);
+}
+
+// Ref all decls
+comptime {
+    const core = @import("kw-core");
+
+    const Rs = struct {
+        pub fn @"TERM @term"(info: SignalInfo) void {
+            _ = info;
+        }
+        pub fn @"INT @int"(info: SignalInfo, dependency: i64) void {
+            _ = info;
+            _ = dependency;
+        }
+    };
+
+    const Rts = From(Rs);
+
+    const R1 = Rts[0];
+    R1.requires(.name);
+    R1.requires(.signal);
+    if (R1.satisfies(.nothing)) @compileError("BUG: Incorrect constraint return");
+    const R2 = R1.mod(.{ .name = "new" });
+    if (!std.mem.eql(u8, R2.query(.name), "new")) @compileError("BUG: Wrong name - " ++ R2.query(.name));
+    const R3 = R2.mod(.{ .signal = .HUP });
+    if (R3.query(.signal) != .HUP) @compileError("BUG: Wrong signal");
+
+    const Drv = Driver
+        .new(.signal)
+        .listen(true)
+        .jobs(1)
+        .routes(Rts)
+        .build();
+
+    const Ds = core.driver.Drivers.new().registerHandler(Drv);
+
+    const ET = Ds.EventList();
+    const EV = Ds.EventValues();
+    const E = Event(ET, EV);
+
+    _ = Ds.Handlers(ET, EV)[0];
+    const Sch = Ds.SchedulerMap();
+    _ = Sch(.signal);
+
+    _ = E;
 }
