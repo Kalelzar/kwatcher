@@ -7,6 +7,7 @@ pub fn build(b: *std.Build) !void {
     const build_example = b.option(bool, "example", "Build the example application") orelse build_all;
     const build_kwev = b.option(bool, "kwev", "Build the kwev tooling ") orelse build_all;
     const openapi_version = b.option([]const u8, "openapi_version", "Target OpenAPI version for HTTP docgen") orelse "3.2.0";
+    const asyncapi_version = b.option([]const u8, "asyncapi_version", "Target AsyncAPI version for AMQP docgen") orelse "3.0.0";
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -91,6 +92,12 @@ pub fn build(b: *std.Build) !void {
         .openapi_version = openapi_version,
     }).module("kw-docgen--http");
 
+    const kw_docgen_amqp = b.dependency("kw_docgen_amqp", .{
+        .target = target,
+        .optimize = optimize,
+        .asyncapi_version = asyncapi_version,
+    }).module("kw-docgen--amqp");
+
     // 3rd Party:
     const httpz = b.dependency("httpz", .{ .target = target, .optimize = optimize }).module("httpz");
 
@@ -115,7 +122,7 @@ pub fn build(b: *std.Build) !void {
         .backends = &.{
             .{ .kind = "http", .module = kw_docgen_http },
             .{ .kind = "cron", .module = kw_docgen_none },
-            .{ .kind = "amqp", .module = kw_docgen_none },
+            .{ .kind = "amqp", .module = kw_docgen_amqp },
             .{ .kind = "action", .module = kw_docgen_none },
             .{ .kind = "signal", .module = kw_docgen_none },
         },
