@@ -66,6 +66,10 @@ fn emitOperation(s: *Stringify, op: model.Operation) !void {
     try s.write(op.operation_id);
     try s.objectField("summary");
     try s.write(op.summary);
+    if (op.description) |d| {
+        try s.objectField("description");
+        try s.write(d);
+    }
 
     if (op.parameters.len > 0) {
         try s.objectField("parameters");
@@ -133,6 +137,7 @@ fn emitSchema(s: *Stringify, schema: model.Schema) !void {
             if (schema.nullable) {
                 // A `$ref` can't carry `null` directly; wrap it.
                 try s.beginObject();
+                try emitDesc(s, schema.description);
                 try s.objectField("anyOf");
                 try s.beginArray();
                 try s.beginObject();
@@ -144,14 +149,17 @@ fn emitSchema(s: *Stringify, schema: model.Schema) !void {
                 try s.endObject();
             } else {
                 try s.beginObject();
+                // In 2020-12 (3.2.0) a `$ref` may carry sibling keywords like description.
                 try s.objectField("$ref");
                 try s.write(ref);
+                try emitDesc(s, schema.description);
                 try s.endObject();
             }
         },
 
         .one_of => {
             try s.beginObject();
+            try emitDesc(s, schema.description);
             try s.objectField("oneOf");
             try s.beginArray();
             for (schema.one_of) |variant| try emitSchema(s, variant);
@@ -163,23 +171,29 @@ fn emitSchema(s: *Stringify, schema: model.Schema) !void {
         .empty => {
             if (schema.nullable) {
                 try s.beginObject();
+                try emitDesc(s, schema.description);
                 try emitTypeField(s, "null", false);
                 try s.endObject();
             } else {
                 try s.beginObject();
+                try emitDesc(s, schema.description);
                 try s.endObject();
             }
         },
 
         .object => {
             try s.beginObject();
+            try emitDesc(s, schema.description);
             try emitTypeField(s, "object", schema.nullable);
             if (schema.properties.len > 0) {
                 try s.objectField("properties");
                 try s.beginObject();
                 for (schema.properties) |prop| {
                     try s.objectField(prop.name);
-                    try emitSchema(s, prop.schema);
+                    // A property's own doc comment becomes the description of its schema.
+                    var prop_schema = prop.schema;
+                    if (prop.description) |d| prop_schema.description = d;
+                    try emitSchema(s, prop_schema);
                 }
                 try s.endObject();
             }
@@ -194,6 +208,7 @@ fn emitSchema(s: *Stringify, schema: model.Schema) !void {
 
         .array => {
             try s.beginObject();
+            try emitDesc(s, schema.description);
             try emitTypeField(s, "array", schema.nullable);
             if (schema.items) |items| {
                 try s.objectField("items");
@@ -208,6 +223,7 @@ fn emitSchema(s: *Stringify, schema: model.Schema) !void {
 
         .@"enum" => {
             try s.beginObject();
+            try emitDesc(s, schema.description);
             try emitTypeField(s, "string", schema.nullable);
             try s.objectField("enum");
             try s.beginArray();
@@ -218,6 +234,7 @@ fn emitSchema(s: *Stringify, schema: model.Schema) !void {
 
         .string, .integer, .number, .boolean => {
             try s.beginObject();
+            try emitDesc(s, schema.description);
             try emitTypeField(s, @tagName(schema.kind), schema.nullable);
             if (schema.format) |f| {
                 try s.objectField("format");
@@ -254,6 +271,13 @@ fn emitNullType(s: *Stringify) !void {
     try s.beginObject();
     try emitTypeField(s, "null", false);
     try s.endObject();
+}
+
+fn emitDesc(s: *Stringify, description: ?[]const u8) !void {
+    if (description) |d| {
+        try s.objectField("description");
+        try s.write(d);
+    }
 }
 
 comptime {

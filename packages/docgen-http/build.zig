@@ -22,6 +22,9 @@ pub fn build(b: *std.Build) !void {
 
     kw_docgen_http.addOptions("build_config", o);
 
+    const kw_docindex = b.dependency("kw_docindex", .{ .target = target, .optimize = optimize }).module("kw-docindex");
+    kw_docgen_http.addImport("kw-docindex", kw_docindex);
+
     const tests = b.addTest(.{
         .root_module = kw_docgen_http,
         .use_llvm = true,

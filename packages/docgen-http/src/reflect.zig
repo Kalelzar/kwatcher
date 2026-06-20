@@ -1,11 +1,14 @@
 const std = @import("std");
+const docindex = @import("kw-docindex");
 const model = @import("model.zig");
 
 /// Shared state for a single document build: the arena schemas are allocated from,
-/// and the component registry named structs are deduplicated into.
+/// the component registry named structs are deduplicated into, and an optional
+/// doc-comment index consulted for type/field descriptions.
 pub const Ctx = struct {
     allocator: std.mem.Allocator,
     components: *model.Components,
+    doc_index: ?*const docindex.DocIndex = null,
 };
 
 /// The content type a payload type explicitly declares via `pub const ContentType`,
@@ -106,27 +109,37 @@ pub fn schemaFor(comptime T: type, ctx: *Ctx) std.mem.Allocator.Error!model.Sche
 }
 
 fn structSchema(comptime T: type, ctx: *Ctx) std.mem.Allocator.Error!model.Schema {
-    const info = @typeInfo(T).@"struct";
-
     if (comptime componentName(T)) |name| {
         const ref = "#/components/schemas/" ++ name;
         // Already registered (or registering) — just reference it.
         if (ctx.components.schemas.contains(name)) return .{ .kind = .ref, .ref = ref };
         // Reserve the slot before recursing so self-referential types terminate.
         try ctx.components.schemas.put(ctx.allocator, name, .{ .kind = .object });
-        const built = try objectSchema(info, ctx);
+        const built = try objectSchema(T, ctx);
         try ctx.components.schemas.put(ctx.allocator, name, built);
         return .{ .kind = .ref, .ref = ref };
     }
 
     // Anonymous/inline struct: emit the object schema directly.
-    return try objectSchema(info, ctx);
+    return try objectSchema(T, ctx);
 }
 
-fn objectSchema(comptime info: std.builtin.Type.Struct, ctx: *Ctx) std.mem.Allocator.Error!model.Schema {
+fn objectSchema(comptime T: type, ctx: *Ctx) std.mem.Allocator.Error!model.Schema {
+    const info = @typeInfo(T).@"struct";
+    // The doc index keys types by bare decl name; `@typeName` is the full import
+    // path + decl, so take the last component. For an anonymous struct this is a
+    // generated name absent from the index, so lookups return null (inline structs
+    // undocumented). NOTE: this is heuristic name-matching — see docKey.
+    const name = comptime docKey(@typeName(T));
+    const names = comptime fieldNames(T);
+
     const props = try ctx.allocator.alloc(model.Property, info.fields.len);
     inline for (info.fields, 0..) |f, i| {
-        props[i] = .{ .name = f.name, .schema = try schemaFor(f.type, ctx) };
+        props[i] = .{
+            .name = f.name,
+            .schema = try schemaFor(f.type, ctx),
+            .description = if (ctx.doc_index) |idx| idx.fieldDoc(name, f.name, names) else null,
+        };
     }
 
     comptime var required_count = 0;
@@ -142,7 +155,37 @@ fn objectSchema(comptime info: std.builtin.Type.Struct, ctx: *Ctx) std.mem.Alloc
         }
     }
 
-    return .{ .kind = .object, .properties = props, .required = required };
+    return .{
+        .kind = .object,
+        .properties = props,
+        .required = required,
+        .description = if (ctx.doc_index) |idx| idx.typeDoc(name, names) else null,
+    };
+}
+
+/// The bare declaration name — the last dot-component of a `@typeName`, which is how
+/// the doc index keys types. `http.response.ProblemDetails` → `ProblemDetails`.
+///
+/// NOTE: this is heuristic. Mapping a reflected type to its source documentation by
+/// name (disambiguated by field set) can mis-resolve when two distinct types share a
+/// name and field shape. Doing it exactly needs import-graph name resolution (find
+/// the actual decl each route handler/param/return points at) rather than reflection
+/// + name matching — a worthwhile but much larger change.
+fn docKey(comptime fqn: []const u8) []const u8 {
+    comptime {
+        const d = std.mem.lastIndexOfScalar(u8, fqn, '.') orelse return fqn;
+        return fqn[d + 1 ..];
+    }
+}
+
+/// The reflected struct's field names, as a comptime slice — used to disambiguate
+/// doc-index entries that collide on file-stem.
+fn fieldNames(comptime T: type) []const []const u8 {
+    const fields = @typeInfo(T).@"struct".fields;
+    comptime var names: [fields.len][]const u8 = undefined;
+    inline for (fields, 0..) |f, i| names[i] = f.name;
+    const frozen = names;
+    return &frozen;
 }
 
 /// A field is required when it has no default value and is not itself optional.
@@ -234,6 +277,41 @@ test "anonymous struct is inlined" {
     const s = try schemaFor(struct { name: []const u8 }, &ctx);
     try std.testing.expectEqual(model.SchemaKind.object, s.kind);
     try std.testing.expectEqual(@as(usize, 0), components.schemas.count());
+}
+
+test "schema and field descriptions come from the doc index" {
+    const HeartbeatMessage = struct { timestamp: u64, count: u64 };
+
+    // Populate the index directly under this type's exact `@typeName`, sidestepping
+    // file-stem FQN matching (a test-local struct has no real source file).
+    var index: docindex.DocIndex = .{ .arena = std.heap.ArenaAllocator.init(std.testing.allocator) };
+    defer index.deinit();
+    const ia = index.arena.allocator();
+    var entries: std.ArrayListUnmanaged(docindex.TypeEntry) = .empty;
+    try entries.append(ia, .{
+        .doc = "A heartbeat payload.",
+        .field_names = &.{ "timestamp", "count" },
+        .field_docs = &.{.{ .name = "timestamp", .doc = "Unix timestamp in seconds." }},
+    });
+    try index.types.put(ia, comptime docKey(@typeName(HeartbeatMessage)), entries);
+
+    var components: model.Components = .{};
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var ctx: Ctx = .{ .allocator = arena.allocator(), .components = &components, .doc_index = &index };
+    defer components.schemas.deinit(arena.allocator());
+
+    _ = try schemaFor(HeartbeatMessage, &ctx);
+    const registered = components.schemas.get("HeartbeatMessage").?;
+    try std.testing.expectEqualStrings("A heartbeat payload.", registered.description.?);
+    // `timestamp` is documented; `count` is not.
+    for (registered.properties) |p| {
+        if (std.mem.eql(u8, p.name, "timestamp")) {
+            try std.testing.expectEqualStrings("Unix timestamp in seconds.", p.description.?);
+        } else {
+            try std.testing.expect(p.description == null);
+        }
+    }
 }
 
 test "ContentType decl overrides default" {

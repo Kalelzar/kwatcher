@@ -1,6 +1,8 @@
 const std = @import("std");
 const build_config = @import("build_config");
 
+const docindex = @import("kw-docindex");
+
 const model = @import("model.zig");
 const version = @import("version.zig");
 const reflect = @import("reflect.zig");
@@ -15,7 +17,12 @@ const Zoir = std.zig.Zoir;
 /// driver's registered routes into a version-neutral model and serialize it to the
 /// target OpenAPI version (default 3.2.0, overridable via the `openapi_version`
 /// build option). The result is written to `<name>-<driver_key>-<version>.json`.
-pub fn docgen(comptime Driver: type, out_dir: std.fs.Dir, allocator: std.mem.Allocator) !void {
+pub fn docgen(
+    comptime Driver: type,
+    out_dir: std.fs.Dir,
+    allocator: std.mem.Allocator,
+    doc_index: *const docindex.DocIndex,
+) !void {
     const ver = version.parse(build_config.openapi_version) catch |err| {
         std.log.err(
             "docgen-http: unsupported openapi_version '{s}'. Only 3.2.0 is implemented.",
@@ -30,7 +37,7 @@ pub fn docgen(comptime Driver: type, out_dir: std.fs.Dir, allocator: std.mem.All
 
     const info = readInfo(a, @tagName(Driver.kind));
 
-    const doc = try extract.buildDocument(Driver, info, ver, a);
+    const doc = try extract.buildDocument(Driver, info, ver, doc_index, a);
 
     const file_name = try std.fmt.allocPrint(a, "{s}-{s}-{s}.json", .{
         info.title,

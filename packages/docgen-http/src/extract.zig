@@ -1,4 +1,5 @@
 const std = @import("std");
+const docindex = @import("kw-docindex");
 const model = @import("model.zig");
 const reflect = @import("reflect.zig");
 const version = @import("version.zig");
@@ -15,10 +16,11 @@ pub fn buildDocument(
     comptime Driver: type,
     info: model.Info,
     ver: version.OpenApiVersion,
+    doc_index: ?*const docindex.DocIndex,
     arena: std.mem.Allocator,
 ) !model.Document {
     var components: model.Components = .{};
-    var ctx: reflect.Ctx = .{ .allocator = arena, .components = &components };
+    var ctx: reflect.Ctx = .{ .allocator = arena, .components = &components, .doc_index = doc_index };
 
     // Group operations by path so routes sharing a path (different methods)
     // collapse into one Path Item. Insertion order is preserved for stable output.
@@ -84,11 +86,27 @@ fn buildOperation(
         };
     }
 
+    // The handler's `///` doc comment, looked up by its original (raw) source name,
+    // drives both summary and description: summary = first sentence, description =
+    // the full text when it carries more than that sentence. With no doc comment we
+    // fall back to a "<METHOD> <path>" summary and no description.
+    const fallback_summary = comptime methodUpper(R.method) ++ " " ++ path;
+    var summary: []const u8 = fallback_summary;
+    var description: ?[]const u8 = null;
+    if (ctx.doc_index) |idx| {
+        if (idx.declDoc(R.inner.raw)) |doc| {
+            const first = firstSentence(doc);
+            summary = first;
+            description = if (doc.len > first.len) doc else null;
+        }
+    }
+
     return .{
         .method = comptime methodOf(R.method),
         // `R.id` is the route identifier — guaranteed unique across the driver.
         .operation_id = R.id,
-        .summary = comptime methodUpper(R.method) ++ " " ++ path,
+        .summary = summary,
+        .description = description,
         .parameters = try params.toOwnedSlice(arena),
         .request_body = request_body,
         .responses = try buildResponses(R.Return, ctx, arena),
@@ -172,6 +190,24 @@ fn isStatusUnion(comptime T: type) bool {
 
 fn phraseOf(status: std.http.Status) []const u8 {
     return status.phrase() orelse "";
+}
+
+/// The first sentence of a doc comment: up to the first sentence-ending period (or
+/// the first line break), trimmed. Used as the short OpenAPI `summary`.
+fn firstSentence(text: []const u8) []const u8 {
+    var end = text.len;
+    if (std.mem.indexOfScalar(u8, text, '\n')) |nl| end = nl;
+    var i: usize = 0;
+    while (i < end) : (i += 1) {
+        if (text[i] == '.') {
+            const after = i + 1;
+            if (after >= end or text[after] == ' ') {
+                end = after;
+                break;
+            }
+        }
+    }
+    return std.mem.trimRight(u8, text[0..end], " \t");
 }
 
 // --- path rendering -------------------------------------------------------
@@ -282,16 +318,25 @@ fn TestRoute(
     return struct {
         pub const method = verb;
         pub const id = identifier;
-        pub const inner = .{ .path = path };
+        pub const inner = .{ .path = path, .raw = identifier };
         pub const CallContext = Ctx;
         pub const Return = Ret;
     };
 }
 
-fn buildTestDoc(comptime Driver: type) !struct { doc: model.Document, arena: *std.heap.ArenaAllocator } {
+const TestDoc = struct { doc: model.Document, arena: *std.heap.ArenaAllocator };
+
+fn buildTestDoc(comptime Driver: type) !TestDoc {
+    return buildTestDocWith(Driver, null);
+}
+
+fn buildTestDocWith(
+    comptime Driver: type,
+    doc_index: ?*const docindex.DocIndex,
+) !TestDoc {
     const arena = try std.testing.allocator.create(std.heap.ArenaAllocator);
     arena.* = std.heap.ArenaAllocator.init(std.testing.allocator);
-    const doc = try buildDocument(Driver, .{ .title = "t", .version = "1" }, .v3_2_0, arena.allocator());
+    const doc = try buildDocument(Driver, .{ .title = "t", .version = "1" }, .v3_2_0, doc_index, arena.allocator());
     return .{ .doc = doc, .arena = arena };
 }
 
@@ -397,6 +442,51 @@ test "generic status union (not the Json helper) yields a response per status" {
         }
     }
     try std.testing.expect(saw200 and saw400 and saw204);
+}
+
+test "summary is the first sentence; description holds the full multi-sentence doc" {
+    const Ctx = struct { request: *u8, response: *u8 };
+    const Driver = struct {
+        pub const Routes = &[_]type{
+            // `inner.raw` for a fabricated route is its identifier.
+            TestRoute(.get, "listThings", &.{.{ .static = "things" }}, Ctx, HeartbeatMessage),
+            TestRoute(.post, "makeThing", &.{.{ .static = "things" }}, Ctx, HeartbeatMessage),
+        };
+    };
+
+    var index: docindex.DocIndex = .{ .arena = std.heap.ArenaAllocator.init(std.testing.allocator) };
+    defer index.deinit();
+    try docindex.indexSource(std.testing.allocator, &index,
+        \\/// Lists all the things. Includes archived ones.
+        \\pub fn listThings() void {}
+        \\/// Creates a thing.
+        \\pub fn makeThing() void {}
+    );
+
+    const r = try buildTestDocWith(Driver, &index);
+    defer {
+        r.arena.deinit();
+        std.testing.allocator.destroy(r.arena);
+    }
+
+    // Multi-sentence: summary = first sentence, description = full text.
+    const list = findOp(r.doc, "/things", .get).?;
+    try std.testing.expectEqualStrings("Lists all the things.", list.summary);
+    try std.testing.expectEqualStrings("Lists all the things. Includes archived ones.", list.description.?);
+
+    // Single-sentence: summary carries it, description is omitted (no extra content).
+    const make = findOp(r.doc, "/things", .post).?;
+    try std.testing.expectEqualStrings("Creates a thing.", make.summary);
+    try std.testing.expect(make.description == null);
+
+    // Without an index, summary falls back to "<METHOD> <path>".
+    const r2 = try buildTestDoc(Driver);
+    defer {
+        r2.arena.deinit();
+        std.testing.allocator.destroy(r2.arena);
+    }
+    try std.testing.expectEqualStrings("GET /things", findOp(r2.doc, "/things", .get).?.summary);
+    try std.testing.expect(findOp(r2.doc, "/things", .get).?.description == null);
 }
 
 test "void return becomes a 204" {

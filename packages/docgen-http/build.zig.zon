@@ -3,7 +3,11 @@
     .version = "0.1.2",
     .minimum_zig_version = "0.15.2",
     .fingerprint = 0x3185bfa5bb981a7,
-    .dependencies = .{},
+    .dependencies = .{
+        .kw_docindex = .{
+            .path = "../docindex",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",

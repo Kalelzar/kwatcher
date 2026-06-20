@@ -44,6 +44,8 @@ pub const Operation = struct {
     method: Method,
     operation_id: []const u8,
     summary: []const u8,
+    /// From the route handler's `///` doc comment, when available.
+    description: ?[]const u8 = null,
     parameters: []const Parameter,
     request_body: ?RequestBody = null,
     responses: []const Response,
@@ -80,6 +82,8 @@ pub const Components = struct {
 pub const Property = struct {
     name: []const u8,
     schema: Schema,
+    /// From the field's `///` doc comment, when available.
+    description: ?[]const u8 = null,
 };
 
 pub const SchemaKind = enum {
@@ -102,6 +106,9 @@ pub const SchemaKind = enum {
 pub const Schema = struct {
     kind: SchemaKind,
     nullable: bool = false,
+
+    /// From the type's `///` doc comment, when available (set for named types).
+    description: ?[]const u8 = null,
 
     /// JSON Schema `format` hint (e.g. "int64", "double") when known.
     format: ?[]const u8 = null,
