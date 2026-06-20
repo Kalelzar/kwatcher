@@ -197,7 +197,7 @@ pub fn DriverBuilder(
     comptime config: []const u8,
     comptime listen: bool,
     comptime _jobs: comptime_int,
-    comptime Routes: []const type,
+    comptime _Routes: []const type,
     comptime ErrorHandler: type,
 ) *const fn (comptime u12) type {
     _ = ErrorHandler;
@@ -209,6 +209,7 @@ pub fn DriverBuilder(
                 pub const jobs = _jobs;
                 pub const kind = Root.kind;
                 pub const key = driver_key;
+                pub const Routes = _Routes;
                 pub const RouteKeys = shared.EnumerateRoutes(Routes);
                 pub const PubRoutes = FilterRoutes(Routes, .publish);
                 pub const PubRouteKeys = shared.EnumerateRoutes(PubRoutes);
@@ -904,6 +905,42 @@ pub fn From(comptime Container: type, comptime Context: type) []type {
     return routes;
 }
 
+/// Static, comptime-introspectable description of a route.
+pub const Meta = struct {
+    /// The handler's full declaration name.
+    raw: []const u8,
+    event: []const u8,
+    /// Raw form; may contain `{param}` placeholders.
+    exchange: []const u8,
+    /// Raw form; may contain `{param}` placeholders.
+    routing_key: []const u8,
+    queue: ?[]const u8 = null,
+    /// Incoming payload (consume/provide/unrouted/reply).
+    PayloadIn: ?type = null,
+    /// Outgoing payload (publish/reply).
+    PayloadOut: ?type = null,
+};
+
+/// The message payload schema behind a handler's result type: strips an optional
+/// and the `Message(T)` envelope (`{ schema, options }`); a bare schema passes through.
+fn MessagePayload(comptime T: type) type {
+    const U = switch (@typeInfo(T)) {
+        .optional => |o| o.child,
+        else => T,
+    };
+    switch (@typeInfo(U)) {
+        .@"struct" => {
+            if (@hasField(U, "schema") and @hasField(U, "options")) {
+                if (@FieldType(U, "options") == schema.ConfigurableMessageOptions) {
+                    return @FieldType(U, "schema");
+                }
+            }
+        },
+        else => {},
+    }
+    return U;
+}
+
 pub fn RouteBase(
     comptime m: Method,
     comptime exchange_template: anytype,
@@ -911,6 +948,7 @@ pub fn RouteBase(
     comptime HandlerFac: anytype,
     comptime parsed_id: []const u8,
     comptime ev_id: @Type(.enum_literal),
+    comptime route_meta: Meta,
 ) type {
     const ET = @TypeOf(exchange_template);
     const RT = @TypeOf(routing_key_template);
@@ -921,6 +959,7 @@ pub fn RouteBase(
         pub var exchange = exchange_template;
         pub var routing_key = routing_key_template;
         pub const id = parsed_id;
+        pub const meta = route_meta;
 
         pub const CallContext = Handler.CallContext;
         pub const Dependencies = Handler.Dependencies;
@@ -935,6 +974,7 @@ pub fn RouteBase(
                 NextHandler,
                 parsed_id,
                 event_id,
+                route_meta,
             );
         }
 
@@ -946,11 +986,12 @@ pub fn RouteBase(
                 NextHandlerFac(HandlerFac).make, // FIXME: This is very gross.
                 parsed_id,
                 event_id,
+                route_meta,
             );
         }
 
         pub fn requires(comptime ct: anytype) void {
-            if (comptime !meta.hasKey(CapabilityType, ct)) {
+            if (comptime !core.meta.hasKey(CapabilityType, ct)) {
                 @compileError(
                     "Required capability '" ++ @tagName(ct) ++ "' is not supported by AMQP routes.",
                 );
@@ -958,7 +999,7 @@ pub fn RouteBase(
         }
 
         pub fn satisfies(comptime ct: anytype) bool {
-            return meta.hasKey(CapabilityType, ct);
+            return core.meta.hasKey(CapabilityType, ct);
         }
 
         pub fn mod(
@@ -972,6 +1013,7 @@ pub fn RouteBase(
                     HandlerFac,
                     parsed_id,
                     ev_id,
+                    route_meta,
                 ),
                 inline .exchange => |ex| RouteBase(
                     m,
@@ -980,6 +1022,7 @@ pub fn RouteBase(
                     HandlerFac,
                     parsed_id,
                     ev_id,
+                    route_meta,
                 ),
                 inline .routing_key => |rk| RouteBase(
                     m,
@@ -988,6 +1031,7 @@ pub fn RouteBase(
                     HandlerFac,
                     parsed_id,
                     ev_id,
+                    route_meta,
                 ),
             };
         }
@@ -1090,6 +1134,7 @@ pub fn RouteParser(comptime Context: type) type {
             comptime self: @This(),
             comptime pubexpr: AmqpTemplate.PublishExpr,
             comptime f: anytype,
+            comptime fnname: []const u8,
         ) @This() {
             const exch = pubexpr.exchange;
             const exch_is_dynamically_bound = exch.params.len != 0;
@@ -1209,6 +1254,13 @@ pub fn RouteParser(comptime Context: type) type {
                 H.make,
                 pubexpr.event.raw,
                 .send,
+                .{
+                    .raw = fnname,
+                    .event = pubexpr.event.raw,
+                    .exchange = pubexpr.exchange.raw,
+                    .routing_key = pubexpr.route.raw,
+                    .PayloadOut = MessagePayload(klib.meta.Result(f)),
+                },
             );
 
             return self.extend(RB);
@@ -1218,6 +1270,7 @@ pub fn RouteParser(comptime Context: type) type {
             comptime self: @This(),
             comptime consexpr: AmqpTemplate.ConsumeExpr,
             comptime f: anytype,
+            comptime fnname: []const u8,
         ) @This() {
             const exch = consexpr.exchange;
             const exch_is_dynamically_bound = exch.params.len != 0;
@@ -1313,6 +1366,14 @@ pub fn RouteParser(comptime Context: type) type {
                 H.make,
                 consexpr.event.raw,
                 .recv,
+                .{
+                    .raw = fnname,
+                    .event = consexpr.event.raw,
+                    .exchange = consexpr.exchange.raw,
+                    .routing_key = consexpr.route.raw,
+                    .queue = if (consexpr.queue) |q| q.raw else null,
+                    .PayloadIn = __CallContext,
+                },
             );
 
             return self.extend(RB);
@@ -1322,6 +1383,7 @@ pub fn RouteParser(comptime Context: type) type {
             comptime self: @This(),
             comptime expr: AmqpTemplate.UnroutedExpr,
             comptime f: anytype,
+            comptime fnname: []const u8,
         ) @This() {
             const fargs = @typeInfo(@TypeOf(f)).@"fn".params;
 
@@ -1397,6 +1459,13 @@ pub fn RouteParser(comptime Context: type) type {
                 H.make,
                 expr.event.raw,
                 .unrouted,
+                .{
+                    .raw = fnname,
+                    .event = expr.event.raw,
+                    .exchange = "",
+                    .routing_key = "",
+                    .PayloadIn = __CallContext,
+                },
             );
 
             return self.extend(RB);
@@ -1406,6 +1475,7 @@ pub fn RouteParser(comptime Context: type) type {
             comptime self: @This(),
             comptime consexpr: AmqpTemplate.ProvideExpr,
             comptime f: anytype,
+            comptime fnname: []const u8,
         ) @This() {
             const exch = consexpr.exchange;
             const exch_is_dynamically_bound = exch.params.len != 0;
@@ -1527,6 +1597,14 @@ pub fn RouteParser(comptime Context: type) type {
                 H.make,
                 consexpr.event.raw,
                 .recv,
+                .{
+                    .raw = fnname,
+                    .event = consexpr.event.raw,
+                    .exchange = consexpr.exchange.raw,
+                    .routing_key = consexpr.route.raw,
+                    .queue = if (consexpr.queue) |q| q.raw else null,
+                    .PayloadIn = __CallContext,
+                },
             );
 
             return self.extend(RB);
@@ -1536,6 +1614,7 @@ pub fn RouteParser(comptime Context: type) type {
             comptime self: @This(),
             comptime consexpr: AmqpTemplate.ReplyExpr,
             comptime f: anytype,
+            comptime fnname: []const u8,
         ) @This() {
             const exch = consexpr.exchange;
             const exch_is_dynamically_bound = exch.params.len != 0;
@@ -1647,6 +1726,15 @@ pub fn RouteParser(comptime Context: type) type {
                 H.make,
                 consexpr.event.raw,
                 .recv,
+                .{
+                    .raw = fnname,
+                    .event = consexpr.event.raw,
+                    .exchange = consexpr.exchange.raw,
+                    .routing_key = consexpr.route.raw,
+                    .queue = if (consexpr.queue) |q| q.raw else null,
+                    .PayloadIn = __CallContext,
+                    .PayloadOut = MessagePayload(klib.meta.Result(f)),
+                },
             );
 
             return self.extend(RB);
@@ -1665,23 +1753,23 @@ pub fn RouteParser(comptime Context: type) type {
 
                 switch (expression.method) {
                     .provide => {
-                        return self.withProvide(expression, f);
+                        return self.withProvide(expression, f, fnname);
                     },
                     .publish => {
-                        return self.withPublish(expression, f);
+                        return self.withPublish(expression, f, fnname);
                     },
                     .consume => {
-                        return self.withConsume(expression, f);
+                        return self.withConsume(expression, f, fnname);
                     },
                     .reply => {
-                        return self.withReply(expression, f);
+                        return self.withReply(expression, f, fnname);
                     },
                     .rejected => {
                         unreachable;
                         //return self.withRejected(expression, f);
                     },
                     .unrouted => {
-                        return self.withUnrouted(expression, f);
+                        return self.withUnrouted(expression, f, fnname);
                     },
                 }
             }
@@ -1851,6 +1939,7 @@ comptime {
 
     _ = R1.mod(.{ .method = .reply });
     _ = R1.query(.method);
+    _ = R1.meta;
 }
 
 comptime {
