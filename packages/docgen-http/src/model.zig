@@ -1,5 +1,15 @@
 const std = @import("std");
 const version = @import("version.zig");
+const docschema = @import("kw-docschema");
+
+/// The JSON-Schema model nodes are shared with every other docgen backend, so they
+/// live in `kw-docschema` and are re-exported here — callers keep using `model.Schema`
+/// etc. unchanged. The OpenAPI-shaped nodes below (`Document`, `Operation`, …) stay
+/// HTTP-specific.
+pub const Schema = docschema.Schema;
+pub const SchemaKind = docschema.SchemaKind;
+pub const Property = docschema.Property;
+pub const Components = docschema.Components;
 
 /// A version-neutral, in-memory description of an HTTP API.
 ///
@@ -72,67 +82,6 @@ pub const Response = struct {
     /// `null` means "no content" (e.g. 204/3xx).
     content_type: ?[]const u8 = null,
     schema: ?Schema = null,
-};
-
-pub const Components = struct {
-    /// Component name -> schema, referenced as `#/components/schemas/<name>`.
-    schemas: std.StringArrayHashMapUnmanaged(Schema) = .empty,
-};
-
-pub const Property = struct {
-    name: []const u8,
-    schema: Schema,
-    /// From the field's `///` doc comment, when available.
-    description: ?[]const u8 = null,
-};
-
-pub const SchemaKind = enum {
-    object,
-    array,
-    string,
-    integer,
-    number,
-    boolean,
-    @"enum",
-    one_of,
-    ref,
-    /// No constraints at all (`{}`) — used as a fallback for types we can't describe.
-    empty,
-};
-
-/// A neutral superset schema node. Emitters read only the fields relevant to the
-/// active `kind`. `nullable` is stored neutrally; each emitter chooses how to
-/// represent it (3.0's `nullable: true` vs 3.1+/3.2's `type: [..., "null"]`).
-pub const Schema = struct {
-    kind: SchemaKind,
-    nullable: bool = false,
-
-    /// From the type's `///` doc comment, when available (set for named types).
-    description: ?[]const u8 = null,
-
-    /// JSON Schema `format` hint (e.g. "int64", "double") when known.
-    format: ?[]const u8 = null,
-
-    // kind == .object
-    properties: []const Property = &.{},
-    required: []const []const u8 = &.{},
-
-    // kind == .array
-    items: ?*const Schema = null,
-    max_items: ?u64 = null,
-
-    // kind == .enum
-    enum_values: []const []const u8 = &.{},
-
-    // kind == .one_of
-    one_of: []const Schema = &.{},
-
-    // kind == .ref ("#/components/schemas/<ref>")
-    ref: ?[]const u8 = null,
-
-    // numeric bounds, when known
-    minimum: ?i64 = null,
-    maximum: ?i64 = null,
 };
 
 comptime {

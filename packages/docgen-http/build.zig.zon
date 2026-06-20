@@ -7,6 +7,9 @@
         .kw_docindex = .{
             .path = "../docindex",
         },
+        .kw_docgen = .{
+            .path = "../docgen",
+        },
     },
     .paths = .{
         "build.zig",

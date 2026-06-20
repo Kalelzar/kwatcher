@@ -1,7 +1,7 @@
 const std = @import("std");
 const docindex = @import("kw-docindex");
 const model = @import("model.zig");
-const reflect = @import("reflect.zig");
+const reflect = @import("kw-docschema").reflect;
 const version = @import("version.zig");
 
 const Operation = model.Operation;

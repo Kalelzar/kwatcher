@@ -25,6 +25,11 @@ pub fn build(b: *std.Build) !void {
     const kw_docindex = b.dependency("kw_docindex", .{ .target = target, .optimize = optimize }).module("kw-docindex");
     kw_docgen_http.addImport("kw-docindex", kw_docindex);
 
+    // The shared JSON-Schema kernel (reflection + schema nodes) lives in the docgen
+    // framework package and is consumed by every backend.
+    const kw_docschema = b.dependency("kw_docgen", .{ .target = target, .optimize = optimize }).module("kw-docschema");
+    kw_docgen_http.addImport("kw-docschema", kw_docschema);
+
     const tests = b.addTest(.{
         .root_module = kw_docgen_http,
         .use_llvm = true,
