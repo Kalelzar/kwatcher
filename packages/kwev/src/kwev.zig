@@ -144,3 +144,9 @@ pub fn inscribe(kwev: *KWEV, driver: drivers.Drivers) !usize {
     try io_writer.flush();
     return fsize;
 }
+
+// Ref all decls — kwev is generic-free, so this reaches the whole package
+// (KWEV, Writer, Reader, MappedFile, structures, recorder, and the free fns).
+comptime {
+    std.testing.refAllDeclsRecursive(@This());
+}

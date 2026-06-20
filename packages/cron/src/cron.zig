@@ -395,7 +395,7 @@ pub fn RouteBase(
             };
         }
 
-        pub fn query(comptime ct: anytype) @field(
+        pub fn query(comptime ct: anytype) @FieldType(
             Capability,
             @tagName(ct),
         ) {
@@ -708,4 +708,41 @@ comptime {
         .build();
 
     core.driver.AssertDriver(Drv, .cron);
+}
+
+// Ref all decls
+comptime {
+    const Rs = struct {
+        pub fn @"simple 0 */5 * * * *"() void {}
+        pub fn @"withDI 0 0 12 * * *"(dependency: i64) void {
+            _ = dependency;
+        }
+    };
+
+    const Rts = From(Rs);
+
+    const R1 = Rts[0];
+    R1.requires(.name);
+    if (R1.satisfies(.nothing)) @compileError("BUG: Incorrect constraint return");
+    const R2 = R1.mod(.{ .name = "new" });
+    if (!std.mem.eql(u8, R2.query(.name), "new")) @compileError("BUG: Wrong name - " ++ R2.query(.name));
+
+    const Drv = Driver
+        .new(.cron)
+        .listen(false)
+        .jobs(0)
+        .routes(Rts)
+        .build();
+
+    const Ds = core.driver.Drivers.new().registerHandler(Drv);
+
+    const ET = Ds.EventList();
+    const EV = Ds.EventValues();
+    const E = Event(ET, EV);
+
+    _ = Ds.Handlers(ET, EV)[0];
+    const Sch = Ds.SchedulerMap();
+    _ = Sch(.cron);
+
+    _ = E;
 }

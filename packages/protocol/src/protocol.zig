@@ -73,3 +73,19 @@ pub fn deps(
         }
     };
 }
+
+// Ref all decls — refAllDeclsRecursive reaches the client-registration submodule
+// (schema/route/timers/registry/deps/Config + protocol_routes + Scheduler).
+// `use` is the generic entry point; exercise it for both supported driver kinds.
+// (`deps` is the deep DI entry point, exercised by the runtime/example build.)
+comptime {
+    std.testing.refAllDeclsRecursive(@This());
+
+    const Ctx = client_registration.ProtocolContext;
+    _ = use(struct {
+        pub const kind = .amqp;
+    }, &.{.client_registration}, Ctx);
+    _ = use(struct {
+        pub const kind = .cron;
+    }, &.{.client_registration}, Ctx);
+}
