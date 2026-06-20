@@ -10,7 +10,7 @@ pub const Expiration = @import("set_builder.zig").Expiration;
 pub const HotCold = @import("hotcold.zig").HotCold;
 pub const context = @import("context.zig");
 pub const eviction = @import("eviction.zig");
-pub const Tiered = @import("tiered_cache.zig").TieredCache;
+pub const Tiered = @import("tiered_cache.zig").Cache;
 
 pub fn Cache(comptime Data: type) type {
     return struct {
@@ -301,4 +301,26 @@ pub fn autoPushWithContexts(
     };
 
     return &H.push;
+}
+
+comptime {
+    std.testing.refAllDeclsRecursive(@This());
+}
+
+// Ref all decls — instantiate the generics refAllDeclsRecursive can't reach.
+comptime {
+    const Data = struct { v: u64 };
+
+    _ = Cache(Data);
+    _ = HotCold(Data);
+    _ = autoCacheWithContexts(Data, .{u64}, .{});
+    _ = autoPushWithContexts(Data, .{u64}, .{});
+
+    // SetBuilder / context builder chain (mirrors real usage from the amqp driver).
+    const Built = context.memory.Cache(Data, .{u64})
+        .key(.refcache)
+        .evict(.none)
+        .residency(.{ .unlimited = {} })
+        .expiration(.{ .unlimited = {} });
+    _ = context.memory.Container(Built);
 }
