@@ -240,7 +240,7 @@ pub fn RouteBase(comptime HandlerFac: anytype, comptime parsed_id: []const u8) t
         ) {
             requires(ct);
             return switch (ct) {
-                .name => parsed_id,
+                .name => id,
                 else => unreachable,
             };
         }
@@ -345,4 +345,53 @@ comptime {
         .build();
 
     @import("kw-core").driver.AssertDriver(Drv, .action);
+}
+
+// Ref all decls
+comptime {
+    const core = @import("kw-core");
+
+    const Rs = struct {
+        pub fn simple() void {}
+        pub fn emptyParams(param: struct {}) void {
+            _ = param;
+        }
+        pub fn params(param: struct { i64, u64 }) void {
+            _ = param;
+        }
+        pub fn withDI(param: struct { i64, u64 }, dependency: i64) void {
+            _ = param;
+            _ = dependency;
+        }
+        pub fn onlyDI(dependency: i64) void {
+            _ = dependency;
+        }
+    };
+
+    const Rts = From(Rs);
+
+    const R1 = Rts[0];
+    R1.requires(.name);
+    if (R1.satisfies(.nothing)) @compileError("BUG: Incorrect constraint return");
+    const R2 = R1.mod(.{ .name = "new" });
+    if (!std.mem.eql(u8, R2.query(.name), "new")) @compileError("BUG: Wrong name - " ++ R2.query(.name));
+
+    const Drv = Driver
+        .new(.action)
+        .listen(false)
+        .jobs(0)
+        .routes(Rts)
+        .build();
+
+    const Ds = core.driver.Drivers.new().registerHandler(Drv);
+
+    const ET = Ds.EventList();
+    const EV = Ds.EventValues();
+    const E = Event(ET, EV);
+
+    _ = Ds.Handlers(ET, EV)[0];
+    const Sch = Ds.SchedulerMap();
+    _ = Sch(.action);
+
+    _ = E;
 }
