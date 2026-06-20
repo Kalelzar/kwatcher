@@ -1,5 +1,9 @@
 /// A dynamic dispatch wrapper for a message client that follows
 /// AMQP 0.9.1 semantics and definitions
+pub const Amqp = @import("amqp_client.zig");
+pub const Logging = @import("logging_client.zig");
+pub const CircuitBreaker = @import("circuit_breaker_client.zig");
+
 const std = @import("std");
 const amqp = @import("zamqp");
 

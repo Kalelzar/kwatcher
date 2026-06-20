@@ -25,6 +25,8 @@ pub const default = @import("amqp/default.zig").default;
 pub const defaultFor = @import("amqp/default.zig").defaultFor;
 pub const Pool = @import("amqp/pool.zig").ClientPool;
 
+pub const clients = @import("client/client.zig");
+
 pub const Method = enum {
     publish,
     consume,
@@ -850,8 +852,9 @@ pub fn DriverBuilder(
                             client: Client,
                         ) anyerror!void {
                             _ = self;
+                            defer @constCast(&event.internal).deinit();
                             const route = event.consumer_tag;
-                            const maybe = dispatchConsume(
+                            try dispatchConsume(
                                 route,
                                 injector,
                                 event.body,
@@ -859,13 +862,6 @@ pub fn DriverBuilder(
                                 &event,
                                 client,
                             );
-                            // std.log.info("Consume: {t}", .{route});
-                            maybe catch |e| {
-                                // HACK: We need a better way to do this.
-                                if (evprop.attempts == 3) @constCast(&event.internal).deinit(); // Yikes.
-                                return e;
-                            };
-                            @constCast(&event.internal).deinit(); // Yikes.
                         }
                     };
                 }
@@ -971,23 +967,29 @@ pub fn RouteBase(
                     exchange_template,
                     routing_key_template,
                     HandlerFac,
+                    parsed_id,
+                    ev_id,
                 ),
                 inline .exchange => |ex| RouteBase(
                     m,
                     ex,
                     routing_key_template,
                     HandlerFac,
+                    parsed_id,
+                    ev_id,
                 ),
                 inline .routing_key => |rk| RouteBase(
                     m,
                     exchange_template,
                     rk,
                     HandlerFac,
+                    parsed_id,
+                    ev_id,
                 ),
             };
         }
 
-        pub fn query(comptime ct: anytype) @field(
+        pub fn query(comptime ct: anytype) @FieldType(
             Capability(ET, RT),
             @tagName(ct),
         ) {
@@ -1762,4 +1764,92 @@ comptime {
         .build();
 
     core.driver.AssertDriver(Drv, .amqp);
+}
+
+// Ref all decls
+comptime {
+    const Context = struct { client_id: []const u8 = "" };
+
+    const Schema = struct {
+        pub const schema_name = "ref";
+        pub const schema_version = 1;
+        value: u64,
+    };
+
+    const Rs = struct {
+        pub fn @"publish:refpub amq.direct/refkey"(ctx: struct { i64 }) Schema {
+            return .{ .value = @intCast(ctx.@"0") };
+        }
+        pub fn @"consume:refcons amq.direct/refkey"(msg: Schema) void {
+            _ = msg;
+        }
+        pub fn @"reply:refrep amq.direct/refkey"(msg: Schema) Schema {
+            return msg;
+        }
+        pub fn @"provide:refprov amq.direct/refkey"(msg: Schema) u64 {
+            return msg.value;
+        }
+        pub fn @"unrouted:refother"(msg: Schema) void {
+            _ = msg;
+        }
+    };
+
+    const Rts = From(Rs, Context);
+
+    // Driver + registry plumbing.
+    const Drv = Driver
+        .new(.amqp)
+        .config("null")
+        .listen(false)
+        .jobs(0)
+        .routes(Rts)
+        .build();
+
+    const Ds = core.driver.Drivers.new().registerHandler(Drv);
+
+    const ET = Ds.EventList();
+    const EV = Ds.EventValues();
+    const E = Event(ET, EV);
+    _ = E;
+
+    _ = Ds.Handlers(ET, EV)[0];
+    const Sch = Ds.SchedulerMap();
+    const RealSched = Sch(.amqp);
+
+    // Force the amqp-specific (otherwise lazy) handler decls, incl. the provider machinery.
+    const AmqpH = Drv(100);
+    _ = AmqpH.PubRoutes;
+    _ = AmqpH.ConsRoutes;
+    _ = AmqpH.UnroutedRoutes;
+    _ = AmqpH.ProviderRoutes;
+    _ = AmqpH.Provides;
+    _ = AmqpH.DependencyContext;
+
+    // Helper generics.
+    _ = FilterRoutes(Rts, .publish);
+    const P = Provided(u8);
+    _ = &P.init;
+    _ = &P.deinit;
+
+    // Scheduler shim/bridge.
+    const Shim = AmqpSchedulerShim(Rts);
+    _ = &Shim.publish;
+    const Bridge = SchedulerBridge(Shim, RealSched);
+    _ = &Bridge.publishImpl;
+    _ = &Bridge.toShim;
+    const BSC = BridgeShimCtx(Shim, RealSched);
+    _ = &BSC.shimSchedulerFac;
+
+    const R1 = Rts[0];
+    R1.requires(.method);
+    R1.requires(.exchange);
+    R1.requires(.routing_key);
+    if (R1.satisfies(.nothing)) @compileError("BUG: Incorrect constraint return");
+
+    _ = R1.mod(.{ .method = .reply });
+    _ = R1.query(.method);
+}
+
+comptime {
+    std.testing.refAllDeclsRecursive(@This());
 }

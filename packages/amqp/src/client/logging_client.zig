@@ -4,6 +4,7 @@ const schema = @import("kw-core").schema;
 
 const Client = @import("client.zig");
 const ChannelOpts = Client.ChannelOpts;
+const BindOpts = Client.BindOpts;
 const Response = Client.Response;
 
 const LoggingClient = @This();
@@ -91,7 +92,7 @@ fn bind(
     queue: ?[]const u8,
     route: []const u8,
     exchange: []const u8,
-    opts: ChannelOpts,
+    opts: BindOpts,
 ) anyerror![]const u8 {
     const self = getSelf(ptr);
     _ = try self.writer.print(
