@@ -1,0 +1,12 @@
+.{
+    .name = .kw_docgen_http,
+    .version = "0.1.2",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0x3185bfa5bb981a7,
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
