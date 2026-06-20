@@ -26,8 +26,23 @@ pub fn build(b: *std.Build) !void {
 
     kw_docgen.addOptions("build_config", o);
 
+    // The protocol-agnostic JSON-Schema kernel (model nodes + reflection), exposed
+    // as its own module so docgen backends (http, amqp, …) can share one copy
+    // without dragging in the orchestrator's build-time `entrypoint`/`kw-gen--modules`
+    // imports. Its only dependency is the doc-comment index.
+    const kw_docschema = b.addModule("kw-docschema", .{
+        .root_source_file = b.path("src/schema/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const tests = b.addTest(.{
         .root_module = kw_docgen,
+        .use_llvm = true,
+    });
+
+    const docschema_tests = b.addTest(.{
+        .root_module = kw_docschema,
         .use_llvm = true,
     });
 
@@ -44,6 +59,7 @@ pub fn build(b: *std.Build) !void {
     }
 
     const run_tests = b.addRunArtifact(tests);
+    const run_docschema_tests = b.addRunArtifact(docschema_tests);
 
     const install_docs = b.addInstallDirectory(
         .{
@@ -69,7 +85,14 @@ pub fn build(b: *std.Build) !void {
 
     const test_step = b.step("test", "Run the unit tests.");
     test_step.dependOn(&run_tests.step);
+    test_step.dependOn(&run_docschema_tests.step);
     exe.step.dependOn(&run_tests.step);
+
+    // The orchestrator module imports the build-time-injected `entrypoint` /
+    // `kw-gen--modules`, so it only compiles once `build_docgen.wire` runs. The
+    // schema kernel has no such dependency — this step runs its tests standalone.
+    const schema_test_step = b.step("test-schema", "Run the kw-docschema unit tests.");
+    schema_test_step.dependOn(&run_docschema_tests.step);
 
     // - fmt
     const fmt_step = b.step("fmt", "Check formatting");
@@ -93,4 +116,6 @@ pub fn build(b: *std.Build) !void {
     kw_docgen.addImport("kw-core", kw_core);
     kw_docgen.addImport("kwatcher", kwatcher);
     kw_docgen.addImport("kw-docindex", kw_docindex);
+
+    kw_docschema.addImport("kw-docindex", kw_docindex);
 }

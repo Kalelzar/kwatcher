@@ -1,6 +1,6 @@
 const std = @import("std");
 const docindex = @import("kw-docindex");
-const model = @import("model.zig");
+const model = @import("schema.zig");
 
 /// Shared state for a single document build: the arena schemas are allocated from,
 /// the component registry named structs are deduplicated into, and an optional
