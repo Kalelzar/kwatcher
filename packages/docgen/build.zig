@@ -1,5 +1,9 @@
 const std = @import("std");
 
+/// Build-time helper for wiring the docgen pipeline into a consumer's build graph.
+/// Consumers reach it as `@import("kw_docgen").build_docgen`.
+pub const build_docgen = @import("build_docgen.zig");
+
 pub fn build(b: *std.Build) !void {
     // Options
     const build_all = b.option(bool, "all", "Build all components. You can still disable individual components") orelse false;
@@ -53,6 +57,7 @@ pub fn build(b: *std.Build) !void {
         .paths = &.{
             "src/",
             "build.zig",
+            "build_docgen.zig",
             "build.zig.zon",
         },
         .check = true,
