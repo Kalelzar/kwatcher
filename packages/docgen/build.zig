@@ -81,9 +81,11 @@ pub fn build(b: *std.Build) !void {
     // 1st Party:
     const kw_core = b.dependency("kw_core", .{ .target = target, .optimize = optimize }).module("kw-core");
     const kwatcher = b.dependency("kwatcher", .{ .target = target, .optimize = optimize }).module("kwatcher");
+    const kw_docindex = b.dependency("kw_docindex", .{ .target = target, .optimize = optimize }).module("kw-docindex");
 
     // Imports:
     // 1st Party:
     kw_docgen.addImport("kw-core", kw_core);
     kw_docgen.addImport("kwatcher", kwatcher);
+    kw_docgen.addImport("kw-docindex", kw_docindex);
 }

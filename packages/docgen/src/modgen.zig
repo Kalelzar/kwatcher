@@ -5,8 +5,9 @@ const Drivers = core.driver.Drivers;
 const build_config = @import("build_config");
 const user_root = @import("entrypoint");
 
-pub fn generate(alloc: std.mem.Allocator, out_dir: []const u8) !void {
+pub fn generate(alloc: std.mem.Allocator, out_dir: []const u8, source_roots: []const []const u8) !void {
     _ = alloc;
+    _ = source_roots;
     const D = user_root.drivers.drivers;
 
     std.log.info("Generating modules at: {s}", .{out_dir});

@@ -10,6 +10,9 @@
         .kwatcher = .{
             .path = "../runtime",
         },
+        .kw_docindex = .{
+            .path = "../docindex",
+        },
     },
     .paths = .{
         "build.zig",
