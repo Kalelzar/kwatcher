@@ -98,3 +98,9 @@ pub const DefaultErrorHandler = struct {
         }
     }
 };
+
+// Ref all decls
+comptime {
+    _ = &DefaultErrorHandler.preQueue;
+    _ = &DefaultErrorHandler.postQueue;
+}

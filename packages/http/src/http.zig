@@ -840,3 +840,84 @@ comptime {
 
     core.driver.AssertDriver(Drv, .http);
 }
+
+// Ref all decls — non-recursive at the root: http re-exports httpz's Request/Response,
+// and recursing those would crawl the whole httpz dependency. Our own sub-files
+// (response.zig, default_error_handler.zig, ...) recurse themselves, and the
+// generics below are instantiated explicitly.
+comptime {
+    std.testing.refAllDecls(@This());
+
+    const Context = struct { request_id: u64 = 0 };
+
+    const Rs = struct {
+        pub fn @"GET /ref @refGet"(ctx: struct {
+            request: *Request,
+            response: *Response,
+        }) []const u8 {
+            _ = ctx;
+            return "";
+        }
+        pub fn @"POST /ref/{id} @refPost"(ctx: struct {
+            request: *Request,
+            response: *Response,
+            captures: struct { id: u64 },
+        }, dependency: i64) []const u8 {
+            _ = ctx;
+            _ = dependency;
+            return "";
+        }
+    };
+
+    const Rts = From(Rs, Context);
+
+    const R1 = Rts[0];
+    R1.requires(.method);
+    R1.requires(.route);
+    R1.requires(.response);
+    if (R1.satisfies(.nothing)) @compileError("BUG: Incorrect constraint return");
+
+    const R2 = R1.mod(.{ .method = .post });
+    if (R2.query(.method) != .post) @compileError("BUG: Wrong method");
+
+    const rt = R1.query(.route);
+    const R3 = R1.mod(.{ .route = rt });
+    _ = R3.query(.route);
+
+    const R4 = R1.mod(.{ .response = u8 });
+    if (R4.query(.response) != u8) @compileError("BUG: Wrong response type");
+
+    _ = FilterRoutes(Rts, .get);
+
+    // Exercise the cors middleware and force analysis of the wrapped/preflight
+    // route call bodies (only their types are built by `cors` itself).
+    const cors_routes = middleware.cors(Rts);
+    for (cors_routes) |CR| {
+        _ = &CR.call;
+    }
+
+    // Exercise the router (only ever called from the un-analysed handleRequest body).
+    var capture_buf: [8][]const u8 = undefined;
+    _ = Router.route(Rts, 0, &capture_buf, 0, "ref", 0);
+
+    const Drv = Driver
+        .new(.http)
+        .config("null")
+        .error_handler(DefaultErrorHandler)
+        .jobs(1)
+        .listen(true)
+        .routes(Rts)
+        .build();
+
+    const Ds = core.driver.Drivers.new().registerHandler(Drv);
+
+    const ET = Ds.EventList();
+    const EV = Ds.EventValues();
+    const E = Event(ET, EV);
+
+    _ = Ds.Handlers(ET, EV)[0];
+    const Sch = Ds.SchedulerMap();
+    _ = Sch(.http);
+
+    _ = E;
+}

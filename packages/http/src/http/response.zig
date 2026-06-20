@@ -60,7 +60,12 @@ pub fn Json(
                     return toStatus(a) == toStatus(b);
                 }
             };
-            const stats = core.shared.SetUnionEql(@TypeOf(expected_statuses[0]), expected_statuses, new_statuses, Eql);
+            const stats = core.shared.SetUnionEql(
+                @TypeOf(expected_statuses[0]),
+                expected_statuses,
+                new_statuses,
+                Eql,
+            );
             return Json(Result, stats);
         }
     };
@@ -80,10 +85,20 @@ fn toStatus(status: anytype) std.http.Status {
         @Type(.enum_literal) => @field(std.http.Status, @tagName(status)),
         else => {
             const ti = @typeInfo(S);
-            switch (ti) {
+            typedef: switch (ti) {
                 .array => |a| {
                     if (a.child == u8) {
                         continue :sw []const u8;
+                    }
+                },
+                .pointer => |p| {
+                    const ti2 = @typeInfo(p.child);
+
+                    switch (ti2) {
+                        .array => |_| {
+                            continue :typedef ti2;
+                        },
+                        else => @compileError("Unsupported pointer status type: " ++ @typeName(S)),
                     }
                 },
                 else => @compileError("Unsupported status type: " ++ @typeName(S)),
@@ -155,6 +170,25 @@ pub fn Unionize(
 
 pub fn Request(comptime Body: ?type) type {
     return FullRequest(Body, null);
+}
+
+// Ref all decls
+comptime {
+    _ = ProblemDetails;
+
+    _ = ApiResult(struct { x: u8 }, ProblemDetails, .{ .ok, .bad_request });
+
+    const J = Json(struct { x: u8 }, .{ .ok, .bad_request });
+    _ = &J.write;
+    _ = J.Extend(.{.created});
+
+    _ = Enumize(.{ .ok, 404 });
+    _ = Enumize(.{"accepted"});
+    _ = Unionize(.{.ok}, Enumize(.{.ok}), struct {}, ProblemDetails);
+
+    _ = Request(null);
+    _ = Request(struct { name: []const u8 });
+    _ = FullRequest(struct {}, struct { q: []const u8 });
 }
 
 pub fn FullRequest(comptime Body: ?type, comptime Query: ?type) type {
