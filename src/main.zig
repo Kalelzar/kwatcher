@@ -153,16 +153,16 @@ const SignalRoutes = struct {
 const HTTPRoutes = struct {
     // --- /api/v1/users family (shared prefix) ---
 
-    pub fn @"GET /"(_: http.data.Request(null)) []const HeartbeatMessage {
+    pub fn @"GET / @index"(_: http.data.Request(null)) []const HeartbeatMessage {
         log.info("HELLO FROM SERVER", .{});
         return &.{};
     }
 
-    pub fn @"GET /api/v1/users"(_: http.data.Request(null)) []const HeartbeatMessage {
+    pub fn @"GET /api/v1/users @listUsers"(_: http.data.Request(null)) []const HeartbeatMessage {
         return &.{};
     }
 
-    pub fn @"GET /api/v1/ok"(_: http.data.Request(null), inj: *core.deps.DepCtx) !http.data.Json(
+    pub fn @"GET /api/v1/ok @okExample"(_: http.data.Request(null), inj: *core.deps.DepCtx) !http.data.Json(
         HeartbeatMessage,
         .{.ok},
     ) {
@@ -180,7 +180,7 @@ const HTTPRoutes = struct {
         };
     }
 
-    pub fn @"GET /api/v1/bad"(_: http.data.Request(null)) http.data.Json(
+    pub fn @"GET /api/v1/bad @badExample"(_: http.data.Request(null)) http.data.Json(
         HeartbeatMessage,
         &.{400},
     ) {
@@ -196,7 +196,7 @@ const HTTPRoutes = struct {
         };
     }
 
-    pub fn @"POST /api/v1/users"(ctx: http.data.Request(struct { name: []const u8 })) HeartbeatMessage {
+    pub fn @"POST /api/v1/users @createUser"(ctx: http.data.Request(struct { name: []const u8 })) HeartbeatMessage {
         return .{
             .timestamp = 0,
             .event = "user_created",
@@ -205,7 +205,7 @@ const HTTPRoutes = struct {
         };
     }
 
-    pub fn @"GET /api/v1/users/{id}"(ctx: struct {
+    pub fn @"GET /api/v1/users/{id} @getUser"(ctx: struct {
         request: *http.Request,
         response: *http.Response,
         captures: struct { id: u64 },
@@ -218,7 +218,7 @@ const HTTPRoutes = struct {
         };
     }
 
-    pub fn @"GET /api/v1/users/{id}/name"(ctx: struct {
+    pub fn @"GET /api/v1/users/{id}/name @getUserName"(ctx: struct {
         request: *http.Request,
         response: *http.Response,
         captures: struct { id: u64 },
@@ -227,7 +227,7 @@ const HTTPRoutes = struct {
         return "TODO";
     }
 
-    pub fn @"GET /api/v1/users/{id}/id"(ctx: struct {
+    pub fn @"GET /api/v1/users/{id}/id @getUserId"(ctx: struct {
         request: *http.Request,
         response: *http.Response,
         captures: struct { id: u64 },
@@ -236,7 +236,7 @@ const HTTPRoutes = struct {
         return "TODO";
     }
 
-    pub fn @"DELETE /api/v1/users/{id}"(ctx: struct {
+    pub fn @"DELETE /api/v1/users/{id} @deleteUser"(ctx: struct {
         request: *http.Request,
         response: *http.Response,
         captures: struct { id: u64 },
@@ -247,7 +247,7 @@ const HTTPRoutes = struct {
 
     // --- /api/v1/config (shared /api/v1 prefix, different leaf) ---
 
-    pub fn @"GET /api/v1/config"(
+    pub fn @"GET /api/v1/config @getConfig"(
         rq: http.data.FullRequest(
             null,
             struct { key: []const u8 },
@@ -279,7 +279,7 @@ const HTTPRoutes = struct {
         };
     }
 
-    pub fn @"PUT /api/v1/config"(ctx: http.data.Request(
+    pub fn @"PUT /api/v1/config @updateConfig"(ctx: http.data.Request(
         struct { greeting: []const u8, interval_seconds: u32 },
     )) AppConfig {
         return .{
@@ -296,7 +296,7 @@ const HTTPRoutes = struct {
 
     // --- /files (wildcard capture, no shared prefix) ---
 
-    pub fn @"GET /files/{*path}"(ctx: struct {
+    pub fn @"GET /files/{*path} @serveFile"(ctx: struct {
         request: *http.Request,
         response: *http.Response,
         captures: struct { path: []const u8 },

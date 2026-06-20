@@ -5,6 +5,7 @@ pub fn build(b: *std.Build) !void {
     const build_all = b.option(bool, "all", "Build all components. You can still disable individual components") orelse false;
     const build_example = b.option(bool, "example", "Build the example application") orelse build_all;
     const build_kwev = b.option(bool, "kwev", "Build the kwev tooling ") orelse build_all;
+    const openapi_version = b.option([]const u8, "openapi_version", "Target OpenAPI version for HTTP docgen") orelse "3.2.0";
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -119,6 +120,15 @@ pub fn build(b: *std.Build) !void {
 
     example.step.dependOn(&docgen.step);
 
+    // Copy the generated OpenAPI documents into zig-out/docs on install.
+    const install_docs = b.addInstallDirectory(.{
+        .source_dir = docgen_path,
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+        .include_extensions = &.{"json"},
+    });
+    b.getInstallStep().dependOn(&install_docs.step);
+
     const kw_docgen_none = b.dependency("kw_docgen_none", .{
         .target = target,
         .optimize = optimize,
@@ -127,6 +137,7 @@ pub fn build(b: *std.Build) !void {
     const kw_docgen_http = b.dependency("kw_docgen_http", .{
         .target = target,
         .optimize = optimize,
+        .openapi_version = openapi_version,
     }).module("kw-docgen--http");
 
     kwatcher_example.addAnonymousImport("kw-gen--docs", .{
