@@ -234,3 +234,15 @@ pub fn Resolver(comptime Container: type) type {
         }
     };
 }
+
+// Ref all decls — resolve/resolveRef are path-generic and need a *DepCtx at
+// runtime (exercised via the template machinery); resolveType/specifier are
+// callable directly.
+comptime {
+    const C = struct { x: u8, name: []const u8 };
+    const R = Resolver(C);
+    std.testing.refAllDeclsRecursive(R);
+    _ = R.resolveType("x");
+    _ = R.specifier("x");
+    _ = R.specifier("name");
+}

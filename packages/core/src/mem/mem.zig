@@ -12,3 +12,9 @@ pub const InternalArena = klib.mem.InstrumentedArena;
 
 pub const PoolAllocator = @import("pool_allocator.zig").PoolAllocator;
 pub const ScopedAllocator = Keyed(std.mem.Allocator, .scoped);
+
+// Ref all decls
+comptime {
+    std.testing.refAllDeclsRecursive(@This());
+    std.testing.refAllDeclsRecursive(Keyed(u8, .ref));
+}

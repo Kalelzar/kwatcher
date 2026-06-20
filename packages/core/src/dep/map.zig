@@ -152,3 +152,7 @@ pub fn DepMap(comptime _Categories: []const type, _Lifetime: type) type {
         }
     };
 }
+
+comptime {
+    std.testing.refAllDecls(@This());
+}

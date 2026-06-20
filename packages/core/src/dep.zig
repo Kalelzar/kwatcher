@@ -17,3 +17,11 @@ pub const DepHub = @import("dep/hub.zig").DepHub;
 const container = @import("dep/container.zig");
 pub const DependencyLifetimes = container.DependencyLifetimes;
 pub const DependencyContainer = container.DependencyContainer;
+
+// Ref all decls — non-recursive: the DI types (DepCtx/DepHub/DependencyContainer)
+// are deeply nested generics that explode under refAllDeclsRecursive; they're
+// exercised concretely by the driver/runtime builds.
+comptime {
+    const std = @import("std");
+    std.testing.refAllDecls(@This());
+}

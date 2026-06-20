@@ -198,3 +198,16 @@ pub fn Pool(comptime T: type, comptime Context: type) type {
         }
     };
 }
+
+// Ref all decls
+comptime {
+    const Ctx = struct {
+        pub fn eql(_: u8, _: u8) bool {
+            return false;
+        }
+        pub fn cancel(_: u8) !void {}
+        pub fn deinit(_: u8) void {}
+    };
+    std.testing.refAllDeclsRecursive(BicyclicBuffer(u8, Ctx));
+    std.testing.refAllDeclsRecursive(Pool(u8, Ctx));
+}

@@ -215,7 +215,7 @@ pub fn SetUnion(comptime T: type, comptime As: []const T, comptime Bs: []const T
     return buf[0..len];
 }
 
-pub fn SetUnionEql(comptime T: type, comptime As: []const T, comptime Bs: []const T, comptime EqlCtx: type) []const T {
+pub fn SetUnionEql(comptime T: type, comptime As: anytype, comptime Bs: anytype, comptime EqlCtx: type) []const T {
     @setEvalBranchQuota((As.len + Bs.len) * 200);
     var len: usize = 0;
     const buf = comptime blk: {
@@ -419,4 +419,16 @@ pub fn ComptimeTemplate(
             return raw;
         }
     };
+}
+
+// Ref all decls — instantiate the template generics (the route/driver builder
+// helpers are exercised by the driver packages with real Routes).
+comptime {
+    std.testing.refAllDeclsRecursive(@This());
+    const Ctx = struct { x: u8 };
+    std.testing.refAllDeclsRecursive(FreeTemplate(Ctx, "k", "{d}", &.{"x"}));
+    std.testing.refAllDeclsRecursive(DependantTemplate(Ctx, "k", "{d}", &.{"x"}));
+    std.testing.refAllDeclsRecursive(LinkedTemplate("k"));
+    std.testing.refAllDeclsRecursive(ComptimeTemplate("k"));
+    _ = DTValue;
 }

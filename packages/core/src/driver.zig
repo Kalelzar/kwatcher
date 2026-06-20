@@ -331,3 +331,9 @@ pub fn AssertDriver(comptime Drv: anytype, comptime expected_key: @Type(.enum_li
         @compileError("Expected Scheduler to be a type");
     }
 }
+
+// Ref all decls — the Drivers builder methods are generic on a `comptime self`
+// and are exercised by the driver packages; this covers the non-generic surface.
+comptime {
+    std.testing.refAllDeclsRecursive(@This());
+}

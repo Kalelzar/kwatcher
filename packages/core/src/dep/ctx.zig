@@ -179,3 +179,7 @@ pub const DepCtx = struct {
 };
 
 pub const Cache = std.ArrayHashMapUnmanaged(klib.meta.TypeId, Resolved, TidArrayHashContext, false);
+
+comptime {
+    std.testing.refAllDecls(@This());
+}

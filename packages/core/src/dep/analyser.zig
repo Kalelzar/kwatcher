@@ -430,3 +430,21 @@ const reserved_declarations_map = std.StaticStringMap(void).initComptime(.{
     .{"deinit"},
     .{"init"},
 });
+
+comptime {
+    std.testing.refAllDecls(@This());
+    const Ctx = struct {
+        i: i64,
+        u: *u64,
+        d: *const f64,
+
+        pub fn f(ii: i64, uu: *u64, dd: *const f64) u128 {
+            _ = ii;
+            _ = uu;
+            _ = dd;
+        }
+    };
+
+    const G = Analyser.analyse(Ctx, .ctx);
+    G.blame();
+}

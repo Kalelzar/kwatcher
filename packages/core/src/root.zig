@@ -19,7 +19,6 @@ pub const queue = @import("utils/queue.zig");
 pub const resolver = @import("utils/resolver.zig");
 pub const arc = @import("utils/arc.zig");
 pub const pool = @import("utils/pool.zig");
-pub const revisionlist = @import("utils/revisionlist.zig");
 
 /// Event-block membership predicate, shared by every driver. Lives in core so
 /// drivers need not import the runtime.

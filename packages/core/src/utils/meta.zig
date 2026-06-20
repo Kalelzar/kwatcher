@@ -190,3 +190,8 @@ pub fn Bare(comptime T: type) type {
         .pointer => |ptr| Bare(ptr.child),
     };
 }
+
+// Ref all decls
+comptime {
+    std.testing.refAllDeclsRecursive(@This());
+}

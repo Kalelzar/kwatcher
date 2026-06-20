@@ -51,11 +51,6 @@ pub fn Config(comptime Extension: type) type {
 }
 
 pub const _BaseNullable = config.validate(BaseConfig, struct {
-    protocol: struct {
-        client: struct {
-            announce_message_expiration: ?u64 = null,
-        } = .{},
-    } = .{},
     server: struct {
         host: ?[]const u8 = null,
         port: ?i32 = null,
@@ -122,4 +117,11 @@ pub fn findConfigFileWithDefaults(
         config_name,
         arena,
     );
+}
+
+// Ref all decls — Config requires an Extension structurally compatible with
+// BaseConfig, so it can't be instantiated standalone here; it's exercised by the
+// runtime/example with a real extension. refAllDeclsRecursive covers the rest.
+comptime {
+    std.testing.refAllDeclsRecursive(@This());
 }

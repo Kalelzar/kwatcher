@@ -110,8 +110,8 @@ pub fn StaticStrict(comptime T: type) type {
         }
 
         /// Skips over the first element, requeing it to the back.
-        pub fn skip(self: *Self) void {
-            if (self.empty()) return;
+        pub fn skip(self: *Self) ?*T {
+            if (self.empty()) return null;
             return self.push(self.pop());
         }
     };
@@ -301,4 +301,10 @@ pub fn StaticLenient(comptime T: type) type {
             self.head = (self.head + 1) % self.buffer.len;
         }
     };
+}
+
+// Ref all decls
+comptime {
+    std.testing.refAllDeclsRecursive(StaticStrict(u8));
+    std.testing.refAllDeclsRecursive(StaticLenient(u8));
 }

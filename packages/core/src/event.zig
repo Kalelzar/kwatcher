@@ -58,3 +58,10 @@ pub fn Event(EventType: type, EventValues: type) type {
         properties: Properties = .{},
     };
 }
+
+// Ref all decls
+comptime {
+    std.testing.refAllDeclsRecursive(@This());
+    std.testing.refAllDeclsRecursive(Event(Base, BaseValues));
+    _ = genAccepts(Base, Base);
+}

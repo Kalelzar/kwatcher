@@ -103,3 +103,16 @@ pub fn ArcSwap(comptime Data: type, comptime Ctx: type) type {
         }
     };
 }
+
+// Ref all decls
+comptime {
+    const Data = struct {
+        pub fn deinit(_: *@This()) void {}
+    };
+    const Ctx = struct {
+        pub fn deinit(_: *@This(), _: *u8) void {}
+    };
+    std.testing.refAllDeclsRecursive(Arc(Data));
+    std.testing.refAllDeclsRecursive(ArcCtx(u8, Ctx));
+    std.testing.refAllDeclsRecursive(ArcSwap(u8, Ctx));
+}

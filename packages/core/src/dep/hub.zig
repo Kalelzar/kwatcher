@@ -509,3 +509,7 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
         }
     };
 }
+
+comptime {
+    std.testing.refAllDecls(@This());
+}

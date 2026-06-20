@@ -42,10 +42,19 @@ pub fn Message(comptime SchemaT: type) type {
 
         /// Prepares the message for sending.
         pub fn prepare(self: *const Message(SchemaT), allocator: std.mem.Allocator) !SendMessage {
-            const body = try std.json.stringifyAlloc(allocator, self.schema, .{});
+            var allocating = std.Io.Writer.Allocating.init(allocator);
+            var json = std.json.fmt(self.schema, .{});
+            try json.format(&allocating.writer);
+
+            var opts: MessageOptions = undefined;
+            opts.reply_to = self.options.reply_to;
+            opts.correlation_id = self.options.correlation_id;
+            opts.expiration = self.options.expiration;
+
+            const body = try allocating.toOwnedSlice();
             return .{
                 .body = body,
-                .options = self.options,
+                .options = opts,
             };
         }
     };
@@ -278,3 +287,11 @@ pub const Metrics = struct {
         );
     }
 };
+
+// Ref all decls
+comptime {
+    std.testing.refAllDeclsRecursive(@This());
+    const S = Schema(1, "ref", struct { value: u64 });
+    std.testing.refAllDeclsRecursive(S);
+    std.testing.refAllDeclsRecursive(Message(S));
+}

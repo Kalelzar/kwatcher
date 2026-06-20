@@ -599,3 +599,8 @@ pub fn recordedOperation(operation: []const u8) !void {
     };
     try metrics.recorded_operations.incr(label);
 }
+
+// Ref all decls
+comptime {
+    std.testing.refAllDeclsRecursive(@This());
+}

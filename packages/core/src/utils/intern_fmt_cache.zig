@@ -310,3 +310,8 @@ pub fn willReintern(self: *InternFmtCache, comptime key: []const u8, args: anyty
     }
     return true;
 }
+
+// Ref all decls
+comptime {
+    std.testing.refAllDeclsRecursive(@This());
+}
