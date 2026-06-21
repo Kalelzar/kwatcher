@@ -10,18 +10,24 @@ pub const Analyser = struct {
         to: [256]u8 = undefined,
         len: u8 = 0,
         provided: bool = false,
+        fulfilled: ?bool = null,
 
-        pub fn isFulfilled(self: *const Node, g: *const Graph) bool {
+        fn isFulfilledInner(self: *const Node, g: *Graph) bool {
             if (self.len == 0) return self.provided;
             for (0..self.len) |i| {
                 const dep = self.to[i];
-                const nod = g.nodes[dep];
-                if (!nod.isFulfilled(g)) return false;
+                if (!g.nodes[dep].isFulfilled(g)) return false;
             }
             return true;
         }
 
-        pub fn blame(self: *const Node, g: *const Graph) void {
+        pub fn isFulfilled(self: *Node, g: *Graph) bool {
+            if (self.fulfilled) |f| return f;
+            self.fulfilled = self.isFulfilledInner(g);
+            return self.fulfilled.?;
+        }
+
+        pub fn blame(self: *Node, g: *Graph) void {
             if (self.len == 0) {
                 if (!self.provided) {
                     if (@inComptime()) {
@@ -39,8 +45,7 @@ pub const Analyser = struct {
             }
             for (0..self.len) |i| {
                 const dep = self.to[i];
-                const nod = g.nodes[dep];
-                if (!nod.isFulfilled(g)) {
+                if (!g.nodes[dep].isFulfilled(g)) {
                     if (@inComptime()) {
                         @compileLog(std.fmt.comptimePrint(
                             "Graph({s}): Unresolved factory {s} of type '{s}'\n",
@@ -60,7 +65,7 @@ pub const Analyser = struct {
                             },
                         );
                     }
-                    nod.blame(g);
+                    g.nodes[dep].blame(g);
                 }
             }
         }
@@ -124,6 +129,15 @@ pub const Analyser = struct {
             }
 
             if (v.lowlink.? == v.id.?) {
+                for (0..self.nodes[v.idx].len) |j| {
+                    if (self.nodes[v.idx].to[j] == v.idx) {
+                        @compileError(std.fmt.comptimePrint(
+                            "Found self-cycle on {s}({s}).",
+                            .{ self.nodes[v.idx].source, self.nodes[v.idx].name },
+                        ));
+                    }
+                }
+
                 var w = stack[stack_size.* - 1];
                 stack_size.* -= 1;
                 while (w.idx != v.idx) {
@@ -145,14 +159,6 @@ pub const Analyser = struct {
             }
         }
 
-        pub fn isAvailable(self: *Graph, comptime T: type) bool {
-            const tid = klib.meta.typeId(T);
-            for (0..self.len) |i| {
-                if (self.nodes[i].id == tid) return self.nodes[i].isFulfilled(self);
-            }
-            return false;
-        }
-
         pub fn indexOf(self: *Graph, comptime T: type) ?u8 {
             const tid = klib.meta.typeId(T);
             // std.log.info("Index of: {s}", .{@typeName(T)});
@@ -164,24 +170,6 @@ pub const Analyser = struct {
                 }
             }
             return null;
-        }
-
-        pub fn fulfill(self: *Graph, other: *Graph) void {
-            outer: for (0..other.len) |i| {
-                if (i >= 255) @compileError("Overflow");
-                const theirs = other.nodes[i];
-                const og = self.len;
-                if (og >= 255) @compileError("Overflow");
-                for (0..og) |j| {
-                    const ours = self.nodes[j];
-                    if (ours.isFulfilled(self)) continue;
-                    if (theirs.id == ours.id) {
-                        self.nodes[j] = theirs;
-                        continue :outer;
-                    }
-                }
-                self.cloneInto(other, theirs, 0);
-            }
         }
 
         pub fn cloneInto(self: *Graph, other: *Graph, node: Node, depth: u8) void {
@@ -219,28 +207,26 @@ pub const Analyser = struct {
             }
         }
 
-        pub fn blame(self: *const Graph) void {
+        pub fn blame(self: *Graph) void {
             for (0..self.len) |i| {
-                const n = self.nodes[i];
-                if (!n.isFulfilled(self)) {
-                    n.blame(self);
+                if (!self.nodes[i].isFulfilled(self)) {
+                    self.nodes[i].blame(self);
                 }
             }
         }
 
         pub fn isFulfilled(self: *const Graph) bool {
             for (0..self.len) |i| {
-                const n = self.nodes[i];
-                if (!n.isFulfilled(self)) {
+                if (!self.nodes[i].isFulfilled(self)) {
                     if (@inComptime()) {
                         @compileError(std.fmt.comptimePrint(
                             "Graph({s}): Factory {s} cannot be fulfilled.",
-                            .{ self.key, n.name },
+                            .{ self.key, self.nodes[i].name },
                         ));
                     } else {
                         std.log.err(
                             "Graph({s}): Factory {s} cannot be fulfilled.",
-                            .{ self.key, n.name },
+                            .{ self.key, self.nodes[i].name },
                         );
                         return false;
                     }
@@ -426,9 +412,11 @@ pub const Analyser = struct {
     }
 };
 
-const reserved_declarations_map = std.StaticStringMap(void).initComptime(.{
+pub const reserved_declarations_map = std.StaticStringMap(void).initComptime(.{
     .{"deinit"},
     .{"init"},
+    .{"construct"},
+    .{"deconstruct"},
 });
 
 comptime {
@@ -445,6 +433,6 @@ comptime {
         }
     };
 
-    const G = Analyser.analyse(Ctx, .ctx);
+    var G = Analyser.analyse(Ctx, .ctx);
     G.blame();
 }

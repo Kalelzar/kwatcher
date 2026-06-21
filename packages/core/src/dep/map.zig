@@ -65,8 +65,8 @@ pub fn DepMap(comptime _Categories: []const type, _Lifetime: type) type {
                     }
                     graphs[i] = graph;
                 }
-                for (graphs) |G| {
-                    G.blame();
+                for (0..Categories.len) |i| {
+                    graphs[i].blame();
                 }
                 break :blk graphs;
             };

@@ -3,6 +3,7 @@ const klib = @import("klib");
 const meta = @import("../utils/meta.zig");
 const DriverRegistry = @import("../driver.zig").Drivers;
 const ctx_mod = @import("ctx.zig");
+const reservered_declarations_map = @import("analyser.zig").reserved_declarations_map;
 const DepCtx = ctx_mod.DepCtx;
 const StaticBinder = ctx_mod.StaticBinder;
 
@@ -11,6 +12,14 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
         pub const DependencyMap = DM;
         pub const StaticMap = Statics;
 
+        // The dependency graph is u8-indexed (analyser.zig), so it can never
+        // hold more than 255 nodes; statics are a subset of that. Reserving the
+        // worst case up front (255 * @sizeOf(StaticBinder) ~= 4KiB) means the
+        // backing buffer is allocated exactly once, while empty, and never
+        // reallocates. That removes the UAF where `static()`'s by-value header
+        // copy outlives a reallocated buffer — see static()/staticAssumeRegistered().
+        pub const max_statics = 255;
+
         statics: std.ArrayList(StaticBinder),
 
         fn fac(comptime T: type, fun: anytype) *const fn (*DepCtx, ?*anyopaque) anyerror!*anyopaque {
@@ -18,7 +27,13 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
                 pub fn get(ctx: *DepCtx, receiver: ?*anyopaque) anyerror!*anyopaque {
                     var args: std.meta.ArgsTuple(@TypeOf(fun)) = undefined;
                     inline for (args, 0..) |t, i| {
-                        args[i] = try ctx.require(@TypeOf(t));
+                        args[i] = ctx.require(@TypeOf(t)) catch |e| {
+                            if (e == error.DependencyNotFound) {
+                                std.log.err("While resolving factory for '{s}'", .{@typeName(T)});
+                            }
+
+                            return e;
+                        };
                     }
 
                     if (comptime !klib.meta.isValuePointer(T)) {
@@ -69,6 +84,7 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
                                             .resolver = .{
                                                 .ctx = nextCtx,
                                                 .offset = @offsetOf(Ctx, f.name),
+                                                .isPtr = klib.meta.isValuePointer(f.type),
                                             },
                                         },
                                     );
@@ -99,19 +115,24 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
                         }
 
                         inline for (@typeInfo(Ctx).@"struct".decls) |f| {
+                            if (comptime reservered_declarations_map.get(f.name) != null) continue;
                             const fun = @field(Ctx, f.name);
-                            const RT = klib.meta.Result(fun);
-                            if (comptime RT == void) continue;
-                            try ctx.cache.put(
-                                allocator,
-                                klib.meta.typeId(RT),
-                                .{
-                                    .factory = .{
-                                        .ctx = nextCtx,
-                                        .fac = fac(RT, fun),
+                            const funti = @typeInfo(@TypeOf(fun));
+
+                            if (comptime funti == .@"fn") {
+                                const RT = klib.meta.Result(fun);
+                                if (comptime RT == void) continue;
+                                try ctx.cache.put(
+                                    allocator,
+                                    klib.meta.typeId(RT),
+                                    .{
+                                        .factory = .{
+                                            .ctx = nextCtx,
+                                            .fac = fac(RT, fun),
+                                        },
                                     },
-                                },
-                            );
+                                );
+                            }
                         }
                     }
                 } else {
@@ -147,6 +168,7 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
                                             .static = .{
                                                 .ctx = i - 1,
                                                 .offset = @offsetOf(Ctx, f.name),
+                                                .isPtr = klib.meta.isValuePointer(f.type),
                                             },
                                         },
                                     );
@@ -167,7 +189,7 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
                                             klib.meta.typeId(*const f.type),
                                             .{
                                                 .static = .{
-                                                    .ctx = i,
+                                                    .ctx = i - 1,
                                                     .offset = @offsetOf(Ctx, f.name),
                                                 },
                                             },
@@ -178,19 +200,23 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
                         }
 
                         inline for (@typeInfo(Ctx).@"struct".decls) |f| {
+                            if (comptime reservered_declarations_map.get(f.name) != null) continue;
                             const fun = @field(Ctx, f.name);
-                            const RT = klib.meta.Result(fun);
-                            if (comptime RT == void) continue;
-                            try ctx.cache.put(
-                                allocator,
-                                klib.meta.typeId(RT),
-                                .{
-                                    .static_factory = .{
-                                        .ctx = i - 1,
-                                        .fac = fac(RT, fun),
+                            const funti = @typeInfo(@TypeOf(fun));
+                            if (comptime funti == .@"fn") {
+                                const RT = klib.meta.Result(fun);
+                                if (comptime RT == void) continue;
+                                try ctx.cache.put(
+                                    allocator,
+                                    klib.meta.typeId(RT),
+                                    .{
+                                        .static_factory = .{
+                                            .ctx = i - 1,
+                                            .fac = fac(RT, fun),
+                                        },
                                     },
-                                },
-                            );
+                                );
+                            }
                         }
                     }
                 }
@@ -199,7 +225,7 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
         }
 
         pub fn swap(comptime DMap: anytype) type {
-            return DepHub(DMap, Static, Config);
+            return DepHub(DMap, Statics, Config);
         }
 
         pub fn become(self: @This(), comptime Other: type) Other {
@@ -218,10 +244,10 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
                     self.actualize(C.Tag, C.Lifetime, &cont) catch break :out;
                     defer deactualize(&cont, C.Tag, C.Lifetime);
 
-                    const Rd = meta.reverse(C.ContextStack);
+                    const Rd = comptime meta.reverse(C.ContextStack);
                     inline for (Rd) |Ctx| {
                         comptime var i: usize = 0;
-                        if (comptime i >= Statics.len - 1) break;
+                        if (comptime i > Statics.len - 1) break;
                         inline for (0..Statics.len) |rj| {
                             const j = Statics.len - rj - 1;
                             const s = Statics[j];
@@ -302,15 +328,19 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
             }
         }
 
-        pub fn newBlank(comptime drivers: DriverRegistry) Drivers(drivers) {
-            return .{ .statics = .{} };
+        pub fn newBlank(comptime drivers: DriverRegistry, alloc: std.mem.Allocator) Drivers(drivers) {
+            var dh: Drivers(drivers) = .{ .statics = .{} };
+            // FIXME: This needs to ensure that the entire dep list can fit.
+            dh.statics.ensureTotalCapacity(alloc, 16) catch unreachable;
+            return dh;
         }
 
         pub fn new(
             comptime drivers: DriverRegistry,
             alloc: std.mem.Allocator,
         ) Extended(Drivers(drivers), drivers, 0) {
-            const dh: Drivers(drivers) = .{ .statics = .{} };
+            var dh: Drivers(drivers) = .{ .statics = .{} };
+            dh.statics.ensureTotalCapacity(alloc, max_statics) catch unreachable;
             return dh.next(drivers, alloc, 0);
         }
 
@@ -322,14 +352,14 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
             self: @This(),
             comptime category: anytype,
             ctx: anytype,
-            allocator: std.mem.Allocator,
         ) Static(category, @TypeOf(ctx)) {
             // std.log.info("Registering static (new) {s}: {s} {x}", .{ @typeName(@TypeOf(ctx)), @tagName(category), @intFromPtr(ctx) });
             var s = self.statics;
-            s.append(allocator, .{
+            std.debug.assert(s.items.len < max_statics);
+            s.appendAssumeCapacity(.{
                 .ptr = @ptrCast(@alignCast(ctx)),
                 .tag = @tagName(category),
-            }) catch unreachable; // YIKES!
+            });
 
             return .{ .statics = s };
         }
@@ -338,13 +368,13 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
             self: *@This(),
             comptime category: anytype,
             ctx: anytype,
-            allocator: std.mem.Allocator,
         ) void {
             // std.log.info("Registering static {s}: {s} {x}", .{ @typeName(@TypeOf(ctx)), @tagName(category), @intFromPtr(ctx) });
-            self.statics.append(allocator, .{
+            std.debug.assert(self.statics.items.len < max_statics);
+            self.statics.appendAssumeCapacity(.{
                 .ptr = @ptrCast(@alignCast(ctx)),
                 .tag = @tagName(category),
-            }) catch unreachable; // YIKES!
+            });
         }
 
         pub fn deactualize(
@@ -357,8 +387,10 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
                 if (comptime std.mem.eql(u8, @tagName(C.Tag), "all")) continue;
                 if (comptime std.mem.eql(u8, @tagName(C.Tag), @tagName(category)) and @intFromEnum(C.Lifetime) <= @intFromEnum(lifetime)) {
                     if (comptime C.Lifetime != .static) {
-                        inline for (C.ContextStack) |Ctx| {
-                            const c: *Ctx = @ptrCast(@alignCast(ctx.value[handles]));
+                        const Rd = comptime meta.reverse(C.ContextStack);
+                        inline for (Rd) |Ctx| {
+                            const i = Rd.len - handles - 1;
+                            const c: *Ctx = @ptrCast(@alignCast(ctx.value[i]));
                             if (comptime @hasDecl(Ctx, "deconstruct")) blk: {
                                 //FIXME: This needs to happen in inverse order! UB!
                                 const fun = @field(Ctx, "deconstruct");

@@ -12,10 +12,12 @@ pub const Resolved = union(enum) {
     resolver: struct {
         ctx: u8,
         offset: usize,
+        isPtr: bool = false,
     },
     static: struct {
         ctx: usize,
         offset: usize,
+        isPtr: bool = false,
     },
     factory: struct {
         ctx: u8,
@@ -89,6 +91,7 @@ pub const DepCtx = struct {
             if (self.parent) |p| {
                 return try p.require(T);
             } else {
+                std.log.err("Dependency not found: {s}", .{@typeName(T)});
                 return error.DependencyNotFound;
             }
         }
@@ -103,6 +106,11 @@ pub const DepCtx = struct {
             },
             .static_ctx => |c| {
                 if (comptime klib.meta.isValuePointer(T)) {
+                    // std.log.info("{x}: Found static_ctx(*) at {x} with tag: {s}", .{
+                    //     @intFromPtr(tid),
+                    //     @intFromPtr(self.static[c].ptr),
+                    //     self.static[c].tag,
+                    // });
                     return @ptrCast(@alignCast(self.static[c].ptr));
                 } else {
                     return @as(*T, @ptrCast(@alignCast(self.static[c].ptr))).*;
@@ -110,7 +118,8 @@ pub const DepCtx = struct {
             },
             .resolver => |r| {
                 if (comptime klib.meta.isValuePointer(T)) {
-                    const v: T = @ptrFromInt(@intFromPtr(self.value[r.ctx]) + r.offset);
+                    const base = @intFromPtr(self.value[r.ctx]) + r.offset;
+                    const v: T = if (r.isPtr) @as(*T, @ptrFromInt(base)).* else @ptrFromInt(base);
                     // std.log.info("{x}: Found resolver(*) at {x} (from {x}+{d}: {d})", .{
                     //     @intFromPtr(tid),
                     //     @intFromPtr(v),
@@ -133,8 +142,10 @@ pub const DepCtx = struct {
             },
             .static => |s| {
                 if (comptime klib.meta.isValuePointer(T)) {
-                    const v: T = @ptrFromInt(@intFromPtr(self.static[s.ctx].ptr) + s.offset);
-                    // std.log.info("{x}: Found static(*) at {x} (from {x}+{d}: {d})", .{
+                    const base = @intFromPtr(self.static[s.ctx].ptr) + s.offset;
+                    const v: T = if (s.isPtr) @as(*T, @ptrFromInt(base)).* else @ptrFromInt(base);
+                    // std.log.info("[{s}]{x}: Found static(*) at {x} (from {x}+{d}: {d})", .{
+                    //     @typeName(T),
                     //     @intFromPtr(tid),
                     //     @intFromPtr(v),
                     //     @intFromPtr(self.static[s.ctx].ptr),

@@ -16,6 +16,7 @@ pub fn StaticStrict(comptime T: type) type {
         /// Initialize a new queue backed by a buffer.
         pub fn init(buffer: []T, occupancy_buffer: []u1) Self {
             std.debug.assert(buffer.len == occupancy_buffer.len);
+            @memset(occupancy_buffer, 0);
             return .{
                 .header = 0,
                 .buffer = buffer,
@@ -216,11 +217,10 @@ pub fn StaticLenient(comptime T: type) type {
             if (currentLen == 0) return null;
 
             const headIdx = self.head;
-            const head = self.buffer[headIdx];
             self.head = (self.head + 1) % self.buffer.len;
             self.len.store(currentLen - 1, .monotonic);
 
-            return head;
+            return self.buffer[headIdx];
         }
 
         /// Pop the next element in the queue if any.
@@ -228,6 +228,9 @@ pub fn StaticLenient(comptime T: type) type {
         /// The head of the buffer is moved forward by 1 and the length is removed.
         /// If you want to block until an element is available use pop() instead.
         pub fn drain(self: *Self) ?T {
+            self.used.timedWait(100) catch {
+                return null;
+            };
             self.mutex.lock();
             defer self.mutex.unlock();
 
