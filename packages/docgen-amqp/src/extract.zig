@@ -166,9 +166,12 @@ fn channelExchange(comptime meta: anytype) ?[]const u8 {
 }
 
 /// A receive route uses the event as its operation id; a reply also publishes, so
-/// its send half is suffixed to stay unique.
+/// its send half is suffixed to stay unique. An unrouted handler is address-less
+/// (no exchange) and shares its event with the publish it shadows, so its receive
+/// half is suffixed too — otherwise the two operations collide on one id.
 fn operationId(comptime meta: anytype, comptime action: model.Action) []const u8 {
     if (action == .send and meta.PayloadIn != null) return meta.event ++ ".reply";
+    if (action == .receive and meta.exchange.len == 0) return meta.event ++ ".unrouted";
     return meta.event;
 }
 
@@ -327,6 +330,42 @@ test "reply yields a receive and a suffixed send on one channel" {
 
     const ch = findChannel(r.doc, "amq.direct.thing").?;
     try std.testing.expectEqual(@as(usize, 2), ch.messages.len);
+}
+
+test "an unrouted handler sharing a publish's event gets a distinct operation id" {
+    const Driver = struct {
+        pub const Routes = &[_]type{
+            TestRoute(.{
+                .raw = "publish!:client-heartbeat amq.direct/client.heartbeat",
+                .event = "client-heartbeat",
+                .exchange = "amq.direct",
+                .routing_key = "client.heartbeat",
+                .PayloadOut = Ack,
+            }),
+            TestRoute(.{
+                .raw = "unrouted:client-heartbeat",
+                .event = "client-heartbeat",
+                .exchange = "",
+                .routing_key = "",
+                .PayloadIn = Ack,
+            }),
+        };
+    };
+    const r = try buildTestDoc(Driver, null);
+    defer {
+        r.arena.deinit();
+        std.testing.allocator.destroy(r.arena);
+    }
+
+    try std.testing.expectEqual(model.Action.send, findOp(r.doc, "client-heartbeat").?.action);
+    try std.testing.expectEqual(model.Action.receive, findOp(r.doc, "client-heartbeat.unrouted").?.action);
+
+    // Operation ids must be unique across the whole document.
+    for (r.doc.operations, 0..) |a, i| {
+        for (r.doc.operations[i + 1 ..]) |b| {
+            try std.testing.expect(!std.mem.eql(u8, a.id, b.id));
+        }
+    }
 }
 
 test "summary and description come from the doc comment" {
