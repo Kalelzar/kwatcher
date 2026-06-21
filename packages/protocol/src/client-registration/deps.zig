@@ -37,6 +37,7 @@ pub fn default(comptime drv: Drivers, comptime Context: type) type {
             Config,
             @TypeOf(dephub),
         ) {
+            _ = allocator;
             const drk: drv.DriverKeys() = category;
             const Shim = amqp.BridgeShimCtx(
                 Scheduler,
