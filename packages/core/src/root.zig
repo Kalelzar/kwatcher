@@ -6,6 +6,7 @@ pub const schema = @import("schema.zig");
 pub const event = @import("event.zig");
 pub const deps = @import("dep.zig");
 pub const driver = @import("driver.zig");
+pub const scheduler = @import("scheduler.zig");
 pub const DriverRegistry = @import("driver.zig").Drivers;
 pub const mem = @import("mem/mem.zig");
 

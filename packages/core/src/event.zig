@@ -16,7 +16,7 @@ pub fn genAccepts(comptime ET: type, comptime T: type) *const fn (ET) bool {
                     if (max < f.value) max = f.value;
                 }
 
-                break :blk .{ .min = min, .max = max - 1 };
+                break :blk .{ .min = min, .max = max };
             };
 
             return v >= bounds.min and v <= bounds.max;
@@ -29,11 +29,13 @@ pub fn genAccepts(comptime ET: type, comptime T: type) *const fn (ET) bool {
 pub const Base = enum(u12) {
     noop,
     shutdown,
+    shutdownImminent,
 };
 
 pub const BaseValues = union(Base) {
     noop: struct {},
     shutdown: struct {},
+    shutdownImminent: struct {},
 };
 
 pub const Properties = struct {

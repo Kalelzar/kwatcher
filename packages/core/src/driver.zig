@@ -1,6 +1,7 @@
 const std = @import("std");
 const meta = @import("utils/meta.zig");
 const event = @import("event.zig");
+const Internal = @import("scheduler.zig").Internal;
 
 pub const Drivers = struct {
     block_start: u12 = 100,
@@ -8,7 +9,7 @@ pub const Drivers = struct {
 
     pub fn new() Drivers {
         return .{
-            .drivers = &.{},
+            .drivers = &.{Internal},
         };
     }
 
@@ -34,26 +35,13 @@ pub const Drivers = struct {
             var defs: [self.last() - 100 + meta.count(event.Base)]std.builtin.Type.EnumField = undefined;
             var i: u64 = 0;
 
-            switch (@typeInfo(event.Base)) {
-                .@"enum" => |e| {
-                    if (!e.is_exhaustive) @compileError("EventType must be exhaustive!");
-                    for (e.fields) |f| {
-                        if (std.mem.eql(u8, f.name[0..f.name.len], "__end")) continue;
-                        defs[i] = f;
-                        i += 1;
-                    }
-                },
-                else => @compileError("Base event is not an enum. How even?"),
-            }
-
-            for (self.drivers) |d| {
-                const driver_block = d.EventType;
-                const ti = @typeInfo(driver_block);
+            for (self.drivers) |D| {
+                const DriverBlock = D.EventType;
+                const ti = @typeInfo(DriverBlock);
                 switch (ti) {
                     .@"enum" => |e| {
                         if (!e.is_exhaustive) @compileError("EventType must be exhaustive!");
                         for (e.fields) |f| {
-                            if (std.mem.eql(u8, f.name[0..f.name.len], "__end")) continue;
                             defs[i] = f;
                             i += 1;
                         }
@@ -76,13 +64,9 @@ pub const Drivers = struct {
     }
 
     pub fn EventValues(comptime self: Drivers) type {
-        var value: [self.drivers.len + 1]std.builtin.Type.UnionField = undefined;
-        value[0] = std.builtin.Type.UnionField{
-            .alignment = @alignOf(event.BaseValues),
-            .name = "internal",
-            .type = event.BaseValues,
-        };
-        inline for (self.drivers, 1..) |D, i| {
+        var value: [self.drivers.len]std.builtin.Type.UnionField = undefined;
+
+        inline for (self.drivers, 0..) |D, i| {
             const name: [:0]const u8 = @tagName(D.key);
             value[i] = std.builtin.Type.UnionField{
                 .alignment = @alignOf(D.EventValues),
@@ -154,13 +138,9 @@ pub const Drivers = struct {
     }
 
     pub fn EventValueKeys(comptime self: Drivers) type {
-        var value: [self.drivers.len + 1]std.builtin.Type.EnumField = undefined;
-        value[0] = std.builtin.Type.EnumField{
-            .name = "internal",
-            .value = 0,
-        };
+        var value: [self.drivers.len]std.builtin.Type.EnumField = undefined;
 
-        inline for (self.drivers, 1..) |D, i| {
+        inline for (self.drivers, 0..) |D, i| {
             const name: [:0]const u8 = @tagName(D.key);
             value[i] = std.builtin.Type.EnumField{
                 .name = name,
@@ -271,10 +251,6 @@ pub fn AssertDriver(comptime Drv: anytype, comptime expected_key: @Type(.enum_li
     const EType = Builder.EventType;
     if (comptime @typeInfo(EType) != .@"enum") {
         @compileError("Expected EventType to be an enum");
-    }
-
-    if (comptime !@hasField(EType, "__end")) {
-        @compileError("EventType is missing the block-end sentinel field: __end");
     }
 
     if (comptime !@hasDecl(Builder, "EventValues")) {
