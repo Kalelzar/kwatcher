@@ -59,6 +59,9 @@ pub const Signal = enum(u32) {
 
 pub const SignalInfo = std.os.linux.siginfo_t;
 
+/// Pre-built signal route containers users can include (e.g. `default.Shutdown`).
+pub const default = @import("default.zig");
+
 pub fn ForSignal(comptime signum: Signal, comptime Rs: []const type) []const type {
     const count = comptime blk: {
         var count = 0;
@@ -122,17 +125,15 @@ pub fn DriverBuilder(
 
                 pub const EventType = enum(u12) {
                     signal = block_start,
-                    __end,
                 };
 
                 pub const EventValues = union(EventType) {
                     signal: SignalData,
-                    __end: struct {},
                 };
 
                 pub inline fn __block_end() u12 {
                     comptime {
-                        return @intFromEnum(@This().EventType.__end);
+                        return block_start + meta.count(EventType);
                     }
                 }
 
@@ -267,7 +268,6 @@ pub fn DriverBuilder(
 
                             switch (et) {
                                 inline .signal => try dispatch(ev.signal, inj),
-                                else => @compileError("Invalid handler mapping!"),
                             }
                         }
                     };
