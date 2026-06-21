@@ -135,18 +135,14 @@ const ActionRoutes = struct {
 /// Function names follow the pattern: "SIG @identifier" (e.g. "INT @shutdown").
 /// The first parameter is always the siginfo; any further params are injected deps.
 /// Multiple handlers may target the same signal — all of them run.
+/// Graceful shutdown on SIGINT/SIGTERM is provided by the pre-built
+/// `signal.default.Shutdown` container, concatenated into the driver below.
+/// Add your own handlers here; multiple handlers may target the same signal.
 const SignalRoutes = struct {
-    pub fn @"INT @log"(info: signal.SignalInfo) void {
-        log.info("[signal] SIGINT caught (signo={d})", .{info.signo});
-    }
-
-    /// A second handler on the same signal, demonstrating multi-handler dispatch.
+    /// A second handler on SIGINT, demonstrating multi-handler dispatch
+    /// (runs alongside the pre-built shutdown handler).
     pub fn @"INT @note"(_: signal.SignalInfo) void {
         log.info("[signal] second SIGINT handler ran too", .{});
-    }
-
-    pub fn @"TERM @log"(info: signal.SignalInfo) void {
-        log.info("[signal] SIGTERM caught (signo={d})", .{info.signo});
     }
 };
 
@@ -362,7 +358,7 @@ const signal_driver = signal.Driver
     .new(.signal)
     .listen(true)
     .jobs(1)
-    .routes(signal.From(SignalRoutes))
+    .routes(signal.From(SignalRoutes) ++ signal.From(signal.default.Shutdown))
     .build();
 
 /// Combined driver registry

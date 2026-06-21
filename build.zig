@@ -125,6 +125,7 @@ pub fn build(b: *std.Build) !void {
             .{ .kind = "amqp", .module = kw_docgen_amqp },
             .{ .kind = "action", .module = kw_docgen_none },
             .{ .kind = "signal", .module = kw_docgen_none },
+            .{ .kind = "internal", .module = kw_docgen_none },
         },
     });
 
