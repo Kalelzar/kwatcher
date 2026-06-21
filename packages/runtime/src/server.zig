@@ -32,11 +32,17 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
     const E = Event(EventType, EventValues);
     const Handlers = D.Handlers(EventType, EventValues);
     const SchCtx = D.SchedulerCtx();
+    // The internal driver is always seeded, so its scheduler is always available
+    // to bridge into the type-erased shim that framework-level routes (e.g. the
+    // pre-built shutdown routes) depend on.
+    const InternalScheduler = D.Schedulers()[@intFromEnum(@as(D.DriverKeys(), .internal))];
+    const ShimCtx = core.scheduler.BridgeShimCtx(InternalScheduler);
     const Deps = comptime blk: {
         var Dm = _Deps;
         for (SchCtx) |S| {
             Dm = Dm.Static(.all, *S);
         }
+        Dm = Dm.Static(.all, *ShimCtx);
         break :blk Dm;
     };
     Deps.verify();
@@ -49,6 +55,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
         queue: MCMPQueue(E),
         handlers: std.meta.Tuple(&Handlers) = undefined,
         schedulers: std.meta.Tuple(&SchCtx) = std.mem.zeroInit(std.meta.Tuple(&SchCtx), .{}),
+        shim_ctx: ShimCtx = .{},
         deps: Deps,
         rand: std.Random.Xoshiro256 = std.Random.DefaultPrng.init(0),
 
@@ -91,6 +98,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                 self.schedulers[i].scheduler = h.scheduler();
                 self.deps.staticAssumeRegistered(.all, &self.schedulers[i]);
             }
+            self.deps.staticAssumeRegistered(.all, &self.shim_ctx);
         }
 
         fn watch(self: *Self) !void {
@@ -175,23 +183,10 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
             for (0..self.consumers) |_| {
                 log.debug("Poison", .{});
                 _ = self.queue.push(.{
-                    .event_type = .shutdown,
-                    .event_data = .{ .internal = .{ .shutdown = .{} } },
+                    .event_type = .shutdownImminent,
+                    .event_data = .{ .internal = .{ .shutdownImminent = .{} } },
                 });
             }
-        }
-
-        fn stopHandler(self: *Self, comptime addr: **anyopaque) std.posix.Sigaction.handler_fn {
-            const H = struct {
-                pub fn shutdown(_: c_int) callconv(.c) void {
-                    const s: *Self = @ptrCast(@alignCast(addr.*));
-                    s.stop();
-                }
-            };
-
-            addr.* = @ptrCast(@alignCast(self));
-
-            return H.shutdown;
         }
 
         fn run(self: *Self) void {
@@ -261,6 +256,9 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                     log.debug("Noop :)", .{});
                 },
                 .shutdown => {
+                    self.stop();
+                },
+                .shutdownImminent => {
                     if (!is_draining) {
                         log.debug("Shutting down thread. :)", .{});
                         return error.ShutdownImminent;
@@ -323,27 +321,6 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
         }
 
         pub fn start(self: *@This()) !void {
-            const H = struct {
-                var slot: *anyopaque = undefined;
-            };
-
-            if (comptime builtin.os.tag == .linux) {
-                // call our shutdown function (below) when
-                // SIGINT or SIGTERM are received
-                std.posix.sigaction(std.posix.SIG.INT, &.{
-                    .handler = .{
-                        .handler = self.stopHandler(&H.slot),
-                    },
-                    .mask = std.posix.sigemptyset(),
-                    .flags = 0,
-                }, null);
-                std.posix.sigaction(std.posix.SIG.TERM, &.{
-                    .handler = .{ .handler = self.stopHandler(&H.slot) },
-                    .mask = std.posix.sigemptyset(),
-                    .flags = 0,
-                }, null);
-            }
-
             try self.bind();
 
             const thread = try std.Thread.spawn(
