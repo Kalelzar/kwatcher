@@ -89,7 +89,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                 var h = &self.handlers[i];
                 h.bind(&self.queue);
                 self.schedulers[i].scheduler = h.scheduler();
-                self.deps.staticAssumeRegistered(.all, &self.schedulers[i], self.allocator);
+                self.deps.staticAssumeRegistered(.all, &self.schedulers[i]);
             }
         }
 
@@ -293,10 +293,9 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
 
                             var prop_ctx = PropCtx{ .props = maybe_next.properties };
                             const o = inj_ctx.require(ScopedAllocator) catch |e| break :fail e;
-                            var v = dep.DependencyContainer(struct {}).newBlank(D).static(
+                            var v = dep.DependencyContainer(struct {}).newBlank(D, o.value).static(
                                 .all,
                                 &prop_ctx,
-                                o.value,
                             );
                             var cm = v.compile(Driver.key, .scoped, o.value) catch |e| break :fail e;
                             v.prepare(&cm, Driver.key, .scoped, o.value) catch |e| break :fail e;

@@ -130,11 +130,12 @@ fn EnsureProvider(comptime key: @Type(.enum_literal), comptime R: type, comptime
             allocator: std.mem.Allocator,
             comptime Config: type,
         ) Return(category, Config, @TypeOf(dephub)) {
+            _ = allocator;
             const H = struct {
                 var fixme_move_elsewhere_cache = Static{};
             };
 
-            return dephub.static(category, &H.fixme_move_elsewhere_cache, allocator);
+            return dephub.static(category, &H.fixme_move_elsewhere_cache);
         }
 
         pub fn Return(comptime category: anytype, comptime Config: type, comptime DH: type) type {

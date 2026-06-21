@@ -103,12 +103,13 @@ pub fn default(
 ) @TypeOf(dephub)
     .Static(category, *Static(Context, Config, subpath))
     .Scoped(category, Scoped) {
+    _ = allocator;
     const H = struct {
         var fixme_move_elsewhere_cache = Static(Context, Config, subpath){};
     };
 
     return dephub
-        .static(category, &H.fixme_move_elsewhere_cache, allocator)
+        .static(category, &H.fixme_move_elsewhere_cache)
         .scoped(category, Scoped);
 }
 

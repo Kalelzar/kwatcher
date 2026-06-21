@@ -455,8 +455,8 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         // TODO: create a http.defaultFor
         .with(.http, kwatcher.default.config(http.Config, "driver.http"), allocator)
         // Register our custom counter as a static dependency
-        .static(.http, &ctx, allocator)
-        .static(.amqp, &counter, allocator);
+        .static(.http, &ctx)
+        .static(.amqp, &counter);
 
     // Create and start the server
     var server = try kwatcher.server.Server(@TypeOf(deps), drivers.drivers)

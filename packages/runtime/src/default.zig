@@ -88,7 +88,7 @@ pub fn default(
     }
 
     return dephub
-        .static(category, &H.fixme_move_elsewhere_cache.?, allocator)
+        .static(category, &H.fixme_move_elsewhere_cache.?)
         .scoped(category, Scoped);
 }
 
@@ -145,12 +145,13 @@ pub fn defaultConfig(
     comptime subpath: []const u8,
 ) @TypeOf(dephub)
     .Static(category, *ResolvedConfig(Config, subpath)) {
+    _ = allocator;
     const H = struct {
         var fixme_move_elsewhere_cache: ResolvedConfig(Config, subpath) = .{};
     };
 
     return dephub
-        .static(category, &H.fixme_move_elsewhere_cache, allocator);
+        .static(category, &H.fixme_move_elsewhere_cache);
 }
 
 pub fn config(comptime OurConfig: type, comptime config_path: []const u8) type {

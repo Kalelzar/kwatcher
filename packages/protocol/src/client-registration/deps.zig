@@ -47,8 +47,8 @@ pub fn default(comptime drv: Drivers, comptime Context: type) type {
                 var shim = Shim{};
             };
 
-            return dephub.static(category, &H.fixme_move_elsewhere_cache, allocator)
-                .static(.all, &H.shim, allocator);
+            return dephub.static(category, &H.fixme_move_elsewhere_cache)
+                .static(.all, &H.shim);
         }
 
         pub fn Return(
