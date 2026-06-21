@@ -109,8 +109,8 @@ pub fn schemaFor(comptime T: type, ctx: *Ctx) std.mem.Allocator.Error!model.Sche
 }
 
 fn structSchema(comptime T: type, ctx: *Ctx) std.mem.Allocator.Error!model.Schema {
-    if (comptime componentName(T)) |name| {
-        const ref = "#/components/schemas/" ++ name;
+    if (componentNameFor(T, ctx)) |name| {
+        const ref = try std.fmt.allocPrint(ctx.allocator, "#/components/schemas/{s}", .{name});
         // Already registered (or registering) — just reference it.
         if (ctx.components.schemas.contains(name)) return .{ .kind = .ref, .ref = ref };
         // Reserve the slot before recursing so self-referential types terminate.
@@ -124,12 +124,31 @@ fn structSchema(comptime T: type, ctx: *Ctx) std.mem.Allocator.Error!model.Schem
     return try objectSchema(T, ctx);
 }
 
+/// The component name for a struct, or null when it should be inlined.
+///
+/// A concrete `schema.Schema(ver, name, …)` is named after its `(name, version)` —
+/// `"client"`/2 → `Client.V2`, `"afk.status-change"`/1 → `Afk.StatusChange.V1`. We only
+/// do this for schemas the doc index actually collected (a `const = Schema(...)` decl);
+/// a *generic* schema like `Heartbeat.V1(Props)` shares one `(name, version)` across
+/// distinct `Props`, so it is left inline to avoid a component collision. Everything else
+/// (HTTP/OpenAPI bare types) keeps the comptime `@typeName`-derived name.
+fn componentNameFor(comptime T: type, ctx: *Ctx) ?[]const u8 {
+    if (comptime schemaIdentity(T)) |id| {
+        if (ctx.doc_index) |idx| {
+            if (idx.hasSchema(id.name, id.version)) return comptime schemaComponentName(id);
+        }
+    }
+    return comptime componentName(T);
+}
+
 fn objectSchema(comptime T: type, ctx: *Ctx) std.mem.Allocator.Error!model.Schema {
     const info = @typeInfo(T).@"struct";
-    // The doc index keys types by bare decl name; `@typeName` is the full import
-    // path + decl, so take the last component. For an anonymous struct this is a
-    // generated name absent from the index, so lookups return null (inline structs
-    // undocumented). NOTE: this is heuristic name-matching — see docKey.
+    // A `schema.Schema(ver, name, …)` carries its `(name, version)` as comptime field
+    // defaults — a stable identity both reflection and the doc index see, immune to the
+    // `@typeName` ambiguity that defeats merged/anonymous types. Prefer it; otherwise
+    // fall back to the bare-decl-name + field-set heuristic (the `@typeName` last
+    // component, generated/absent for anonymous structs). See docKey.
+    const id = comptime schemaIdentity(T);
     const name = comptime docKey(@typeName(T));
     const names = comptime fieldNames(T);
 
@@ -138,7 +157,7 @@ fn objectSchema(comptime T: type, ctx: *Ctx) std.mem.Allocator.Error!model.Schem
         props[i] = .{
             .name = f.name,
             .schema = try schemaFor(f.type, ctx),
-            .description = if (ctx.doc_index) |idx| idx.fieldDoc(name, f.name, names) else null,
+            .description = fieldDescription(ctx.doc_index, id, name, f.name, names),
         };
     }
 
@@ -159,8 +178,79 @@ fn objectSchema(comptime T: type, ctx: *Ctx) std.mem.Allocator.Error!model.Schem
         .kind = .object,
         .properties = props,
         .required = required,
-        .description = if (ctx.doc_index) |idx| idx.typeDoc(name, names) else null,
+        .description = typeDescription(ctx.doc_index, id, name, names),
     };
+}
+
+/// A `schema.Schema(...)` envelope's identity: the comptime defaults of its
+/// `schema_name`/`schema_version` fields. Null for any other struct, so non-schema
+/// types keep using the bare-name lookup.
+const SchemaIdentity = struct { name: []const u8, version: u32 };
+
+fn schemaIdentity(comptime T: type) ?SchemaIdentity {
+    const info = @typeInfo(T);
+    if (info != .@"struct") return null;
+    comptime var name: ?[]const u8 = null;
+    comptime var version: ?u32 = null;
+    inline for (info.@"struct".fields) |f| {
+        if (comptime std.mem.eql(u8, f.name, "schema_name") and f.type == []const u8) {
+            if (f.default_value_ptr) |p| name = @as(*const []const u8, @ptrCast(@alignCast(p))).*;
+        }
+        if (comptime std.mem.eql(u8, f.name, "schema_version") and f.type == u32) {
+            if (f.default_value_ptr) |p| version = @as(*const u32, @ptrCast(@alignCast(p))).*;
+        }
+    }
+    if (name) |n| if (version) |v| return .{ .name = n, .version = v };
+    return null;
+}
+
+/// The component name for a schema identity: each `.`-segment of the wire name is
+/// PascalCased (splitting on `-`/`_` too), then `.V<version>` is appended.
+/// `client.announce`/1 → `Client.Announce.V1`; `afk`/1 → `Afk.V1`.
+fn schemaComponentName(comptime id: SchemaIdentity) []const u8 {
+    comptime {
+        var out: []const u8 = "";
+        var it = std.mem.splitScalar(u8, id.name, '.');
+        var first = true;
+        while (it.next()) |seg| {
+            if (!first) out = out ++ ".";
+            out = out ++ pascalWord(seg);
+            first = false;
+        }
+        return out ++ std.fmt.comptimePrint(".V{d}", .{id.version});
+    }
+}
+
+/// `status-change` → `StatusChange`: uppercase each word, dropping `-`/`_`/space.
+fn pascalWord(comptime s: []const u8) []const u8 {
+    comptime {
+        var out: []const u8 = "";
+        var upper = true;
+        for (s) |c| {
+            if (c == '-' or c == '_' or c == ' ') {
+                upper = true;
+                continue;
+            }
+            out = out ++ &[_]u8{if (upper) std.ascii.toUpper(c) else c};
+            upper = false;
+        }
+        return out;
+    }
+}
+
+/// A schema's type doc: by `(name, version)` when it is a `Schema(...)` envelope, else
+/// by bare decl name + field set.
+fn typeDescription(idx: ?*const docindex.DocIndex, comptime id: ?SchemaIdentity, comptime name: []const u8, comptime names: []const []const u8) ?[]const u8 {
+    const i = idx orelse return null;
+    if (comptime id) |x| return i.schemaDoc(x.name, x.version);
+    return i.typeDoc(name, names);
+}
+
+/// A field's doc, resolved the same way as `typeDescription`.
+fn fieldDescription(idx: ?*const docindex.DocIndex, comptime id: ?SchemaIdentity, comptime name: []const u8, comptime field: []const u8, comptime names: []const []const u8) ?[]const u8 {
+    const i = idx orelse return null;
+    if (comptime id) |x| return i.schemaFieldDoc(x.name, x.version, field);
+    return i.fieldDoc(name, field, names);
 }
 
 /// The bare declaration name — the last dot-component of a `@typeName`, which is how
@@ -172,10 +262,7 @@ fn objectSchema(comptime T: type, ctx: *Ctx) std.mem.Allocator.Error!model.Schem
 /// the actual decl each route handler/param/return points at) rather than reflection
 /// + name matching — a worthwhile but much larger change.
 fn docKey(comptime fqn: []const u8) []const u8 {
-    comptime {
-        const d = std.mem.lastIndexOfScalar(u8, fqn, '.') orelse return fqn;
-        return fqn[d + 1 ..];
-    }
+    return comptime lastSegment(fqn);
 }
 
 /// The reflected struct's field names, as a comptime slice — used to disambiguate
@@ -206,9 +293,16 @@ fn componentName(comptime T: type) ?[]const u8 {
     return comptime sanitize(seg);
 }
 
+/// The bare declaration identifier inside a `@typeName`: the final dot-component with
+/// any trailing generic-instantiation punctuation removed. A generic type's name ends
+/// in the closing tokens of the call — `MergeStructs(..,pkg.ClientHeartbeat)` yields
+/// the segment `ClientHeartbeat)`, which trims to `ClientHeartbeat`. Keeping this in
+/// one place means the component key (`componentName`) and the doc-lookup key
+/// (`docKey`) agree, so a documented type still matches its index entry.
 fn lastSegment(comptime full: []const u8) []const u8 {
     const idx = comptime std.mem.lastIndexOfScalar(u8, full, '.');
-    return if (idx) |i| full[i + 1 ..] else full;
+    const seg = if (idx) |i| full[i + 1 ..] else full;
+    return comptime std.mem.trimRight(u8, seg, ")] ");
 }
 
 /// Replace any character outside the OpenAPI component-key set with '_'.
