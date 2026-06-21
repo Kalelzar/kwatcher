@@ -119,7 +119,6 @@ pub fn inscribe(kwev: *KWEV, driver: drivers.Drivers) !usize {
                 .@"enum" => |e| {
                     if (!e.is_exhaustive) @compileError("EventType must be exhaustive!");
                     for (e.fields) |f| {
-                        if (std.mem.eql(u8, f.name[0..f.name.len], "__end")) continue;
                         ev = ev ++ .{structures.EventType.Mapping{
                             .identifier = f.name,
                             .value = f.value,

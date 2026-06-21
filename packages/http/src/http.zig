@@ -81,7 +81,6 @@ pub fn DriverBuilder(
 
                 pub const EventType = enum(u12) {
                     http_recv = block_start,
-                    __end,
                 };
 
                 pub const RequestData = struct {
@@ -100,12 +99,11 @@ pub fn DriverBuilder(
 
                 pub const EventValues = union(EventType) {
                     http_recv: RequestData,
-                    __end: struct {},
                 };
 
                 pub inline fn __block_end() u12 {
                     comptime {
-                        return @intFromEnum(@This().EventType.__end);
+                        return block_start + meta.count(EventType);
                     }
                 }
 
@@ -317,7 +315,6 @@ pub fn DriverBuilder(
                                     ev.http_recv,
                                     ep,
                                 }),
-                                inline else => @compileError("Invalid handler mapping!"),
                             };
                         }
 

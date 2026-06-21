@@ -42,7 +42,6 @@ pub fn DriverBuilder(
                 pub const map = shared.RouteMap(Routes);
                 pub const EventType = enum(u12) {
                     trigger_job = block_start,
-                    __end,
                 };
 
                 const TriggerJobData = struct {
@@ -51,12 +50,11 @@ pub fn DriverBuilder(
 
                 pub const EventValues = union(EventType) {
                     trigger_job: TriggerJobData,
-                    __end: struct {},
                 };
 
                 pub inline fn __block_end() u12 {
                     comptime {
-                        return @intFromEnum(@This().EventType.__end);
+                        return block_start + meta.count(EventType);
                     }
                 }
                 pub fn Yield(comptime ET: type, comptime EV: type) type {
@@ -309,7 +307,6 @@ pub fn DriverBuilder(
                                         },
                                     }
                                 },
-                                else => @compileError("Invalid handler mapping!"),
                             }
                         }
                     };

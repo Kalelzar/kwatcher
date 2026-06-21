@@ -236,7 +236,6 @@ pub fn DriverBuilder(
                     send = block_start,
                     recv,
                     unrouted,
-                    __end,
                 };
 
                 pub const PublishData = PubCallContext;
@@ -267,12 +266,11 @@ pub fn DriverBuilder(
                     send: PublishData,
                     recv: ConsumeData,
                     unrouted: UnroutedData,
-                    __end: struct {},
                 };
 
                 pub inline fn __block_end() u12 {
                     comptime {
-                        return @intFromEnum(@This().EventType.__end);
+                        return block_start + meta.count(EventType);
                     }
                 }
 
@@ -764,7 +762,6 @@ pub fn DriverBuilder(
                                     ev.unrouted,
                                     ep,
                                 }),
-                                inline else => @compileError("Invalid handler mapping!"),
                             };
                         }
 
