@@ -76,12 +76,19 @@ pub const RequestBody = struct {
     schema: Schema,
 };
 
+/// One media type a payload can be represented as.
+pub const Content = struct {
+    content_type: []const u8,
+    schema: Schema,
+};
+
 pub const Response = struct {
     status: u16,
     description: []const u8,
-    /// `null` means "no content" (e.g. 204/3xx).
-    content_type: ?[]const u8 = null,
-    schema: ?Schema = null,
+    /// Media types this response can produce. Empty means "no content" (e.g.
+    /// 204/3xx). More than one entry when the route content-negotiates — e.g. a
+    /// `Many`/template wrapper offering `application/json` + `text/html`.
+    content: []const Content = &.{},
 };
 
 comptime {

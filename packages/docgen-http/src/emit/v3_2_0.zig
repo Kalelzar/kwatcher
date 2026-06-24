@@ -95,7 +95,7 @@ fn emitOperation(s: *Stringify, op: model.Operation) !void {
         try s.objectField("required");
         try s.write(body.required);
         try s.objectField("content");
-        try emitContent(s, body.content_type, body.schema);
+        try emitContentMap(s, &.{.{ .content_type = body.content_type, .schema = body.schema }});
         try s.endObject();
     }
 
@@ -108,9 +108,9 @@ fn emitOperation(s: *Stringify, op: model.Operation) !void {
         try s.beginObject();
         try s.objectField("description");
         try s.write(resp.description);
-        if (resp.schema) |schema| {
+        if (resp.content.len > 0) {
             try s.objectField("content");
-            try emitContent(s, resp.content_type orelse "application/json", schema);
+            try emitContentMap(s, resp.content);
         }
         try s.endObject();
     }
@@ -119,13 +119,16 @@ fn emitOperation(s: *Stringify, op: model.Operation) !void {
     try s.endObject();
 }
 
-fn emitContent(s: *Stringify, content_type: []const u8, schema: model.Schema) !void {
+/// Emit an OpenAPI `content` map: one entry per media type, each `{ "schema": … }`.
+fn emitContentMap(s: *Stringify, contents: []const model.Content) !void {
     try s.beginObject();
-    try s.objectField(content_type);
-    try s.beginObject();
-    try s.objectField("schema");
-    try emitSchema(s, schema);
-    try s.endObject();
+    for (contents) |c| {
+        try s.objectField(c.content_type);
+        try s.beginObject();
+        try s.objectField("schema");
+        try emitSchema(s, c.schema);
+        try s.endObject();
+    }
     try s.endObject();
 }
 
@@ -312,7 +315,7 @@ test "emits a minimal valid-looking document" {
                     .schema = .{ .kind = .integer, .format = "int64", .minimum = 0 },
                 }},
                 .responses = &.{
-                    .{ .status = 200, .description = "OK", .content_type = "application/json", .schema = .{ .kind = .ref, .ref = "#/components/schemas/Thing" } },
+                    .{ .status = 200, .description = "OK", .content = &.{.{ .content_type = "application/json", .schema = .{ .kind = .ref, .ref = "#/components/schemas/Thing" } }} },
                     .{ .status = 404, .description = "Not Found" },
                 },
             }},

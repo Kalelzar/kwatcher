@@ -7,6 +7,7 @@ const version = @import("version.zig");
 const Operation = model.Operation;
 const Parameter = model.Parameter;
 const Response = model.Response;
+const Content = model.Content;
 
 /// Build a version-neutral `model.Document` from a driver's registered routes.
 ///
@@ -122,6 +123,8 @@ fn buildOperation(
 /// status-named variants. This deliberately does not depend on the `Json` helper.
 fn buildResponses(comptime Return: type, ctx: *reflect.Ctx, arena: std.mem.Allocator) ![]const Response {
     @setEvalBranchQuota(100_000);
+    const content_types = comptime contentTypesOf(Return);
+
     if (comptime findStatusUnion(Return)) |StatusUnion| {
         const fields = @typeInfo(StatusUnion).@"union".fields;
         const responses = try arena.alloc(Response, fields.len);
@@ -134,10 +137,7 @@ fn buildResponses(comptime Return: type, ctx: *reflect.Ctx, arena: std.mem.Alloc
                 responses[i] = .{
                     .status = code,
                     .description = phraseOf(status),
-                    // A variant may override the content type; otherwise it inherits
-                    // the wrapper's (e.g. the `Json` helper's `application/json`).
-                    .content_type = reflect.declaredContentType(f.type) orelse reflect.contentTypeOf(Return),
-                    .schema = try reflect.schemaFor(f.type, ctx),
+                    .content = try buildContent(f.type, content_types, ctx, arena),
                 };
             }
         }
@@ -152,11 +152,62 @@ fn buildResponses(comptime Return: type, ctx: *reflect.Ctx, arena: std.mem.Alloc
         responses[0] = .{
             .status = 200,
             .description = phraseOf(.ok),
-            .content_type = reflect.contentTypeOf(Return),
-            .schema = try reflect.schemaFor(Return, ctx),
+            .content = try buildContent(Return, content_types, ctx, arena),
         };
     }
     return responses;
+}
+
+/// The media types a return type advertises. A multi-representation wrapper (the
+/// template `Many`) exposes them through a `pub const AllowedTypes` enum whose field
+/// names are the content-type strings; anything else has the single type from
+/// `contentTypeOf` (the `Json` helper's `application/json`, or the default).
+fn contentTypesOf(comptime Return: type) []const []const u8 {
+    switch (@typeInfo(Return)) {
+        .@"struct", .@"union", .@"enum", .@"opaque" => {
+            if (@hasDecl(Return, "AllowedTypes") and @typeInfo(Return.AllowedTypes) == .@"enum") {
+                const fields = @typeInfo(Return.AllowedTypes).@"enum".fields;
+                var out: [fields.len][]const u8 = undefined;
+                for (fields, 0..) |f, i| out[i] = f.name;
+                const frozen = out;
+                return &frozen;
+            }
+        },
+        else => {},
+    }
+    return &.{reflect.contentTypeOf(Return)};
+}
+
+/// Build the `content` map for one payload across the route's media types. A payload
+/// that pins its own content type (`pub const ContentType`) overrides the set and is
+/// emitted once with its structured schema. Otherwise each media type gets the
+/// structured schema if it's JSON-shaped, or a plain string schema otherwise —
+/// non-JSON representations (e.g. template-rendered `text/html`) are opaque text.
+fn buildContent(
+    comptime Payload: type,
+    comptime content_types: []const []const u8,
+    ctx: *reflect.Ctx,
+    arena: std.mem.Allocator,
+) ![]const Content {
+    if (comptime reflect.declaredContentType(Payload)) |own| {
+        const out = try arena.alloc(Content, 1);
+        out[0] = .{ .content_type = own, .schema = try reflect.schemaFor(Payload, ctx) };
+        return out;
+    }
+
+    const structured = try reflect.schemaFor(Payload, ctx);
+    const out = try arena.alloc(Content, content_types.len);
+    inline for (content_types, 0..) |ct, i| {
+        out[i] = .{
+            .content_type = ct,
+            .schema = if (comptime isJsonLike(ct)) structured else .{ .kind = .string },
+        };
+    }
+    return out;
+}
+
+fn isJsonLike(comptime content_type: []const u8) bool {
+    return std.mem.endsWith(u8, content_type, "json");
 }
 
 /// `Return` itself, a `value` field, or any single union-typed field — whichever
@@ -428,15 +479,15 @@ test "generic status union (not the Json helper) yields a response per status" {
         switch (resp.status) {
             200 => {
                 saw200 = true;
-                try std.testing.expect(resp.schema != null);
+                try std.testing.expectEqual(@as(usize, 1), resp.content.len);
             },
             400 => {
                 saw400 = true;
-                try std.testing.expect(resp.schema != null);
+                try std.testing.expectEqual(@as(usize, 1), resp.content.len);
             },
             204 => {
                 saw204 = true;
-                try std.testing.expect(resp.schema == null); // void -> no content
+                try std.testing.expectEqual(@as(usize, 0), resp.content.len); // void -> no content
             },
             else => {},
         }
@@ -505,5 +556,5 @@ test "void return becomes a 204" {
     const op = findOp(r.doc, "/thing", .delete).?;
     try std.testing.expectEqual(@as(usize, 1), op.responses.len);
     try std.testing.expectEqual(@as(u16, 204), op.responses[0].status);
-    try std.testing.expect(op.responses[0].schema == null);
+    try std.testing.expectEqual(@as(usize, 0), op.responses[0].content.len);
 }
