@@ -20,15 +20,10 @@ pub fn generate(alloc: std.mem.Allocator, out_dir: []const u8, source_roots: []c
     var sourceFile = try out.createFile("generated.zig", .{});
     defer sourceFile.close();
 
-    // The project name/version for every document's info block, read once from the
-    // project's build.zig.zon (cwd is the project root during a build). Scratch lives
-    // in an arena freed after every driver has been documented.
     var manifest_arena = std.heap.ArenaAllocator.init(alloc);
     defer manifest_arena.deinit();
     const manifest = readManifest(manifest_arena.allocator());
 
-    // Mine `///` doc comments from the project sources once; every driver's docgen
-    // shares the same index (generic — see kw-docindex).
     var index = try docindex.build(alloc, source_roots);
     defer index.deinit();
 

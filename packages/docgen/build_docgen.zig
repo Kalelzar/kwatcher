@@ -37,9 +37,9 @@ pub const Options = struct {
 };
 
 pub const Result = struct {
-    /// The `kw-docgen` run step; consumers add `compile.step.dependOn(&docgen_step.step)`.
+    build_step: *std.Build.Step.Compile,
+    modgen_step: *std.Build.Step.Run,
     docgen_step: *std.Build.Step.Run,
-    /// InstallDir step copying emitted *.json into <prefix>/docs.
     install_docs: *std.Build.Step.InstallDir,
 };
 
@@ -113,6 +113,8 @@ pub fn wire(b: *std.Build, opts: Options) Result {
 
     return .{
         .docgen_step = docgen,
+        .modgen_step = modgen,
+        .build_step = kw_modgen,
         .install_docs = install_docs,
     };
 }
