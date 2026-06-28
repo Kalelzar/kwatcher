@@ -9,6 +9,7 @@ pub const default = @import("default.zig");
 pub const middleware = struct {
     pub const latency = @import("latency.zig").WithLatency;
     pub const Latency = @import("latency.zig");
+    pub const enable_if = @import("middleware/enable.zig").EnableIf;
 };
 
 comptime {
