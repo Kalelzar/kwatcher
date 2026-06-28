@@ -216,10 +216,10 @@ pub fn DriverBuilder(
                         }
 
                         fn watch_failing(self: *@This(), reserve: *?Schedule) !void {
-                            self.mutex.lock();
+                            self.mutex.lock(); // #1: This lock
                             var sch = self.schedules.removeOrNull();
                             {
-                                defer self.mutex.unlock();
+                                defer self.mutex.unlock(); // #1: Is always unlocked here. Very easy to miss.
                                 if (sch == null) {
                                     self.cond.wait(&self.mutex);
                                     return;
@@ -229,6 +229,7 @@ pub fn DriverBuilder(
                                         self.schedules.add(r) catch @panic("Potential unsynchronized write. Cron queue was filled while under lock.");
                                     }
                                 }
+                                // #1: Here ends critical section
                             }
 
                             var now = std.time.timestamp();
