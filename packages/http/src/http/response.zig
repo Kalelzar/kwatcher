@@ -74,7 +74,7 @@ pub fn Json(
     };
 }
 
-fn toStatus(status: anytype) std.http.Status {
+pub fn toStatus(status: anytype) std.http.Status {
     const S = @TypeOf(status);
     const res: std.http.Status = sw: switch (S) {
         []const u8, []u8 => std.meta.stringToEnum(std.http.Status, status) orelse blk: {
@@ -84,7 +84,7 @@ fn toStatus(status: anytype) std.http.Status {
             const numerically: std.http.Status = @enumFromInt(int);
             break :blk numerically;
         },
-        usize, u64, u32, u16, isize, i64, i32, i16, comptime_int => @enumFromInt(status),
+        usize, u64, u32, u16, isize, i64, i32, i16, u10, comptime_int => @enumFromInt(status),
         @Type(.enum_literal) => @field(std.http.Status, @tagName(status)),
         else => {
             const ti = @typeInfo(S);
@@ -173,6 +173,59 @@ pub fn Unionize(
 
 pub fn Request(comptime Body: ?type) type {
     return FullRequest(Body, null);
+}
+
+/// A result type that can return a file from disk.
+/// @see InternalFile for files embedded in the executable.
+pub fn File(
+    comptime _ContentType: []const u8,
+) type {
+    return struct {
+        pub const ContentType = _ContentType;
+        value: std.fs.File,
+
+        pub fn write(self: *const @This(), writer: *std.Io.Writer, res: *http.Response) !void {
+            _ = writer;
+            defer self.value.close();
+            res.header("Content-Type", ContentType);
+
+            var buffer: [1024]u8 = undefined;
+
+            const file_size = (try self.value.stat()).size;
+            var temp: [64]u8 = undefined;
+            res.header("Content-Length", try std.fmt.bufPrint(&temp, "{d}", .{file_size}));
+
+            var reader = self.value.readerStreaming(&.{});
+            try res.writeHeader();
+
+            res.written = true;
+
+            var streamWriter = res.conn.stream.writer(&buffer);
+            const wi = &streamWriter.interface;
+
+            var switched_to_blocking = false;
+            defer if (switched_to_blocking) res.conn.nonblockingMode() catch {};
+
+            while (true) {
+                const n = wi.sendFile(&reader, .unlimited) catch |err| switch (err) {
+                    error.EndOfStream => break,
+                    else => return err,
+                };
+                if (n != 0) continue;
+
+                // No progress: either a stashed error or a benign mode-switch retry.
+                const se = streamWriter.file_writer.sendfile_err orelse continue;
+                streamWriter.file_writer.sendfile_err = null;
+                if (se != error.WouldBlock) return se;
+                if (!switched_to_blocking) {
+                    try res.conn.blockingMode();
+                    switched_to_blocking = true;
+                }
+            }
+
+            try wi.flush();
+        }
+    };
 }
 
 // Ref all decls

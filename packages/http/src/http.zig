@@ -341,8 +341,8 @@ pub fn DriverBuilder(
                                 evprop,
                                 @constCast(&event),
                             ) catch |e| {
-                                ErrorHandler.postQueue(e, event.req, event.res);
-                                return e;
+                                const final = ErrorHandler.postQueue(e, event.req, event.res);
+                                if (final) |f| return f;
                             };
                         }
 
