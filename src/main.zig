@@ -9,6 +9,9 @@ const cron = @import("kw-cron");
 const action = @import("kw-action");
 const signal = @import("kw-signal");
 const httpz = @import("httpz");
+const zmpl = @import("zmpl.zig");
+
+const docs = @import("kw-gen--docs");
 
 pub const std_options = std.Options{
     .log_scope_levels = &[_]std.log.ScopeLevel{
@@ -159,16 +162,14 @@ const HTTPRoutes = struct {
         return &.{};
     }
 
-    pub fn @"GET /api/v1/users @listUsers"(_: http.data.Request(null)) []const HeartbeatMessage {
-        return &.{};
-    }
-
     pub fn @"GET /api/v1/ok @okExample"(_: http.data.Request(null), inj: *core.deps.DepCtx) !http.data.Json(
         HeartbeatMessage,
         .{.ok},
     ) {
-        const act = try inj.require(Scheduler(.action));
-        try act.callImmediate(.{ .greet = .{"hello from /ok"} }, inj);
+        const act: Scheduler(.action) = try inj.require(Scheduler(.action));
+        const scron: Scheduler(.cron) = try inj.require(Scheduler(.cron));
+        const ev = try act.callLater(.{ .greet = .{"hello from /ok"} }, .{ .inj = inj });
+        try scron.after(5, ev);
         return .{
             .value = .{
                 .ok = .{
@@ -195,6 +196,10 @@ const HTTPRoutes = struct {
                 },
             },
         };
+    }
+
+    pub fn @"GET /api/v1/users @listUsers"(_: http.data.Request(null)) []const HeartbeatMessage {
+        return &.{};
     }
 
     pub fn @"POST /api/v1/users @createUser"(ctx: http.data.Request(struct { name: []const u8 })) HeartbeatMessage {
@@ -341,7 +346,8 @@ const http_driver = http.Driver
     .config("driver.http")
     .listen(true)
     .jobs(1)
-    .routes(http.middleware.cors(http.From(HTTPRoutes, RouteContext)))
+    .routes(http.middleware.cors(http.From(HTTPRoutes, RouteContext) ++
+        if (!docs.isDocgen) zmpl.WithTemplates(.@"test", http.From(@import("template_routes.zig"), RouteContext)) else @as([]const type, &.{})))
     .error_handler(http.DefaultErrorHandler)
     .build();
 

@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<!--
+  HTTP DRIVER VIEW — STATIC LAYOUT MOCKUP (no server, no docgen wiring)
+
+  Purpose: pin down the layout so we know what to export from docgen into the
+  runtime manifest. Open directly in a browser. All data below is hardcoded and
+  drawn from the example routes in src/main.zig.
+
+  Every labelled UI element maps to a field on docgen's `model.Document`
+  (packages/docgen-http/src/model.zig) + shared `Schema` (packages/docgen/src/schema/schema.zig).
+  See the data-contract notes at the bottom of this file and the [doc: ...] tags inline.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KW-IntrospectUI — http (mockup)</title>
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  </head>
+  <body class="flex h-screen overflow-hidden bg-zinc-900 text-zinc-100 antialiased">
+
+    <!-- ============================================================= -->
+    <!-- App driver sidebar (existing component, shown for context)     -->
+    <!-- ============================================================= -->
+    <aside class="sticky top-0 flex h-screen w-64 shrink-0 flex-col gap-3 overflow-y-auto border-r border-zinc-700/60 bg-zinc-800/50 p-4">
+      <header class="flex items-center gap-2 border-b border-zinc-700/60 px-1 pb-3">
+        <span class="text-base font-semibold tracking-tight text-zinc-100">KW-IntrospectUI</span>
+      </header>
+      <span class="px-1 text-xs font-medium uppercase tracking-wider text-zinc-500">Drivers</span>
+      <nav class="flex flex-col gap-0.5">
+        <a class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700/50"><span class="grid h-7 w-7 place-items-center rounded bg-zinc-700 text-xs">⚙</span>internal</a>
+        <a class="flex items-center gap-2.5 rounded-lg bg-zinc-700/70 px-3 py-2 text-sm font-medium text-sky-300 ring-1 ring-inset ring-sky-500/50" aria-current="page"><span class="grid h-7 w-7 place-items-center rounded bg-zinc-700 text-xs">🌐</span>http</a>
+        <a class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700/50"><span class="grid h-7 w-7 place-items-center rounded bg-zinc-700 text-xs">⏱</span>cron</a>
+        <a class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700/50"><span class="grid h-7 w-7 place-items-center rounded bg-zinc-700 text-xs">📡</span>amqp</a>
+      </nav>
+    </aside>
+
+    <!-- ============================================================= -->
+    <!-- HTTP driver view (the new feature): content pane = two panes  -->
+    <!-- ============================================================= -->
+    <main class="flex min-w-0 flex-1 flex-col" x-data="httpView()">
+
+      <!-- Header bar framing the pane (matches sidebar bg) [doc: Info.title + Driver key] -->
+      <header class="flex items-baseline gap-3 border-b border-zinc-700/60 bg-zinc-800/50 px-6 py-4">
+        <h1 class="text-xl font-semibold tracking-tight text-zinc-100">http</h1>
+        <span class="text-sm text-zinc-400">example · v1.0.0 · OpenAPI 3.2.0</span>
+        <span class="ml-auto text-xs text-zinc-500" x-text="endpoints.length + ' endpoints'"></span>
+      </header>
+
+      <div class="flex min-h-0 flex-1">
+
+        <!-- ========================================================= -->
+        <!-- LEFT PANE: endpoints + their documentation                -->
+        <!-- ========================================================= -->
+        <section class="flex min-w-0 flex-1 flex-col overflow-y-auto">
+          <template x-for="ep in endpoints" :key="ep.id">
+            <article
+              @click="sel = ep.id"
+              :class="sel === ep.id ? 'border-sky-500/50 bg-zinc-800/40' : 'border-zinc-800 hover:border-zinc-700'"
+              class="cursor-pointer border-b px-6 py-5">
+
+              <!-- method + path + operation_id  [doc: Operation.method / PathItem.path / Operation.operation_id] -->
+              <div class="flex items-center gap-3">
+                <span class="rounded px-2 py-0.5 text-xs font-bold tracking-wide"
+                      :class="methodClass(ep.method)" x-text="ep.method"></span>
+                <code class="font-mono text-sm text-zinc-200" x-text="ep.path"></code>
+                <span class="ml-auto font-mono text-xs text-zinc-500" x-text="ep.id"></span>
+              </div>
+
+              <!-- summary + description  [doc: Operation.summary / Operation.description] -->
+              <p class="mt-2 text-sm font-medium text-zinc-200" x-text="ep.summary"></p>
+              <p class="mt-0.5 text-sm text-zinc-400" x-text="ep.description" x-show="ep.description"></p>
+
+              <!-- parameters  [doc: Operation.parameters[]: name/location/required/schema] -->
+              <template x-if="ep.parameters.length">
+                <div class="mt-4">
+                  <h3 class="mb-1.5 text-xs font-semibold uppercase tracking-wider text-zinc-500">Parameters</h3>
+                  <div class="overflow-hidden rounded-lg border border-zinc-800">
+                    <table class="w-full text-left text-sm">
+                      <thead class="bg-zinc-800/60 text-xs uppercase tracking-wider text-zinc-500">
+                        <tr><th class="px-3 py-1.5 font-medium">Name</th><th class="px-3 py-1.5 font-medium">In</th><th class="px-3 py-1.5 font-medium">Type</th><th class="px-3 py-1.5 font-medium">Required</th><th class="px-3 py-1.5 font-medium">Description</th></tr>
+                      </thead>
+                      <tbody class="divide-y divide-zinc-800">
+                        <template x-for="p in ep.parameters" :key="p.name">
+                          <tr>
+                            <td class="px-3 py-1.5 font-mono text-zinc-200" x-text="p.name"></td>
+                            <td class="px-3 py-1.5 text-zinc-400" x-text="p.location"></td>
+                            <td class="px-3 py-1.5 font-mono text-xs text-emerald-300" x-text="p.type"></td>
+                            <td class="px-3 py-1.5"><span x-show="p.required" class="text-rose-400">required</span><span x-show="!p.required" class="text-zinc-500">optional</span></td>
+                            <td class="px-3 py-1.5 text-zinc-400" x-text="p.description"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </template>
+
+              <!-- request body  [doc: Operation.request_body: content_type/required/schema] -->
+              <template x-if="ep.body">
+                <div class="mt-4">
+                  <h3 class="mb-1.5 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                    Request Body <span class="font-mono normal-case text-zinc-400" x-text="'· ' + ep.body.contentType"></span>
+                  </h3>
+                  <div class="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+                    <template x-for="f in ep.body.fields" :key="f.name">
+                      <div class="flex items-baseline gap-2 py-0.5 text-sm">
+                        <code class="font-mono text-zinc-200" x-text="f.name"></code>
+                        <span class="font-mono text-xs text-emerald-300" x-text="f.type"></span>
+                        <span x-show="f.required" class="text-xs text-rose-400">required</span>
+                        <span class="text-zinc-500" x-text="f.description"></span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+
+              <!-- responses  [doc: Operation.responses[]: status/description/content[]] -->
+              <div class="mt-4">
+                <h3 class="mb-1.5 text-xs font-semibold uppercase tracking-wider text-zinc-500">Responses</h3>
+                <div class="flex flex-col gap-1.5">
+                  <template x-for="r in ep.responses" :key="r.status">
+                    <div class="flex items-center gap-3 rounded-lg border border-zinc-800 px-3 py-1.5 text-sm">
+                      <span class="rounded px-2 py-0.5 text-xs font-bold" :class="statusClass(r.status)" x-text="r.status"></span>
+                      <span class="text-zinc-300" x-text="r.description"></span>
+                      <span class="ml-auto font-mono text-xs text-zinc-500" x-text="r.content.join(', ')"></span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </article>
+          </template>
+        </section>
+
+        <!-- ========================================================= -->
+        <!-- RIGHT PANE: Examples / Try it tabs (for selected endpoint) -->
+        <!-- ========================================================= -->
+        <aside class="flex w-[30rem] shrink-0 flex-col border-l border-zinc-700/60 bg-zinc-800/30">
+          <!-- tab bar -->
+          <nav class="flex shrink-0 border-b border-zinc-700/60 px-2">
+            <button @click="tab='examples'" :class="tab==='examples' ? 'border-sky-400 text-zinc-100' : 'border-transparent text-zinc-400 hover:text-zinc-200'" class="border-b-2 px-4 py-3 text-sm font-medium">Examples</button>
+            <button @click="tab='tryit'" :class="tab==='tryit' ? 'border-sky-400 text-zinc-100' : 'border-transparent text-zinc-400 hover:text-zinc-200'" class="border-b-2 px-4 py-3 text-sm font-medium">Try it</button>
+            <span class="ml-auto self-center pr-2 font-mono text-xs text-zinc-500" x-text="current().method + ' ' + current().path"></span>
+          </nav>
+
+          <div class="min-h-0 flex-1 overflow-y-auto p-4">
+
+            <!-- ===== EXAMPLES TAB ===== -->
+            <!-- [doc: synthesized from schemas today; explicit examples are a docgen GAP] -->
+            <div x-show="tab==='examples'" class="flex flex-col gap-4">
+              <div>
+                <h3 class="mb-1.5 text-xs font-semibold uppercase tracking-wider text-zinc-500">Example request</h3>
+                <pre class="overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 font-mono text-xs text-zinc-300"><code x-text="exampleRequest()"></code></pre>
+              </div>
+              <div>
+                <h3 class="mb-1.5 text-xs font-semibold uppercase tracking-wider text-zinc-500">Example response · 200</h3>
+                <pre class="overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 font-mono text-xs text-emerald-200"><code x-text="current().exampleResponse"></code></pre>
+              </div>
+            </div>
+
+            <!-- ===== TRY IT TAB ===== -->
+            <form x-show="tab==='tryit'" @submit.prevent="" class="flex flex-col gap-4">
+              <!-- inputs generated per parameter  [doc: parameters[] + body.fields[]] -->
+              <template x-if="current().parameters.length">
+                <fieldset class="flex flex-col gap-2">
+                  <legend class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Parameters</legend>
+                  <template x-for="p in current().parameters" :key="p.name">
+                    <label class="flex flex-col gap-1 text-sm">
+                      <span class="text-zinc-300"><code class="font-mono" x-text="p.name"></code> <span class="text-xs text-zinc-500" x-text="'(' + p.location + ', ' + p.type + ')'"></span> <span x-show="p.required" class="text-rose-400">*</span></span>
+                      <input class="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-sky-500 focus:outline-none" :placeholder="p.placeholder" />
+                    </label>
+                  </template>
+                </fieldset>
+              </template>
+
+              <template x-if="current().body">
+                <fieldset class="flex flex-col gap-1">
+                  <legend class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Body <span class="font-mono normal-case text-zinc-400" x-text="'· ' + current().body.contentType"></span></legend>
+                  <textarea rows="6" class="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs text-zinc-100 focus:border-sky-500 focus:outline-none" x-text="current().bodyExample"></textarea>
+                </fieldset>
+              </template>
+
+              <button type="submit" class="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-sky-500">Send request</button>
+
+              <!-- live response area  [client-side: actual fetch() result] -->
+              <div>
+                <h3 class="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                  Response <span class="rounded bg-emerald-500/15 px-2 py-0.5 font-mono text-emerald-300">200 OK</span><span class="font-mono normal-case text-zinc-500">· 12 ms</span>
+                </h3>
+                <pre class="overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 font-mono text-xs text-zinc-300"><code x-text="current().exampleResponse"></code></pre>
+              </div>
+            </form>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <script>
+      function httpView() {
+        return {
+          tab: "tryit",
+          sel: "createUser",
+          endpoints: [
+            {
+              id: "createUser", method: "POST", path: "/api/v1/users",
+              summary: "Create a user",
+              description: "Creates a user and returns a heartbeat snapshot.",
+              parameters: [],
+              body: { contentType: "application/json", fields: [
+                { name: "name", type: "string", required: true, description: "Display name" },
+              ]},
+              bodyExample: '{\n  "name": "Ada"\n}',
+              responses: [
+                { status: 200, description: "The created user snapshot", content: ["application/json"] },
+              ],
+              exampleResponse: '{\n  "timestamp": 0,\n  "event": "user_created",\n  "count": 0,\n  "greeting": "Ada"\n}',
+            },
+            {
+              id: "getUser", method: "GET", path: "/api/v1/users/{id}",
+              summary: "Fetch a single user by id",
+              description: "Returns a heartbeat snapshot for that user.",
+              parameters: [
+                { name: "id", location: "path", type: "integer<int64>", required: true, description: "User id", placeholder: "42" },
+              ],
+              body: null,
+              responses: [
+                { status: 200, description: "The user snapshot", content: ["application/json"] },
+              ],
+              exampleResponse: '{\n  "timestamp": 0,\n  "event": "user_fetched",\n  "count": 42,\n  "greeting": ""\n}',
+            },
+            {
+              id: "getConfig", method: "GET", path: "/api/v1/config",
+              summary: "Read a config value",
+              description: null,
+              parameters: [
+                { name: "key", location: "query", type: "string", required: true, description: "Config key", placeholder: "greeting" },
+              ],
+              body: null,
+              responses: [
+                { status: 200, description: "The config value", content: ["application/json"] },
+                { status: 400, description: "Empty query parameter", content: ["application/json"] },
+              ],
+              exampleResponse: '{\n  "key": "greeting",\n  "value": "value"\n}',
+            },
+          ],
+          current() { return this.endpoints.find((e) => e.id === this.sel); },
+          methodClass(m) {
+            return { GET: "bg-emerald-500/15 text-emerald-300", POST: "bg-sky-500/15 text-sky-300", PUT: "bg-amber-500/15 text-amber-300", DELETE: "bg-rose-500/15 text-rose-300", PATCH: "bg-violet-500/15 text-violet-300" }[m] || "bg-zinc-700 text-zinc-300";
+          },
+          statusClass(s) {
+            if (s < 300) return "bg-emerald-500/15 text-emerald-300";
+            if (s < 400) return "bg-sky-500/15 text-sky-300";
+            if (s < 500) return "bg-amber-500/15 text-amber-300";
+            return "bg-rose-500/15 text-rose-300";
+          },
+          exampleRequest() {
+            const e = this.current();
+            let s = e.method + " " + e.path;
+            if (e.body) s += "\nContent-Type: " + e.body.contentType + "\n\n" + e.bodyExample;
+            return s;
+          },
+        };
+      }
+    </script>
+
+    <!--
+      ============================================================================
+      DATA CONTRACT — what to export from docgen into the runtime manifest
+      ============================================================================
+      Source of truth already exists: packages/docgen-http/src/model.zig `Document`.
+      docgen currently only writes OpenAPI JSON to disk + exports DriverInfo/drivers
+      to the manifest. To drive this view, export the `Document` (per http driver)
+      into kw-gen--docs so the runtime can read it.
+
+      Left pane is fully covered by `Document` today:
+        - endpoint row .... Operation.method, PathItem.path, Operation.operation_id
+        - summary/desc .... Operation.summary, Operation.description (from /// comments)
+        - parameters ...... Operation.parameters[] (name, location, required, schema)
+        - request body .... Operation.request_body (content_type, required, schema)
+        - responses ....... Operation.responses[] (status, description, content[])
+        - types/enums ..... Schema (kind, format, nullable, enum_values, min/max, ref, items, properties)
+        - shared schemas .. Components.schemas (resolve `ref` for nested/named types)
+
+      Right pane gaps (not in `Document` yet — decide if docgen should add them):
+        1. EXAMPLES: no example values on Operation/Schema/Response. Options:
+             a) synthesize client-side from Schema (type/enum/format) — zero docgen work, what the mockup does;
+             b) add `example` to Schema/Response/RequestBody in docgen for curated samples.
+        2. PARAM/BODY DEFAULTS: query params have Zig defaults (e.g. key="internal")
+           but `Parameter` only carries `required`, not the default value — would be
+           nice to prefill "Try it". Add `default`/`example` to Parameter if wanted.
+        3. PARAM DESCRIPTION: lives on Parameter.schema.description (named types) —
+           confirm per-field /// comments propagate for inline query/body structs.
+        4. "Try it" needs no extra docgen data — it builds the request from
+           method/path/parameters/body and calls the live endpoint.
+    -->
+  </body>
+</html>

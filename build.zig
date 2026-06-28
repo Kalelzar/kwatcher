@@ -100,6 +100,8 @@ pub fn build(b: *std.Build) !void {
 
     // 3rd Party:
     const httpz = b.dependency("httpz", .{ .target = target, .optimize = optimize }).module("httpz");
+    const zmpl_d = b.dependency("zmpl", .{ .target = target, .optimize = optimize });
+    const zmpl = zmpl_d.module("zmpl");
 
     // Imports:
     // Example application:
@@ -111,6 +113,7 @@ pub fn build(b: *std.Build) !void {
     kwatcher_example.addImport("kw-action", kw_action);
     kwatcher_example.addImport("kw-signal", kw_signal);
     kwatcher_example.addImport("httpz", httpz);
+    kwatcher_example.addImport("zmpl", zmpl);
 
     // Docgen: wired after the example's imports are in place so the helper can mirror
     // them onto the host-target entrypoint it derives internally. This also adds the
