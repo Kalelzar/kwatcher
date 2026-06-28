@@ -9,6 +9,11 @@ const reflect = @import("kw-docschema").reflect;
 const extract = @import("extract.zig");
 const openapi = @import("openapi.zig");
 
+/// Append a runtime-facing projection of the http drivers' APIs to the generated
+/// manifest (consumed by the in-app introspection view). Called once for the http
+/// kind by the docgen framework. See `runtime.zig`.
+pub const emitRuntime = @import("runtime.zig").emitRuntime;
+
 /// Generate an OpenAPI document for an HTTP driver.
 ///
 /// Called by the docgen framework (`packages/docgen`) once per driver. We mine the

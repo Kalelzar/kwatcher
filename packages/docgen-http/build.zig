@@ -30,6 +30,11 @@ pub fn build(b: *std.Build) !void {
     const kw_docschema = b.dependency("kw_docgen", .{ .target = target, .optimize = optimize }).module("kw-docschema");
     kw_docgen_http.addImport("kw-docschema", kw_docschema);
 
+    // Backend-agnostic example generation (synthesize ∘ serialize), shared from the
+    // docgen framework package. Used by runtime.zig to emit per-operation examples.
+    const kw_docexample = b.dependency("kw_docgen", .{ .target = target, .optimize = optimize }).module("kw-docexample");
+    kw_docgen_http.addImport("kw-docexample", kw_docexample);
+
     const tests = b.addTest(.{
         .root_module = kw_docgen_http,
         .use_llvm = true,
