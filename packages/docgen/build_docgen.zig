@@ -72,6 +72,8 @@ pub fn wire(b: *std.Build, opts: Options) Result {
     kw_modgen_mod.addImport("entrypoint", entrypoint);
     kw_docgen_mod.addImport("entrypoint", entrypoint);
 
+    entrypoint.addImport("kw-gen--docs", kw_docgen_dep.module("dummy"));
+
     const docgen = b.addRunArtifact(kw_docgen);
     const modgen = b.addRunArtifact(kw_modgen);
     kw_docgen.step.dependOn(&kw_modgen.step);
@@ -98,7 +100,7 @@ pub fn wire(b: *std.Build, opts: Options) Result {
     b.getInstallStep().dependOn(&install_docs.step);
 
     opts.consumer.addAnonymousImport("kw-gen--docs", .{
-        .root_source_file = docgen_path.path(b, "generated.zig"),
+        .root_source_file = docgen_path.path(b, "manifest.zig"),
     });
 
     const docgen_modules = b.createModule(.{

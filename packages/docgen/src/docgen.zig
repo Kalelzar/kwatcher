@@ -17,8 +17,30 @@ pub fn generate(alloc: std.mem.Allocator, out_dir: []const u8, source_roots: []c
     var out = try std.fs.cwd().makeOpenPath(out_dir, .{});
     defer out.close();
 
-    var sourceFile = try out.createFile("generated.zig", .{});
+    var sourceFile = try out.createFile("manifest.zig", .{});
     defer sourceFile.close();
+
+    var buf: [1024]u8 = undefined;
+    var writer = sourceFile.writer(&buf);
+    const wi = &writer.interface;
+
+    try wi.writeAll(
+        \\ pub const isDocgen = false;
+        \\ pub const DriverInfo = struct { kind: []const u8, key: []const u8 };
+        \\ pub const drivers: []const DriverInfo = &.{
+    );
+
+    inline for (D.drivers) |Drv| {
+        const kind = Drv.kind;
+        const key = Drv.key;
+        try wi.print(".{{ .key = \"{s}\", .kind = \"{s}\", }}, ", .{ @tagName(key), @tagName(kind) });
+    }
+
+    try wi.writeAll(
+        \\ };
+    );
+
+    try wi.flush();
 
     var manifest_arena = std.heap.ArenaAllocator.init(alloc);
     defer manifest_arena.deinit();
@@ -33,6 +55,24 @@ pub fn generate(alloc: std.mem.Allocator, out_dir: []const u8, source_roots: []c
         const module = @field(modules, module_name);
         try module.docgen(Drv, out, alloc, &index, manifest.name, manifest.version);
     }
+
+    // Runtime doc data: let each backend that wants to be introspectable in-app append
+    // self-contained Zig to the manifest. Driven per unique kind (the framework never
+    // enumerates kinds) — each backend receives every driver and filters to its own,
+    // keeping one driver's metadata from leaking into another's.
+    const KindCtx = struct {
+        pub fn eql(comptime A: type, comptime B: type) bool {
+            return std.mem.eql(u8, @tagName(A.kind), @tagName(B.kind));
+        }
+    };
+    const unique_kinds = core.shared.SetUnionEql(type, .{}, D.drivers, KindCtx);
+    inline for (unique_kinds) |Drv| {
+        const module = @field(modules, @tagName(Drv.kind));
+        if (@hasDecl(module, "emitRuntime")) {
+            try module.emitRuntime(D.drivers, wi, alloc, &index, manifest.name, manifest.version);
+        }
+    }
+    try wi.flush();
 }
 
 /// Read `.name`/`.version` from the project's `build.zig.zon`, falling back per

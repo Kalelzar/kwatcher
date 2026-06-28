@@ -24,6 +24,13 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
+    const kw_docgen_dummy = b.addModule("dummy", .{
+        .root_source_file = b.path("src/dummy.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    _ = kw_docgen_dummy;
+
     kw_docgen.addOptions("build_config", o);
 
     // The protocol-agnostic JSON-Schema kernel (model nodes + reflection), exposed
@@ -36,6 +43,16 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
+    // Backend-agnostic example-value generation: synthesize a neutral sample from a
+    // `Schema`, then serialize it per content type. Sits one layer above the schema
+    // kernel; shared by every backend that emits examples into its runtime projection.
+    const kw_docexample = b.addModule("kw-docexample", .{
+        .root_source_file = b.path("src/example/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    kw_docexample.addImport("kw-docschema", kw_docschema);
+
     const tests = b.addTest(.{
         .root_module = kw_docgen,
         .use_llvm = true,
@@ -43,6 +60,11 @@ pub fn build(b: *std.Build) !void {
 
     const docschema_tests = b.addTest(.{
         .root_module = kw_docschema,
+        .use_llvm = true,
+    });
+
+    const docexample_tests = b.addTest(.{
+        .root_module = kw_docexample,
         .use_llvm = true,
     });
 
@@ -60,6 +82,7 @@ pub fn build(b: *std.Build) !void {
 
     const run_tests = b.addRunArtifact(tests);
     const run_docschema_tests = b.addRunArtifact(docschema_tests);
+    const run_docexample_tests = b.addRunArtifact(docexample_tests);
 
     const install_docs = b.addInstallDirectory(
         .{
@@ -86,6 +109,7 @@ pub fn build(b: *std.Build) !void {
     const test_step = b.step("test", "Run the unit tests.");
     test_step.dependOn(&run_tests.step);
     test_step.dependOn(&run_docschema_tests.step);
+    test_step.dependOn(&run_docexample_tests.step);
     exe.step.dependOn(&run_tests.step);
 
     // The orchestrator module imports the build-time-injected `entrypoint` /
@@ -93,6 +117,10 @@ pub fn build(b: *std.Build) !void {
     // schema kernel has no such dependency — this step runs its tests standalone.
     const schema_test_step = b.step("test-schema", "Run the kw-docschema unit tests.");
     schema_test_step.dependOn(&run_docschema_tests.step);
+
+    // Likewise standalone — kw-docexample depends only on the schema kernel.
+    const example_test_step = b.step("test-example", "Run the kw-docexample unit tests.");
+    example_test_step.dependOn(&run_docexample_tests.step);
 
     // - fmt
     const fmt_step = b.step("fmt", "Check formatting");
