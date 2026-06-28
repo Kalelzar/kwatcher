@@ -228,6 +228,76 @@ pub fn File(
     };
 }
 
+/// Build an exhaustive enum whose fields are the `ContentType` of each formatter type, so
+/// `Many` can tag which representation a response is rendered as. Generic — a formatter is any
+/// type with a `pub const ContentType: []const u8` and a `write(self, writer, res)` (e.g. `Json`,
+/// or the template formatter in `kw-http-template`).
+pub fn ContentTypes(comptime Formatters: []const type) type {
+    const result: []const std.builtin.Type.EnumField = comptime blk: {
+        var result: [Formatters.len]std.builtin.Type.EnumField = undefined;
+        for (Formatters, 0..) |F, i| {
+            // TODO: Formally verify no duplicate content type?
+            // This will error out anyway but might as well give a sane error maybe?
+            result[i] = .{
+                .name = F.ContentType,
+                .value = i,
+            };
+        }
+
+        break :blk &result;
+    };
+
+    return @Type(.{
+        .@"enum" = .{
+            .decls = &.{},
+            .fields = result,
+            .is_exhaustive = true,
+            .tag_type = core.meta.UIntShrink(Formatters.len),
+        },
+    });
+}
+
+/// A response value that can be rendered as one of several content types. `to` selects which
+/// formatter `write` dispatches to (the caller — e.g. the template middleware — sets it from
+/// content negotiation). Generic over the formatter set; carries no rendering logic of its own.
+pub fn Many(comptime T: type, comptime Formatters: []const type) type {
+    const CTs = ContentTypes(Formatters);
+
+    return struct {
+        value: T,
+        to: CTs,
+
+        pub const AllowedTypes = CTs;
+
+        pub fn write(self: *const @This(), writer: *std.Io.Writer, res: *http.Response) !void {
+            switch (self.to) {
+                inline else => |t| {
+                    const i = comptime @intFromEnum(t);
+                    const F = Formatters[i];
+                    const f: F = .{
+                        .value = self.value,
+                    };
+                    try f.write(writer, res);
+                },
+            }
+
+            res.content_type = null;
+            res.header("content-type", @tagName(self.to));
+        }
+    };
+}
+
+/// An HTML-only response marker: same status-union value shape as `Json` but with
+/// `ContentType = "text/html"`. It has no `write` of its own — it's resolved/rendered by the
+/// `kw-http-template` middleware, which reads `ContentType` to route it to the template path.
+/// Kept here next to `Json` because it's a generic result-type builder with no zmpl dependency.
+pub fn Html(comptime Result: type, comptime statuses: anytype) type {
+    return struct {
+        pub const ContentType = "text/html";
+        value: ApiResult(Result, ProblemDetails, statuses),
+    };
+}
+
 // Ref all decls
 comptime {
     _ = ProblemDetails;
@@ -245,6 +315,17 @@ comptime {
     _ = Request(null);
     _ = Request(struct { name: []const u8 });
     _ = FullRequest(struct {}, struct { q: []const u8 });
+
+    const H = Html(struct { x: u8 }, .{ .ok, .bad_request });
+    _ = @FieldType(H, "value");
+    _ = H.ContentType;
+
+    // Mirror real usage: `Many`'s `T` is the status union (a formatter's `value` field), and each
+    // formatter must have a `write`. Reuse `J` (a `Json`) above as that formatter (the template
+    // formatter qualifies too, but it lives in kw-http-template). One formatter exercises it.
+    const M = Many(@FieldType(J, "value"), &.{J});
+    _ = &M.write;
+    _ = M.AllowedTypes;
 }
 
 pub fn FullRequest(comptime Body: ?type, comptime Query: ?type) type {
