@@ -1,0 +1,24 @@
+.{
+    .name = .kw_http_template,
+    .version = "0.1.2",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0xf7441eae91cc2867,
+    .dependencies = .{
+        .kw_http = .{
+            .path = "../http",
+        },
+        .kw_core = .{
+            .path = "../core",
+        },
+        .zmpl = .{
+            .url = "git+https://github.com/jetzig-framework/zmpl?ref=zig-0.15#3390a643b0e527448c0a4596575a97d8b66c9252",
+            .hash = "zmpl-0.0.1-SYFGBrUCBACz1jqtVhboZxFo24KUlditybFrtNl0nrJQ",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "build_templates.zig",
+        "src",
+    },
+}
