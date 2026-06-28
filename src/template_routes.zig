@@ -2,9 +2,7 @@ const std = @import("std");
 const docs = @import("kw-gen--docs");
 const http = @import("kw-http");
 const core = @import("kw-core");
-const zmpl = @import("zmpl.zig");
-
-// FE-only routes return `zmpl.Html(T, statuses)` instead of `http.data.Json` — they render
+// FE-only routes return `http.data.Html(T, statuses)` instead of `http.data.Json` — they render
 // HTML only and carry no JSON a separate frontend would consume (a redirect shell, the
 // driver/icon chrome, the per-operation tab fragments, the JSON pretty-printer). `WithTemplates`
 // resolves their template name and skips content negotiation. Routes that genuinely expose data
@@ -63,7 +61,7 @@ fn prettyJson(a: std.mem.Allocator, raw: []const u8) ![]const u8 {
     return buf.written();
 }
 
-pub fn @"GET _introspect @introspectIndex"(_: http.data.Request(null)) zmpl.Html(
+pub fn @"GET _introspect @introspectIndex"(_: http.data.Request(null)) http.data.Html(
     struct { title: []const u8 },
     &.{200},
 ) {
@@ -87,7 +85,7 @@ pub fn @"GET _introspect/{kind}/{key} @introspectDriver"(
     },
     depctx: *core.deps.DepCtx,
     allocator: core.mem.ScopedAllocator,
-) !zmpl.Html(docs.DriverInfo, &.{ 200, 404 }) {
+) !http.data.Html(docs.DriverInfo, &.{ 200, 404 }) {
     inline for (docs.drivers) |D| {
         if (std.mem.eql(u8, D.key, body.captures.key) and std.mem.eql(u8, D.kind, body.captures.kind)) {
             return .{
@@ -162,7 +160,7 @@ pub fn @"GET _introspect/{kind}/{key}/icon @driverIcon"(
     },
     depctx: *core.deps.DepCtx,
     allocator: core.mem.ScopedAllocator,
-) !zmpl.Html(docs.DriverInfo, &.{ 200, 404 }) {
+) !http.data.Html(docs.DriverInfo, &.{ 200, 404 }) {
     inline for (docs.drivers) |D| {
         if (std.mem.eql(u8, D.key, body.captures.key) and std.mem.eql(u8, D.kind, body.captures.kind)) {
             return .{
@@ -274,7 +272,7 @@ pub fn @"GET _introspect/http/{key}/op/{operationId}/try @httpTryForm"(
         response: *http.Response,
         captures: struct { key: []const u8, operationId: []const u8 },
     },
-) zmpl.Html(OpInfo, &.{ 200, 404 }) {
+) http.data.Html(OpInfo, &.{ 200, 404 }) {
     if (findOp(body.captures.key, body.captures.operationId)) |op| {
         return .{ .value = .{ .ok = .{ .key = body.captures.key, .operation = op } } };
     }
@@ -297,7 +295,7 @@ pub fn @"GET _introspect/http/{key}/op/{operationId}/examples @httpExamples"(
         response: *http.Response,
         captures: struct { key: []const u8, operationId: []const u8 },
     },
-) zmpl.Html(OpInfo, &.{ 200, 404 }) {
+) http.data.Html(OpInfo, &.{ 200, 404 }) {
     if (findOp(body.captures.key, body.captures.operationId)) |op| {
         return .{ .value = .{ .ok = .{ .key = body.captures.key, .operation = op } } };
     }
@@ -320,7 +318,7 @@ pub fn @"POST _introspect/render/application/json @renderJson"(
         response: *http.Response,
     },
     allocator: core.mem.ScopedAllocator,
-) zmpl.Html(JsonRender, &.{200}) {
+) http.data.Html(JsonRender, &.{200}) {
     const raw = body.request.body() orelse "";
     const pretty = prettyJson(allocator.value, raw) catch raw;
     return .{ .value = .{ .ok = .{ .body = pretty } } };

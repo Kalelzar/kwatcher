@@ -10,7 +10,7 @@
   @if ($.operation.request_example)
   <section class="flex flex-col gap-1.5">
     <h3 class="text-xs font-semibold uppercase tracking-wider text-zinc-400">Example request <span class="font-mono normal-case text-zinc-500">{{$.operation.request_example.content_type}}</span></h3>
-    @partial test/viewJson(body: $.operation.request_example.body)
+    @partial viewJson(body: $.operation.request_example.body)
   </section>
   @end
 
@@ -19,7 +19,7 @@
 @html RESPEX
     <section class="flex flex-col gap-1.5">
       <h3 class="text-xs font-semibold uppercase tracking-wider text-zinc-400">Response {{r.status}} <span class="font-mono normal-case text-zinc-500">{{ex.content_type}}</span></h3>
-      @partial test/viewJson(body: ex.body)
+      @partial viewJson(body: ex.body)
     </section>
 RESPEX
     }

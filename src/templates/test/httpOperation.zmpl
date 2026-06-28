@@ -4,7 +4,7 @@
   class="flex cursor-pointer flex-col gap-4 border-b border-b-zinc-800 border-l-2 px-6 py-5 transition-colors">
   <div>
     <div class="flex items-center gap-3">
-      @partial test/methodBadge(method: $.operation.method)
+      @partial methodBadge(method: $.operation.method)
       <code class="font-mono text-sm text-zinc-200">{{$.operation.path}}</code>
       <span class="ml-auto font-mono text-xs text-zinc-400">{{$.operation.id}}</span>
     </div>

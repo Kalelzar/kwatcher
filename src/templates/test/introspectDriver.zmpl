@@ -1,5 +1,5 @@
 @if ($.tag == "ok")
-@partial test/head(title: "KW-IntrospectUI") {
+@partial head(title: "KW-IntrospectUI") {
   <sidebar class="flex h-screen w-72 shrink-0 flex-col bg-zinc-900">
     <header class="flex h-[4.5rem] shrink-0 items-center border-b border-zinc-700/60 px-4">
       <span class="text-base font-semibold leading-7 tracking-tight text-zinc-100">KW-IntrospectUI</span>
@@ -34,7 +34,7 @@
 }
 @else
 
-@partial test/head(title: "KW-IntrospectUI") {
+@partial head(title: "KW-IntrospectUI") {
   <sidebar class="flex h-screen w-72 shrink-0 flex-col bg-zinc-900">
     <header class="flex h-[4.5rem] shrink-0 items-center border-b border-zinc-700/60 px-4">
       <span class="text-base font-semibold leading-7 tracking-tight text-zinc-100">KW-IntrospectUI</span>

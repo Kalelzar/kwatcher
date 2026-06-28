@@ -1,1 +1,1 @@
-@partial test/viewJson(body: $.body)
+@partial viewJson(body: $.body)

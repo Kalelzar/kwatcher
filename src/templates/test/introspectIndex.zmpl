@@ -1,4 +1,4 @@
-@partial test/head(title: $.title) {
+@partial head(title: $.title) {
   <script>
     location.replace("/_introspect/" + (localStorage.getItem("kw:last-driver") || "internal/internal"));
   </script>

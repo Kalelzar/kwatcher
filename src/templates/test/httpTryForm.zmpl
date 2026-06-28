@@ -183,7 +183,7 @@
 <div class="min-h-0 flex-1 overflow-y-auto p-4" x-data="kwTryIt('{{$.operation.method}}', '{{$.operation.path}}')">
   <form @submit.prevent="send()" @input="validate()" class="flex flex-col gap-4">
     <div class="flex items-center gap-2">
-      @partial test/methodBadge(method: $.operation.method)
+      @partial methodBadge(method: $.operation.method)
       <code class="font-mono text-sm text-zinc-200">{{$.operation.path}}</code>
     </div>
 

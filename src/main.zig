@@ -9,7 +9,7 @@ const cron = @import("kw-cron");
 const action = @import("kw-action");
 const signal = @import("kw-signal");
 const httpz = @import("httpz");
-const zmpl = @import("zmpl.zig");
+const http_template = @import("kw-http-template");
 
 const docs = @import("kw-gen--docs");
 
@@ -347,7 +347,7 @@ const http_driver = http.Driver
     .listen(true)
     .jobs(1)
     .routes(http.middleware.cors(http.From(HTTPRoutes, RouteContext) ++
-        if (!docs.isDocgen) zmpl.WithTemplates(.@"test", http.From(@import("template_routes.zig"), RouteContext)) else @as([]const type, &.{})))
+        if (!docs.isDocgen) http_template.WithTemplates("test", http.From(@import("template_routes.zig"), RouteContext), &.{"image/svg+xml"}) else @as([]const type, &.{})))
     .error_handler(http.DefaultErrorHandler)
     .build();
 

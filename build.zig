@@ -1,5 +1,6 @@
 const std = @import("std");
 const docgen = @import("kw_docgen").build_docgen;
+const http_template = @import("kw_http_template").build_templates;
 
 pub fn build(b: *std.Build) !void {
     // Options
@@ -100,8 +101,17 @@ pub fn build(b: *std.Build) !void {
 
     // 3rd Party:
     const httpz = b.dependency("httpz", .{ .target = target, .optimize = optimize }).module("httpz");
-    const zmpl_d = b.dependency("zmpl", .{ .target = target, .optimize = optimize });
-    const zmpl = zmpl_d.module("zmpl");
+
+    // The template machinery owns its own zmpl dependency; we hand it the example's template
+    // sources (each with a prefix namespace) and it returns a module wired to a zmpl instance whose
+    // manifest covers them.
+    const kw_http_template = http_template.wire(b, .{
+        .target = target,
+        .optimize = optimize,
+        .sources = &.{
+            .{ .prefix = "test", .path = &.{ "src", "templates", "test" } },
+        },
+    });
 
     // Imports:
     // Example application:
@@ -113,7 +123,7 @@ pub fn build(b: *std.Build) !void {
     kwatcher_example.addImport("kw-action", kw_action);
     kwatcher_example.addImport("kw-signal", kw_signal);
     kwatcher_example.addImport("httpz", httpz);
-    kwatcher_example.addImport("zmpl", zmpl);
+    kwatcher_example.addImport("kw-http-template", kw_http_template);
 
     // Docgen: wired after the example's imports are in place so the helper can mirror
     // them onto the host-target entrypoint it derives internally. This also adds the

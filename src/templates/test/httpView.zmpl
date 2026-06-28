@@ -4,7 +4,7 @@
       <article class="flex flex-col gap-2 border-b border-zinc-800 px-6 py-5" hx-get="/_introspect/http/{{$.key}}/op/{{op.id}}" hx-trigger="intersect" hx-swap="outerHTML">
         <div class="flex items-center gap-3">
     }
-    @partial test/methodBadge(method: op.method)
+    @partial methodBadge(method: op.method)
     @html {
           <code class="font-mono text-sm text-zinc-200">{{op.path}}</code>
           <span class="ml-auto font-mono text-xs text-zinc-400">{{op.id}}</span>
