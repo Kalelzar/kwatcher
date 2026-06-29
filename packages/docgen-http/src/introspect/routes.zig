@@ -21,9 +21,11 @@ const OpStub = struct {
     summary: []const u8,
 };
 
-/// One operation's introspection JSON
+/// One operation's introspection JSON. `port` is the configured port of the http mount that
+/// serves this operation (as a string, "" when unknown), so the Try-it form targets that mount
+/// rather than the introspection UI's own origin.
 fn OpInfo(comptime Docs: type) type {
-    return struct { key: []const u8, operation: Docs.HttpOperation };
+    return struct { key: []const u8, operation: Docs.HttpOperation, port: []const u8 = "" };
 }
 
 fn HttpView(comptime Docs: type) type {
@@ -44,6 +46,15 @@ fn findOp(comptime Docs: type, key: []const u8, operationId: []const u8) ?Docs.H
         if (std.mem.eql(u8, op.id, operationId)) return op;
     }
     return null;
+}
+
+/// The problem-detail `instance` for a not-found response: the request's correlation id.
+/// `Properties` is injected per-event into the ad-hoc inner container, so it is pulled from
+/// `depctx` in the body rather than declared as a handler param (the outer-generator analysis
+/// can't see it).
+fn instanceId(depctx: *core.deps.DepCtx, allocator: core.mem.ScopedAllocator) ![]const u8 {
+    const properties = try depctx.require(core.event.Properties);
+    return std.fmt.allocPrint(allocator.value, "{d}", .{properties.correlation_id});
 }
 
 /// Routes whose templates live under the `http` prefix.
@@ -77,13 +88,15 @@ fn Browser(comptime Docs: type) type {
                 response: *http.Response,
                 captures: struct { key: []const u8, operationId: []const u8 },
             },
-        ) http.data.Json(OpInfo(Docs), &.{ 200, 404 }) {
+            depctx: *core.deps.DepCtx,
+            allocator: core.mem.ScopedAllocator,
+        ) !http.data.Json(OpInfo(Docs), &.{ 200, 404 }) {
             if (findOp(Docs, body.captures.key, body.captures.operationId)) |op| {
                 body.response.header("Cache-Control", "public, max-age=60");
                 return .{ .value = .{ .ok = .{ .key = body.captures.key, .operation = op } } };
             }
 
-            return notFound(Docs);
+            return notFound(Docs, try instanceId(depctx, allocator));
         }
 
         pub fn @"GET _introspect/http/{key}/op/{operationId}/try @httpTryForm"(
@@ -92,12 +105,26 @@ fn Browser(comptime Docs: type) type {
                 response: *http.Response,
                 captures: struct { key: []const u8, operationId: []const u8 },
             },
-        ) http.data.Html(OpInfo(Docs), &.{ 200, 404 }) {
+            depctx: *core.deps.DepCtx,
+            allocator: core.mem.ScopedAllocator,
+        ) !http.data.Html(OpInfo(Docs), &.{ 200, 404 }) {
             if (findOp(Docs, body.captures.key, body.captures.operationId)) |op| {
-                return .{ .value = .{ .ok = .{ .key = body.captures.key, .operation = op } } };
+                const cfg = blk: {
+                    inline for (Docs.drivers) |D| {
+                        if (std.mem.eql(u8, D.kind, "http") and std.mem.eql(u8, D.key, body.captures.key)) {
+                            const res = try depctx.require(core.mem.Keyed(*http.Config, D.key));
+                            break :blk res.value;
+                        }
+                    }
+
+                    unreachable;
+                };
+
+                const port = try std.fmt.allocPrint(allocator.value, "{d}", .{cfg.port});
+                return .{ .value = .{ .ok = .{ .key = body.captures.key, .operation = op, .port = port } } };
             }
 
-            return notFoundHtml(Docs);
+            return notFoundHtml(Docs, try instanceId(depctx, allocator));
         }
     };
 }
@@ -111,37 +138,39 @@ fn Examples(comptime Docs: type) type {
                 response: *http.Response,
                 captures: struct { key: []const u8, operationId: []const u8 },
             },
-        ) http.data.Html(OpInfo(Docs), &.{ 200, 404 }) {
+            depctx: *core.deps.DepCtx,
+            allocator: core.mem.ScopedAllocator,
+        ) !http.data.Html(OpInfo(Docs), &.{ 200, 404 }) {
             if (findOp(Docs, body.captures.key, body.captures.operationId)) |op| {
                 return .{ .value = .{ .ok = .{ .key = body.captures.key, .operation = op } } };
             }
 
-            return notFoundHtml(Docs);
+            return notFoundHtml(Docs, try instanceId(depctx, allocator));
         }
     };
 }
 
-fn notFound(comptime Docs: type) http.data.Json(OpInfo(Docs), &.{ 200, 404 }) {
+fn notFound(comptime Docs: type, instance: []const u8) http.data.Json(OpInfo(Docs), &.{ 200, 404 }) {
     return .{
         .value = .{
             .not_found = .{
                 .type = error.NotFound,
                 .title = "Operation not found",
                 .details = "No operation with that id is registered on this driver.",
-                .instance = "TODO",
+                .instance = instance,
             },
         },
     };
 }
 
-fn notFoundHtml(comptime Docs: type) http.data.Html(OpInfo(Docs), &.{ 200, 404 }) {
+fn notFoundHtml(comptime Docs: type, instance: []const u8) http.data.Html(OpInfo(Docs), &.{ 200, 404 }) {
     return .{
         .value = .{
             .not_found = .{
                 .type = error.NotFound,
                 .title = "Operation not found",
                 .details = "No operation with that id is registered on this driver.",
-                .instance = "TODO",
+                .instance = instance,
             },
         },
     };

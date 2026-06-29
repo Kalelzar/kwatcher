@@ -10,13 +10,17 @@
 <script>
   // Try-it tab state (Alpine), scoped to the template that uses it. Like SwaggerUI:
   // the request is built from the form fields and fired from the BROWSER against the
-  // real relative endpoint (same origin — no CORS, no server proxy). The response
-  // body is then POSTed to a content-type-specific server renderer
+  // served http mount. `port` is that mount's configured port (this UI may be served by
+  // a *different* mount, e.g. a private introspection port); when set we build an absolute
+  // URL on the current host at that port, so the fetch is cross-origin and the target mount
+  // must send CORS headers — no server proxy. Empty `port` falls back to same-origin. The
+  // response body is then POSTed to a content-type-specific server renderer
   // (/_introspect/render/<type>) whose HTML fragment we drop into the viewer.
-  function kwTryIt(method, path) {
+  function kwTryIt(method, path, port) {
     return {
       method: method,
       path: path,
+      port: port,
       loading: false,
       sent: false,
       status: null,
@@ -110,7 +114,8 @@
         // Build the URL + headers from the per-parameter inputs: path params
         // substitute into the template, query params append, header params become
         // request headers. Empty values are skipped (optional params).
-        var url = this.path;
+        var base = this.port ? (window.location.protocol + "//" + window.location.hostname + ":" + this.port) : "";
+        var url = base + this.path;
         var query = [];
         var headers = {};
         this.$root.querySelectorAll("[data-param]").forEach(function (el) {
@@ -180,7 +185,7 @@
   }
 </script>
 
-<div class="min-h-0 flex-1 overflow-y-auto p-4" x-data="kwTryIt('{{$.operation.method}}', '{{$.operation.path}}')">
+<div class="min-h-0 flex-1 overflow-y-auto p-4" x-data="kwTryIt('{{$.operation.method}}', '{{$.operation.path}}', '{{$.port}}')">
   <form @submit.prevent="send()" @input="validate()" class="flex flex-col gap-4">
     <div class="flex items-center gap-2">
       @partial methodBadge(method: $.operation.method)
