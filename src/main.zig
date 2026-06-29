@@ -39,7 +39,8 @@ const log = std.log.scoped(.example);
 pub const Config = struct {
     driver: struct {
         amqp: core.config.BaseConfig,
-        http: http.Config,
+        public: http.Config,
+        private: http.Config,
     },
     middleware: struct {
         cors: http.middleware.Cors.Config,
@@ -348,11 +349,21 @@ const cron_driver = cron.Driver
 const introspection = introspect.Assemble(docs, .{introspect_http});
 
 const http_driver = http.Driver
-    .new(.http)
-    .config("driver.http")
+    .new(.public)
+    .config("driver.public")
     .listen(true)
     .jobs(1)
-    .routes(http.middleware.cors(http.From(HTTPRoutes, RouteContext) ++ introspection(.http)))
+    .routes(http.middleware.cors(http.From(HTTPRoutes, RouteContext)))
+    .error_handler(http.DefaultErrorHandler)
+    .build();
+
+/// Second HTTP mount — serves the introspection UI, split off from the public API surface.
+const private_http_driver = http.Driver
+    .new(.private)
+    .config("driver.private")
+    .listen(true)
+    .jobs(1)
+    .routes(http.middleware.cors(introspection(.http)))
     .error_handler(http.DefaultErrorHandler)
     .build();
 
@@ -374,13 +385,19 @@ const signal_driver = signal.Driver
 
 /// Combined driver registry
 pub const drivers = struct {
-    pub const drivers = core.DriverRegistry
-        .new()
-        .registerHandler(cron_driver)
-        .registerHandler(amqp_driver)
-        .registerHandler(http_driver)
-        .registerHandler(action_driver)
-        .registerHandler(signal_driver);
+    pub const drivers = reg: {
+        const base = core.DriverRegistry
+            .new()
+            .registerHandler(cron_driver)
+            .registerHandler(amqp_driver)
+            .registerHandler(http_driver)
+            .registerHandler(action_driver)
+            .registerHandler(signal_driver);
+        // The private introspection mount is included only in normal runtime builds, not
+        // during docgen: the introspection UI is generated *from* the docs, so it must not
+        // be part of the driver graph that produces them.
+        break :reg if (docs.isDocgen) base else base.registerHandler(private_http_driver);
+    };
 };
 
 /// Type alias for the scheduler (used to publish events from cron routes)
@@ -447,7 +464,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     // The chain of .with() and .static() calls registers dependencies at different lifetimes:
     // - .static(): Lives for the entire application lifetime
     // - .scoped(): Created fresh for each request
-    const deps = core.deps.DependencyContainer(Config)
+    const base_deps = core.deps.DependencyContainer(Config)
         .new(drivers.drivers, allocator)
         // Register default dependencies (allocator pools, user info, client info)
         .with(.all, kwatcher.default.withDefault(&config_slot, .{
@@ -456,18 +473,30 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         }), allocator)
         // Register app-specific config resolver
         .with(.all, kwatcher.default.config(AppConfig, "app"), allocator)
-        .with(.http, kwatcher.default.config(http.middleware.Cors.Config, "middleware.cors"), allocator)
+        .with(.public, kwatcher.default.config(http.middleware.Cors.Config, "middleware.cors"), allocator)
         // Register AMQP client pool and connection handling
         .with(.amqp, amqp.defaultFor(drivers.drivers, RouteContext), allocator)
         // TODO: create a http.defaultFor
-        .with(.http, kwatcher.default.config(http.Config, "driver.http"), allocator)
+        .with(.public, kwatcher.default.config(http.Config, "driver.public"), allocator)
         // Register our custom counter as a static dependency
-        .static(.http, &ctx)
+        .static(.public, &ctx)
         .static(.amqp, &counter);
+
+    // The private introspection mount is only registered outside docgen, so its dep wiring
+    // must be gated on the same condition — otherwise the dephub rejects `.private` as an
+    // unregistered category during docgen. It needs both its cors config (the routes are
+    // cors-wrapped) and its own http config section.
+    const deps = if (docs.isDocgen)
+        base_deps
+    else
+        base_deps
+            .with(.private, kwatcher.default.config(http.middleware.Cors.Config, "middleware.cors"), allocator)
+            .with(.private, kwatcher.default.configKeyed("public", http.Config, "driver.public"), allocator)
+            .with(.private, kwatcher.default.config(http.Config, "driver.private"), allocator);
 
     // Create and start the server
     var server = try kwatcher.server.Server(@TypeOf(deps), drivers.drivers)
-        .init(allocator, deps, 4); // 2 consumer threads
+        .init(allocator, deps, 4); // 4 consumer threads
     defer server.deinit();
 
     log.info("Starting example server...", .{});
