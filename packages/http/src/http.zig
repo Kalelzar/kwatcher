@@ -711,8 +711,11 @@ pub fn RouteParser(comptime Context: type) type {
                         pub const Dependencies = __Dependencies ++ .{
                             core.mem.ScopedAllocator,
                             std.mem.Allocator,
-                            *Context, //FIXME: This should not be a pointer
-                        };
+                                //FIXME: This is papering over the fact that the route parameter check above is not implemented
+                        } ++ if (Context != void) .{
+                            //FIXME: This should not be a pointer
+                            *Context,
+                        } else .{};
 
                         pub fn name(inj: *dep.DepCtx) ![]const u8 {
                             const allocator = try inj.require(std.mem.Allocator);

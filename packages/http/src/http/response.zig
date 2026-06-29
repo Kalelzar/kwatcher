@@ -228,6 +228,45 @@ pub fn File(
     };
 }
 
+/// A strong ETag (quoted hash) for `bytes`, computable at comptime — so an `@embedFile`'d
+/// asset gets a stable validator baked into the binary with no runtime hashing.
+pub fn etag(comptime bytes: []const u8) []const u8 {
+    @setEvalBranchQuota(bytes.len * 4 + 4_000);
+    return std.fmt.comptimePrint("\"{x}\"", .{std.hash.Wyhash.hash(0, bytes)});
+}
+
+/// The bare hex hash of `bytes`, for fingerprinting a URL (e.g. `…/{fp}/icon.svg`) so the
+/// path itself versions the asset and `Cache-Control: immutable` becomes correct. Same hash
+/// as `etag`, without the quotes a path segment can't carry.
+pub fn fingerprint(comptime bytes: []const u8) []const u8 {
+    @setEvalBranchQuota(bytes.len * 4 + 4_000);
+    return std.fmt.comptimePrint("{x}", .{std.hash.Wyhash.hash(0, bytes)});
+}
+
+/// A result type that serves bytes embedded in the executable (e.g. via `@embedFile`),
+/// as opposed to `File`, which `sendFile`s a handle from disk. Writes straight to the
+/// response writer like `Json`/`Many` — no streaming dance, the bytes are already in memory.
+///
+/// Set `tag` to emit an `ETag` validator (a comptime `etag(...)` for embedded assets). The
+/// caller owns `Cache-Control` (it knows whether the URL is fingerprinted/immutable), so this
+/// type emits no freshness policy of its own.
+pub fn InternalFile(
+    comptime _ContentType: []const u8,
+) type {
+    return struct {
+        pub const ContentType = _ContentType;
+        value: []const u8,
+        tag: ?[]const u8 = null,
+
+        pub fn write(self: *const @This(), writer: *std.Io.Writer, res: *http.Response) !void {
+            if (self.tag) |t| res.header("ETag", t);
+            res.content_type = null;
+            res.header("Content-Type", ContentType);
+            try writer.writeAll(self.value);
+        }
+    };
+}
+
 /// Build an exhaustive enum whose fields are the `ContentType` of each formatter type, so
 /// `Many` can tag which representation a response is rendered as. Generic — a formatter is any
 /// type with a `pub const ContentType: []const u8` and a `write(self, writer, res)` (e.g. `Json`,
@@ -319,6 +358,8 @@ comptime {
     const H = Html(struct { x: u8 }, .{ .ok, .bad_request });
     _ = @FieldType(H, "value");
     _ = H.ContentType;
+
+    _ = &InternalFile("image/svg+xml").write;
 
     // Mirror real usage: `Many`'s `T` is the status union (a formatter's `value` field), and each
     // formatter must have a `write`. Reuse `J` (a `Json`) above as that formatter (the template
