@@ -535,6 +535,7 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
             var N = DM;
             inline for (drivers.drivers) |D| {
                 N = N.cat(D.key);
+                // FIXME: This should provide context for who actually depends on this.
                 N = N.requires(D.key, .scoped, D.Dependencies);
             }
             return DepHub(N, Statics, Config);
