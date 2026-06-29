@@ -297,7 +297,7 @@ pub fn DriverBuilder(
 
                                 var ev = E{
                                     .event_data = value,
-                                    .event_type = .send,
+                                    .event_type = @field(ET, @tagName(key) ++ "_send"),
                                 };
 
                                 if (extra.inj) |inj| {
@@ -337,7 +337,7 @@ pub fn DriverBuilder(
 
                                 const ev = E{
                                     .event_data = value,
-                                    .event_type = .send,
+                                    .event_type = @field(ET, @tagName(key) ++ "_send"),
                                 };
 
                                 return ev;
@@ -816,7 +816,7 @@ pub fn DriverBuilder(
                                     );
 
                                     _ = self.queue.?.tryPush(.{
-                                        .event_type = .unrouted,
+                                        .event_type = @field(ET, @tagName(key) ++ "_unrouted"),
                                         .event_data = val,
                                         .properties = .{
                                             .correlation_id = if (correlation_id) |c|

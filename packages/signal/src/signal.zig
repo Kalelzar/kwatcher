@@ -248,7 +248,7 @@ pub fn DriverBuilder(
                                 log.info("Got: {t}({d})", .{ signal, res });
 
                                 _ = self.queue.?.push(.{
-                                    .event_type = .signal,
+                                    .event_type = @field(ET, @tagName(key) ++ "_signal"),
                                     .event_data = val,
                                     .properties = .{
                                         .correlation_id = 0,

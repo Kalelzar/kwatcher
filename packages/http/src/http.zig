@@ -80,7 +80,7 @@ pub fn DriverBuilder(
                 pub const map = shared.RouteMap(Routes);
 
                 pub const EventType = enum(u12) {
-                    http_recv = block_start,
+                    recv = block_start,
                 };
 
                 pub const RequestData = struct {
@@ -98,7 +98,7 @@ pub fn DriverBuilder(
                 };
 
                 pub const EventValues = union(EventType) {
-                    http_recv: RequestData,
+                    recv: RequestData,
                 };
 
                 pub inline fn __block_end() u12 {
@@ -246,7 +246,7 @@ pub fn DriverBuilder(
                                 EV,
                                 @tagName(key),
                                 .{
-                                    .http_recv = .{
+                                    .recv = .{
                                         .req = req,
                                         .res = res,
                                         .id = id,
@@ -262,7 +262,7 @@ pub fn DriverBuilder(
 
                             const slot = self.queue.?.tryPush(
                                 .{
-                                    .event_type = .http_recv,
+                                    .event_type = @field(ET, @tagName(key) ++ "_recv"),
                                     .event_data = val,
                                     .properties = .{
                                         .correlation_id = if (correlation) |c| std.fmt.parseInt(u128, c, 10) catch 0 else 0,
@@ -310,9 +310,9 @@ pub fn DriverBuilder(
                             };
 
                             try switch (et) {
-                                inline .http_recv => inj.call_first(receive, .{
+                                inline .recv => inj.call_first(receive, .{
                                     self,
-                                    ev.http_recv,
+                                    ev.recv,
                                     ep,
                                 }),
                             };
@@ -783,7 +783,7 @@ pub fn RouteParser(comptime Context: type) type {
                 route,
                 H.make,
                 ActualResultType,
-                .http_recv,
+                .recv,
             );
 
             return self.extend(RB);

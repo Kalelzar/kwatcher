@@ -277,7 +277,7 @@ pub fn DriverBuilder(
                                         },
                                     });
                                     _ = self.queue.?.push(.{
-                                        .event_type = .trigger_job,
+                                        .event_type = @field(ET, @tagName(key) ++ "_trigger_job"),
                                         .event_data = data,
                                     });
                                     log.info("Job {s} queued successfully.", .{name});

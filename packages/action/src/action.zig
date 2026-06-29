@@ -109,7 +109,7 @@ pub fn DriverBuilder(
 
                                 var ev = E{
                                     .event_data = value,
-                                    .event_type = .call,
+                                    .event_type = @field(ET, @tagName(key) ++ "_call"),
                                 };
 
                                 if (extra.inj) |inj| {
