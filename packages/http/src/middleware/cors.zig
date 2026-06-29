@@ -207,7 +207,10 @@ pub fn WithCors(comptime routes: []const type) []const type {
             }
             entries[i].@"1" = new;
         }
-        break :blk std.StaticStringMap(Statuses).initComptime(entries);
+        {
+            @setEvalBranchQuota(routes.len * 300);
+            break :blk std.StaticStringMap(Statuses).initComptime(entries);
+        }
     };
 
     inline for (routes, 0..) |R, i| {
