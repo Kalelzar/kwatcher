@@ -9,7 +9,6 @@
 const assemble = @import("assemble.zig");
 
 pub const Assemble = assemble.Assemble;
-pub const get = assemble.get;
 pub const Entry = assemble.Entry;
 pub const Build = assemble.Build;
 pub const collect = assemble.collect;

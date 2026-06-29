@@ -70,12 +70,6 @@ pub fn build(comptime entries: []const Entry) Build(entries) {
     }
 }
 
-/// Read a kind's routes off an assembled result; `&.{}` when that kind received none — so a
-/// consumer never has to name a kind that no backend contributed to.
-pub fn get(comptime g: anytype, comptime kind: []const u8) []const type {
-    return if (@hasField(@TypeOf(g), kind)) @field(g, kind) else &.{};
-}
-
 /// The distinct driver kinds present in the manifest — the set generation is keyed on, so a
 /// backend's kind-level routes are produced once no matter how many driver instances share a
 /// kind. Discovered from `Docs.drivers`, never a hardcoded list.
@@ -112,26 +106,31 @@ fn entriesOf(comptime Docs: type, comptime backends: anytype) []const Entry {
     return entries;
 }
 
-/// The result type of `Assemble`: the kind-keyed `Build` struct, or — during docgen — an
-/// empty struct. The `Docs.isDocgen` branch is short-circuited at comptime so the dummy
-/// manifest (which has no `drivers`/`http_documents`) never reaches `entriesOf`. This keeps
-/// the docgen hedge here instead of every consumer call site.
-fn AssembleResult(comptime Docs: type, comptime backends: anytype) type {
-    if (Docs.isDocgen) return struct {};
-    return Build(entriesOf(Docs, backends));
+const AccessFn = *const fn (@Type(.enum_literal)) []const type;
+
+pub fn Assembly(comptime g: anytype) AccessFn {
+    const Cache = struct {
+        /// Read a kind's routes off an assembled result; `&.{}` when that kind received none — so a
+        /// consumer never has to name a kind that no backend contributed to.
+        pub fn get(comptime kind: @Type(.enum_literal)) []const type {
+            return if (@hasField(@TypeOf(g), @tagName(kind))) @field(g, @tagName(kind)) else &.{};
+        }
+    };
+    return &Cache.get;
 }
 
-/// Assemble every backend's introspection routes into one kind-keyed struct.
+/// Assemble every backend's introspection routes into a kind-keyed accessor.
 ///
-/// `Docs` is the generated manifest module (`@import("kw-gen--docs")` in the consumer);
-/// `backends` is a tuple of backend modules, each declaring its own `introspected_kind`/`generate`.
-/// (Routes carry no app routing context — each generator picks its own; the introspection routes
-/// don't use one.) Read the result with `get(result, "<kind>")` — which yields `&.{}` for any
-/// kind, so the empty docgen-time result needs no special-casing.
+/// @param `Docs` is the generated manifest module (`@import("kw-gen--docs")` in the consumer);
+/// @param `backends` is a tuple of backend modules, each declaring its own `introspected_kind`/`generate`.
 pub fn Assemble(
     comptime Docs: type,
     comptime backends: anytype,
-) AssembleResult(Docs, backends) {
-    if (comptime Docs.isDocgen) return .{};
-    return build(entriesOf(Docs, backends));
+) AccessFn {
+    if (comptime Docs.isDocgen) return noopAccess;
+    return Assembly(build(entriesOf(Docs, backends)));
+}
+
+fn noopAccess(_: @Type(.enum_literal)) []const type {
+    return &.{};
 }
