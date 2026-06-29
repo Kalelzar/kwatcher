@@ -33,8 +33,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
     const Handlers = D.Handlers(EventType, EventValues);
     const SchCtx = D.SchedulerCtx();
     // The internal driver is always seeded, so its scheduler is always available
-    // to bridge into the type-erased shim that framework-level routes (e.g. the
-    // pre-built shutdown routes) depend on.
+    // to bridge into the type-erased shim that framework-level routes depend on.
     const InternalScheduler = D.Schedulers()[@intFromEnum(@as(D.DriverKeys(), .internal))];
     const ShimCtx = core.scheduler.BridgeShimCtx(InternalScheduler);
     const Deps = comptime blk: {

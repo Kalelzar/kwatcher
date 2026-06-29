@@ -137,6 +137,16 @@ pub fn ResolvedConfig(comptime Config: type, comptime config_path: []const u8) t
     };
 }
 
+pub fn ResolvedKeyedConfig(comptime key: anytype, comptime Config: type, comptime config_path: []const u8) type {
+    const OurConfig = Resolver(Config).resolveType(config_path);
+
+    return struct {
+        pub fn ourConfig(inj: *dep.DepCtx, conf: *Config) !core.mem.Keyed(*OurConfig, key) {
+            return .{ .value = try Resolver(Config).resolveRef(inj, config_path, conf) };
+        }
+    };
+}
+
 pub fn defaultConfig(
     comptime category: anytype,
     dephub: anytype,
@@ -148,6 +158,24 @@ pub fn defaultConfig(
     _ = allocator;
     const H = struct {
         var fixme_move_elsewhere_cache: ResolvedConfig(Config, subpath) = .{};
+    };
+
+    return dephub
+        .static(category, &H.fixme_move_elsewhere_cache);
+}
+
+pub fn defaultKeyedConfig(
+    comptime key: anytype,
+    comptime category: anytype,
+    dephub: anytype,
+    allocator: std.mem.Allocator,
+    comptime Config: type,
+    comptime subpath: []const u8,
+) @TypeOf(dephub)
+    .Static(category, *ResolvedKeyedConfig(key, Config, subpath)) {
+    _ = allocator;
+    const H = struct {
+        var fixme_move_elsewhere_cache: ResolvedKeyedConfig(key, Config, subpath) = .{};
     };
 
     return dephub
@@ -176,6 +204,33 @@ pub fn config(comptime OurConfig: type, comptime config_path: []const u8) type {
 
         pub fn Return(comptime category: anytype, comptime Config: type, comptime DH: type) type {
             return DH.Static(category, *ResolvedConfig(Config, config_path));
+        }
+    };
+}
+
+pub fn configKeyed(comptime key: anytype, comptime OurConfig: type, comptime config_path: []const u8) type {
+    return struct {
+        pub fn apply(
+            dephub: anytype,
+            comptime category: anytype,
+            allocator: std.mem.Allocator,
+            comptime Config: type,
+        ) Return(category, Config, @TypeOf(dephub)) {
+            if (comptime Resolver(Config).resolveType(config_path) != OurConfig) {
+                @compileError("Config mismatch");
+            }
+            return defaultKeyedConfig(
+                key,
+                category,
+                dephub,
+                allocator,
+                Config,
+                config_path,
+            );
+        }
+
+        pub fn Return(comptime category: anytype, comptime Config: type, comptime DH: type) type {
+            return DH.Static(category, *ResolvedKeyedConfig(key, Config, config_path));
         }
     };
 }
