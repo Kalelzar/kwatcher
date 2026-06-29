@@ -10,10 +10,20 @@
         .kw_docgen = .{
             .path = "../docgen",
         },
+        .kw_core = .{
+            .path = "../core",
+        },
+        .kw_http = .{
+            .path = "../http",
+        },
+        .kw_http_template = .{
+            .path = "../kw-http-template",
+        },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
+        "templates",
     },
 }
