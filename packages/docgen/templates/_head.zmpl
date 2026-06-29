@@ -5,11 +5,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{title}}</title>
-    <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
-    <script src="https://unpkg.com/idiomorph@0.7.4/dist/idiomorph-ext.min.js" integrity="sha384-SsScJKzATF/w6suEEdLbgYGsYFLzeKfOA6PY+/C5ZPxOSuA+ARquqtz/BZz9JWU8" crossorigin="anonymous"></script>
-    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
-    <!-- <script defer src="https://unpkg.com/htmx-ext-form-json"></script> -->
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="/_introspect/assets/htmx.min.js"></script>
+    <script src="/_introspect/assets/idiomorph-ext.min.js"></script>
+    <script src="/_introspect/assets/tailwind-browser.js"></script>
+    <script defer src="/_introspect/assets/alpine.min.js"></script>
     <script>
       // Track the active driver. The ok driver page renders a `#kw-current-driver`
       // marker in its content pane (the 404 page omits it). Driver switches swap only

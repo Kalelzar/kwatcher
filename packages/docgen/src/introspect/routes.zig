@@ -177,6 +177,52 @@ fn iconList(comptime backends: anytype) []const KindIcon {
     }
 }
 
+/// One vendored frontend bundle, embedded into the binary so the UI loads its JS from this
+/// app's own origin instead of a public CDN. `tag` is the comptime `ETag` for revalidation.
+const Asset = struct { name: []const u8, bytes: []const u8, tag: []const u8 };
+
+/// The vendored frontend libraries the introspection UI's `_head` partial loads. All are
+/// JavaScript bundles, so they share one content type and one serving route. Versions are
+/// pinned by the vendored file contents; bump by re-vendoring under `assets/vendor/`.
+const assets: []const Asset = &.{
+    .{ .name = "htmx.min.js", .bytes = @embedFile("assets/vendor/htmx.min.js"), .tag = http.data.etag(@embedFile("assets/vendor/htmx.min.js")) },
+    .{ .name = "idiomorph-ext.min.js", .bytes = @embedFile("assets/vendor/idiomorph-ext.min.js"), .tag = http.data.etag(@embedFile("assets/vendor/idiomorph-ext.min.js")) },
+    .{ .name = "tailwind-browser.js", .bytes = @embedFile("assets/vendor/tailwind-browser.js"), .tag = http.data.etag(@embedFile("assets/vendor/tailwind-browser.js")) },
+    .{ .name = "alpine.min.js", .bytes = @embedFile("assets/vendor/alpine.min.js"), .tag = http.data.etag(@embedFile("assets/vendor/alpine.min.js")) },
+};
+
+/// Serves the vendored frontend bundles from this app's own origin. The URL is a stable path
+/// (not fingerprinted — the `_head` partial that references these takes no asset data), so it
+/// carries an `ETag` for cheap revalidation rather than an `immutable` policy: a matching
+/// `If-None-Match` short-circuits to a bodyless 304 (the framework does no conditional-GET
+/// handling of its own). An unknown `{name}` is a 404 with an empty body.
+const Assets = struct {
+    pub fn @"GET _introspect/assets/{name}"(
+        body: struct {
+            request: *http.Request,
+            response: *http.Response,
+            captures: struct { name: []const u8 },
+        },
+    ) http.data.InternalFile("text/javascript") {
+        inline for (assets) |a| {
+            if (std.mem.eql(u8, a.name, body.captures.name)) {
+                body.response.header("Cache-Control", "public, max-age=86400");
+                // Conditional GET: if the client already holds this exact build (its
+                // `If-None-Match` echoes our `ETag`), skip the body with a 304.
+                if (body.request.header("if-none-match")) |inm| {
+                    if (std.mem.eql(u8, inm, a.tag)) {
+                        body.response.status = 304;
+                        return .{ .value = "", .tag = a.tag };
+                    }
+                }
+                return .{ .value = a.bytes, .tag = a.tag };
+            }
+        }
+        body.response.status = 404;
+        return .{ .value = "" };
+    }
+};
+
 /// The favicon route, generated with the backend icon table baked in. The URL carries the
 /// icon's content fingerprint (`{fp}`), so it versions per icon and we can serve it
 /// `immutable` with a long max-age — a changed icon means a changed URL, never a stale cache.
@@ -204,14 +250,15 @@ fn Favicon(comptime icons: []const KindIcon) type {
 }
 
 /// Build the generic core routes (always contributed once). Returns a kind-keyed struct; the
-/// UI is served over HTTP, so everything lands under `.http`. The favicon is excluded from
-/// templating (it's a raw `image/svg+xml` asset).
+/// UI is served over HTTP, so everything lands under `.http`. The favicon (`image/svg+xml`)
+/// and the vendored frontend bundles (`text/javascript`) are excluded from templating — they
+/// are raw assets served straight from embedded bytes.
 ///
 /// Routes pass `void` as their context: their captures are all string-typed and they never
 /// read a routing context, so `void` keeps them context-agnostic and out of the `*Context`
 /// dependency graph — they fold into any driver's routes regardless of its context type.
 pub fn coreRoutes(comptime Docs: type, comptime backends: anytype) struct { http: []const type } {
     const icons = iconList(backends);
-    const all = http.From(Core(Docs, icons), void) ++ http.From(Favicon(icons), void);
-    return .{ .http = http_template.WithTemplates("core", all, &.{"image/svg+xml"}) };
+    const all = http.From(Core(Docs, icons), void) ++ http.From(Favicon(icons), void) ++ http.From(Assets, void);
+    return .{ .http = http_template.WithTemplates("core", all, &.{ "image/svg+xml", "text/javascript" }) };
 }
