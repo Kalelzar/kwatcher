@@ -10,7 +10,6 @@ pub fn generate(alloc: std.mem.Allocator, out_dir: []const u8, source_roots: []c
     _ = source_roots;
     const D = user_root.drivers.drivers;
 
-    std.log.info("Generating modules at: {s}", .{out_dir});
     var out = try std.fs.cwd().makeOpenPath(out_dir, .{});
     defer out.close();
 
@@ -30,7 +29,6 @@ pub fn generate(alloc: std.mem.Allocator, out_dir: []const u8, source_roots: []c
     inline for (uniq) |Drv| {
         const kind = Drv.kind;
         const module_name = @tagName(kind);
-        std.log.info("Module: {s}", .{module_name});
         try wi.writeAll(std.fmt.comptimePrint("pub const {s} = @import(\"kw-docgen--{s}\");\n", .{ module_name, module_name }));
     }
     try wi.flush();

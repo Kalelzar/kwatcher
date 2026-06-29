@@ -131,6 +131,6 @@ pub fn Assemble(
     return Assembly(build(entriesOf(Docs, backends)));
 }
 
-fn noopAccess(_: @Type(.enum_literal)) []const type {
+fn noopAccess(comptime _: @Type(.enum_literal)) []const type {
     return &.{};
 }

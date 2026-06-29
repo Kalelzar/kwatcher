@@ -163,4 +163,8 @@ pub fn build(b: *std.Build) !void {
     kw_introspect.addImport("kw-core", kw_core);
     kw_introspect.addImport("kw-http", kw_http);
     kw_introspect.addImport("kw-http-template", kw_http_template);
+    // The hardcoded private mount (private_mount.zig) wires its config deps via kwatcher.default.
+    // The `kwatcher` module dep is already declared (build.zig.zon) and bound above; this is
+    // acyclic — kwatcher imports no introspect package.
+    kw_introspect.addImport("kwatcher", kwatcher);
 }
