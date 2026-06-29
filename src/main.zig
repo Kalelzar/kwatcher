@@ -9,7 +9,9 @@ const cron = @import("kw-cron");
 const action = @import("kw-action");
 const signal = @import("kw-signal");
 const httpz = @import("httpz");
-const http_template = @import("kw-http-template");
+
+const introspect = @import("kw-introspect");
+const introspect_http = @import("kw-introspect--http");
 
 const docs = @import("kw-gen--docs");
 
@@ -341,13 +343,16 @@ const cron_driver = cron.Driver
     .routes(cron.From(CronRoutes))
     .build();
 
+/// Introspection UI routes assembled from the per-kind backends, merged per route-kind.
+/// `Assemble` returns an empty set during docgen, so there's no isDocgen hedging here.
+const introspection = introspect.Assemble(docs, .{introspect_http});
+
 const http_driver = http.Driver
     .new(.http)
     .config("driver.http")
     .listen(true)
     .jobs(1)
-    .routes(http.middleware.cors(http.From(HTTPRoutes, RouteContext) ++
-        if (!docs.isDocgen) http_template.WithTemplates("test", http.From(@import("template_routes.zig"), RouteContext), &.{"image/svg+xml"}) else @as([]const type, &.{})))
+    .routes(http.middleware.cors(http.From(HTTPRoutes, RouteContext) ++ introspect.get(introspection, "http")))
     .error_handler(http.DefaultErrorHandler)
     .build();
 
@@ -447,7 +452,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         // Register default dependencies (allocator pools, user info, client info)
         .with(.all, kwatcher.default.withDefault(&config_slot, .{
             .name = "example",
-            .version = "1.0.0",
+            .version = "1.0.l0",
         }), allocator)
         // Register app-specific config resolver
         .with(.all, kwatcher.default.config(AppConfig, "app"), allocator)

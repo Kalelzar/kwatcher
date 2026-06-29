@@ -87,11 +87,18 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     }).module("kw-docgen--none");
 
-    const kw_docgen_http = b.dependency("kw_docgen_http", .{
+    const kw_docgen_dep = b.dependency("kw_docgen", .{ .target = target, .optimize = optimize });
+    const kw_docgen_http_dep = b.dependency("kw_docgen_http", .{
         .target = target,
         .optimize = optimize,
         .openapi_version = openapi_version,
-    }).module("kw-docgen--http");
+    });
+    const kw_docgen_http = kw_docgen_http_dep.module("kw-docgen--http");
+
+    // Runtime-facing introspection UI modules (separate from the build-time codegen backends
+    // above): the generic core and the HTTP backend, served over the app's HTTP driver.
+    const kw_introspect = kw_docgen_dep.module("kw-introspect");
+    const kw_introspect_http = kw_docgen_http_dep.module("kw-introspect--http");
 
     const kw_docgen_amqp = b.dependency("kw_docgen_amqp", .{
         .target = target,
@@ -102,16 +109,25 @@ pub fn build(b: *std.Build) !void {
     // 3rd Party:
     const httpz = b.dependency("httpz", .{ .target = target, .optimize = optimize }).module("httpz");
 
-    // The template machinery owns its own zmpl dependency; we hand it the example's template
-    // sources (each with a prefix namespace) and it returns a module wired to a zmpl instance whose
-    // manifest covers them.
+    // The template machinery owns its own zmpl dependency; we hand it every contributing
+    // template source (each with a prefix namespace) and it returns a module wired to a zmpl
+    // instance whose manifest covers them all. The introspection backends ship their `.zmpl`
+    // files inside their packages; `packageSource` resolves those dirs to absolute paths. One
+    // shared module so every generator's `WithTemplates` lookups (core + http prefixes) resolve.
     const kw_http_template = http_template.wire(b, .{
         .target = target,
         .optimize = optimize,
         .sources = &.{
-            .{ .prefix = "test", .path = &.{ "src", "templates", "test" } },
+            http_template.packageSource(kw_docgen_dep, "core", &.{"templates"}),
+            http_template.packageSource(kw_docgen_http_dep, "http", &.{"templates"}),
         },
     });
+
+    // The introspection modules call `WithTemplates`, which resolves `zmpl` against their own
+    // `kw-http-template` import — so override their package default with this wired instance
+    // (whose manifest covers the core + http prefixes).
+    kw_introspect.addImport("kw-http-template", kw_http_template);
+    kw_introspect_http.addImport("kw-http-template", kw_http_template);
 
     // Imports:
     // Example application:
@@ -123,7 +139,8 @@ pub fn build(b: *std.Build) !void {
     kwatcher_example.addImport("kw-action", kw_action);
     kwatcher_example.addImport("kw-signal", kw_signal);
     kwatcher_example.addImport("httpz", httpz);
-    kwatcher_example.addImport("kw-http-template", kw_http_template);
+    kwatcher_example.addImport("kw-introspect", kw_introspect);
+    kwatcher_example.addImport("kw-introspect--http", kw_introspect_http);
 
     // Docgen: wired after the example's imports are in place so the helper can mirror
     // them onto the host-target entrypoint it derives internally. This also adds the
