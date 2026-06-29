@@ -352,7 +352,7 @@ const http_driver = http.Driver
     .config("driver.http")
     .listen(true)
     .jobs(1)
-    .routes(http.middleware.cors(http.From(HTTPRoutes, RouteContext) ++ introspect.get(introspection, "http")))
+    .routes(http.middleware.cors(http.From(HTTPRoutes, RouteContext) ++ introspection(.http)))
     .error_handler(http.DefaultErrorHandler)
     .build();
 
