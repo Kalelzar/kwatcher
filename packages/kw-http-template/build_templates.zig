@@ -26,6 +26,28 @@ pub fn wire(b: *std.Build, opts: WireOptions) *std.Build.Module {
     }).module("kw-http-template");
 }
 
+/// Build a `TemplateSource` for a directory that ships *inside a dependency package* (e.g. a
+/// backend's bundled `templates/`), resolved to an absolute path under the dep's build root.
+/// zmpl realpaths template dirs at configure time, and path deps exist on disk then, so this
+/// hands `wire` an already-absolute path that `resolvePaths` passes straight through.
+pub fn packageSource(
+    dep: *std.Build.Dependency,
+    prefix: []const u8,
+    subpath: []const []const u8,
+) TemplateSource {
+    const a = dep.builder.allocator;
+    const root = dep.builder.build_root.path orelse @panic("kw-http-template: dependency has no build root path");
+
+    var parts = a.alloc([]const u8, subpath.len + 1) catch @panic("OOM");
+    parts[0] = root;
+    for (subpath, 0..) |s, i| parts[i + 1] = s;
+    const joined = std.fs.path.join(a, parts) catch @panic("OOM");
+
+    const seg = a.alloc([]const u8, 1) catch @panic("OOM");
+    seg[0] = joined;
+    return .{ .prefix = prefix, .path = seg };
+}
+
 /// Mirror of zmpl's own `templatesPaths` (which is private to its build.zig): join each source's
 /// path segments, make it absolute relative to the build cwd, and emit zmpl's option syntax. A
 /// missing directory becomes `_`, which zmpl skips with a warning.
