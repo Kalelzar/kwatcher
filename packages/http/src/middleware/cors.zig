@@ -194,18 +194,21 @@ pub fn WithCors(comptime routes: []const type) []const type {
         var entries: [pre_entries.len]E = @splat(E{ "__none__", .{} });
 
         for (routes) |R| {
-            R.requires(.method);
-            R.requires(.route);
-            const c = R.query(.route).canonic();
-            const i = pre.get(c) orelse @compileError("Bug: Route not registered in pre-map");
-            entries[i].@"0" = c;
-            var new = entries[i].@"1";
-            switch (R.query(.method)) {
-                inline else => |m| {
-                    @field(new, @tagName(m)) = 1;
-                },
+            {
+                R.requires(.method);
+                R.requires(.route);
+                @setEvalBranchQuota(routes.len * 300);
+                const c = R.query(.route).canonic();
+                const i = pre.get(c) orelse @compileError("Bug: Route not registered in pre-map");
+                entries[i].@"0" = c;
+                var new = entries[i].@"1";
+                switch (R.query(.method)) {
+                    inline else => |m| {
+                        @field(new, @tagName(m)) = 1;
+                    },
+                }
+                entries[i].@"1" = new;
             }
-            entries[i].@"1" = new;
         }
         {
             @setEvalBranchQuota(routes.len * 300);
