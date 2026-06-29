@@ -146,4 +146,21 @@ pub fn build(b: *std.Build) !void {
     kw_docgen.addImport("kw-docindex", kw_docindex);
 
     kw_docschema.addImport("kw-docindex", kw_docindex);
+
+    // The runtime-facing introspection UI core (kw-introspect). Deliberately a separate
+    // module from the build-time codegen tool above, with its own root source and import
+    // edges, so the host-target `kw-docgen` exe never drags in kw-http/zmpl. Consumers import
+    // it and, at build time, override `kw-http-template` with their wired instance (whose zmpl
+    // manifest covers the introspect template prefixes) and inject the generated `kw-gen--docs`
+    // — neither is wired here, so the module compiles only inside a consumer's graph.
+    const kw_http = b.dependency("kw_http", .{ .target = target, .optimize = optimize }).module("kw-http");
+    const kw_http_template = b.dependency("kw_http_template", .{ .target = target, .optimize = optimize }).module("kw-http-template");
+    const kw_introspect = b.addModule("kw-introspect", .{
+        .root_source_file = b.path("src/introspect/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    kw_introspect.addImport("kw-core", kw_core);
+    kw_introspect.addImport("kw-http", kw_http);
+    kw_introspect.addImport("kw-http-template", kw_http_template);
 }

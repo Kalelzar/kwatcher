@@ -99,9 +99,12 @@ pub fn wire(b: *std.Build, opts: Options) Result {
     });
     b.getInstallStep().dependOn(&install_docs.step);
 
-    opts.consumer.addAnonymousImport("kw-gen--docs", .{
+    // One generated-manifest module, shared by the consumer and any extra runtime doc
+    // consumers (the introspection modules) so they all read the same `manifest.zig`.
+    const docs_mod = b.createModule(.{
         .root_source_file = docgen_path.path(b, "manifest.zig"),
     });
+    opts.consumer.addImport("kw-gen--docs", docs_mod);
 
     const docgen_modules = b.createModule(.{
         .root_source_file = modgen_path.path(b, "modules.zig"),

@@ -13,10 +13,18 @@
         .kw_docindex = .{
             .path = "../docindex",
         },
+        .kw_http = .{
+            .path = "../http",
+        },
+        .kw_http_template = .{
+            .path = "../kw-http-template",
+        },
     },
     .paths = .{
         "build.zig",
+        "build_docgen.zig",
         "build.zig.zon",
         "src",
+        "templates",
     },
 }
