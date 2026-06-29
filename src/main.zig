@@ -344,9 +344,10 @@ const cron_driver = cron.Driver
     .routes(cron.From(CronRoutes))
     .build();
 
-/// Introspection UI routes assembled from the per-kind backends, merged per route-kind.
-/// `Assemble` returns an empty set during docgen, so there's no isDocgen hedging here.
-const introspection = introspect.Assemble(docs, .{introspect_http});
+/// The private introspection-UI mount (a second `.private` HTTP driver) and its registry/dep
+/// wiring, all hardcoded in the library — see `kw-introspect`'s `Mount`. The docs manifest and
+/// the http backend are threaded in.
+const introspection = introspect.Mount(docs, .{introspect_http});
 
 const http_driver = http.Driver
     .new(.public)
@@ -354,16 +355,6 @@ const http_driver = http.Driver
     .listen(true)
     .jobs(1)
     .routes(http.middleware.cors(http.From(HTTPRoutes, RouteContext)))
-    .error_handler(http.DefaultErrorHandler)
-    .build();
-
-/// Second HTTP mount — serves the introspection UI, split off from the public API surface.
-const private_http_driver = http.Driver
-    .new(.private)
-    .config("driver.private")
-    .listen(true)
-    .jobs(1)
-    .routes(http.middleware.cors(introspection(.http)))
     .error_handler(http.DefaultErrorHandler)
     .build();
 
@@ -393,10 +384,9 @@ pub const drivers = struct {
             .registerHandler(http_driver)
             .registerHandler(action_driver)
             .registerHandler(signal_driver);
-        // The private introspection mount is included only in normal runtime builds, not
-        // during docgen: the introspection UI is generated *from* the docs, so it must not
-        // be part of the driver graph that produces them.
-        break :reg if (docs.isDocgen) base else base.registerHandler(private_http_driver);
+        // The private introspection mount is appended only in normal runtime builds, not during
+        // docgen (the UI is generated *from* the docs); `register` handles that gating.
+        break :reg introspection.register(base);
     };
 };
 
@@ -482,17 +472,10 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         .static(.public, &ctx)
         .static(.amqp, &counter);
 
-    // The private introspection mount is only registered outside docgen, so its dep wiring
-    // must be gated on the same condition — otherwise the dephub rejects `.private` as an
-    // unregistered category during docgen. It needs both its cors config (the routes are
-    // cors-wrapped) and its own http config section.
-    const deps = if (docs.isDocgen)
-        base_deps
-    else
-        base_deps
-            .with(.private, kwatcher.default.config(http.middleware.Cors.Config, "middleware.cors"), allocator)
-            .with(.private, kwatcher.default.configKeyed("public", http.Config, "driver.public"), allocator)
-            .with(.private, kwatcher.default.config(http.Config, "driver.private"), allocator);
+    // The private introspection mount's deps (cors config + a keyed http.Config per served http
+    // mount + its own config). `introspection.deps` no-ops during docgen, so this stays one
+    // unconditional `.with`.
+    const deps = base_deps.with(.private, introspection.deps, allocator);
 
     // Create and start the server
     var server = try kwatcher.server.Server(@TypeOf(deps), drivers.drivers)
