@@ -71,8 +71,8 @@ fn Core(comptime Docs: type, comptime icons: []const KindIcon) type {
                 }
             }
 
-            const ev_prop = try depctx.require(core.event.ExtendedProperties);
-            const instance = try std.fmt.allocPrint(allocator.value, "{d}", .{ev_prop.correlation_id});
+            const properties = try depctx.require(core.event.Properties);
+            const instance = try std.fmt.allocPrint(allocator.value, "{d}", .{properties.correlation_id});
 
             return .{
                 .value = .{
@@ -105,8 +105,8 @@ fn Core(comptime Docs: type, comptime icons: []const KindIcon) type {
                 }
             }
 
-            const ev_prop = try depctx.require(core.event.ExtendedProperties);
-            const instance = try std.fmt.allocPrint(allocator.value, "{d}", .{ev_prop.correlation_id});
+            const properties = try depctx.require(core.event.Properties);
+            const instance = try std.fmt.allocPrint(allocator.value, "{d}", .{properties.correlation_id});
 
             return .{
                 .value = .{
