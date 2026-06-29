@@ -42,7 +42,15 @@ pub const Drivers = struct {
                     .@"enum" => |e| {
                         if (!e.is_exhaustive) @compileError("EventType must be exhaustive!");
                         for (e.fields) |f| {
-                            defs[i] = f;
+                            if (D.key != .internal) {
+                                defs[i] = .{
+                                    .value = f.value,
+                                    .name = @tagName(D.key) ++ "_" ++ f.name,
+                                };
+                            } else {
+                                defs[i] = f;
+                            }
+
                             i += 1;
                         }
                     },
