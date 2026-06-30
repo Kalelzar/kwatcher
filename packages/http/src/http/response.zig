@@ -267,6 +267,34 @@ pub fn InternalFile(
     };
 }
 
+pub fn Gzip(
+    comptime Inner: type,
+) type {
+    return struct {
+        pub const ContentType = Inner.ContentType;
+        value: @FieldType(Inner, "value"),
+
+        pub fn write(self: *const @This(), writer: *std.Io.Writer, res: *http.Response) !void {
+            var buf: [1024]u8 = undefined;
+            var compressor = std.compress.flate.Compress.init(writer, &buf, .{
+                .container = .gzip,
+            });
+            const wi = &compressor.writer;
+
+            const inner = Inner{
+                .value = self.value,
+            };
+
+            try inner.write(wi, res);
+            try compressor.endUnflushed();
+
+            if (!res.written) {
+                res.header("Content-Encoding", "gzip");
+            }
+        }
+    };
+}
+
 /// Build an exhaustive enum whose fields are the `ContentType` of each formatter type, so
 /// `Many` can tag which representation a response is rendered as. Generic — a formatter is any
 /// type with a `pub const ContentType: []const u8` and a `write(self, writer, res)` (e.g. `Json`,
