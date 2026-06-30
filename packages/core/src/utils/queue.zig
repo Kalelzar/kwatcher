@@ -10,17 +10,22 @@ pub fn StaticStrict(comptime T: type) type {
         buffer: []T,
         header: u128 align(16), // head u64 | len u64
         occupancy: []u1,
+        mask: usize,
 
         const Self = @This();
 
         /// Initialize a new queue backed by a buffer.
+        ///
+        /// `buffer.len` must be a power of two.
         pub fn init(buffer: []T, occupancy_buffer: []u1) Self {
             std.debug.assert(buffer.len == occupancy_buffer.len);
+            std.debug.assert(std.math.isPowerOfTwo(buffer.len));
             @memset(occupancy_buffer, 0);
             return .{
                 .header = 0,
                 .buffer = buffer,
                 .occupancy = occupancy_buffer,
+                .mask = buffer.len - 1,
                 .used = .{ .permits = 0 },
                 .free = .{ .permits = buffer.len },
             };
@@ -47,9 +52,12 @@ pub fn StaticStrict(comptime T: type) type {
             const old = @atomicRmw(u128, &self.header, .Add, 1, .acq_rel);
             const len: u128 = (old & bitmask);
             const head: u128 = (old & (@as(u128, bitmask) << 64)) >> 64;
-            const index: u64 = @intCast((head + len) % self.buffer.len);
+            const index: u64 = @intCast((head + len) & @as(u128, self.mask));
             while (true) {
-                if (@atomicLoad(u1, &self.occupancy[index], .acquire) == 1) continue;
+                if (@atomicLoad(u1, &self.occupancy[index], .acquire) == 1) {
+                    std.atomic.spinLoopHint();
+                    continue;
+                }
                 self.buffer[index] = data;
                 @atomicStore(u1, &self.occupancy[index], 1, .release);
                 return index;
@@ -76,12 +84,16 @@ pub fn StaticStrict(comptime T: type) type {
             while (true) {
                 const len: u128 = old & bitmask;
                 const head: u128 = (old & (@as(u128, bitmask) << 64)) >> 64;
-                const index: usize = @intCast(head % self.buffer.len);
-                if (@atomicLoad(u1, &self.occupancy[index], .acquire) == 0) continue;
+                const index: usize = @intCast(head & @as(u128, self.mask));
+                if (@atomicLoad(u1, &self.occupancy[index], .acquire) == 0) {
+                    std.atomic.spinLoopHint();
+                    continue;
+                }
                 const slot = self.buffer[index];
                 const new = (len - 1) | ((head +% 1) << 64);
                 if (@cmpxchgWeak(u128, &self.header, old, new, .acq_rel, .acquire)) |next| {
                     old = next;
+                    std.atomic.spinLoopHint();
                     continue;
                 }
                 @atomicStore(u1, &self.occupancy[index], 0, .release);
@@ -105,9 +117,9 @@ pub fn StaticStrict(comptime T: type) type {
             const old = @atomicLoad(u128, &self.header, .acquire);
             const len: u64 = @truncate(old);
             if (len == 0) return null;
-            const head: u64 = @truncate(old >> 64);
+            const head: usize = @truncate(old >> 64);
 
-            return self.buffer[head % self.buffer.len];
+            return self.buffer[head & self.mask];
         }
 
         /// Skips over the first element, requeing it to the back.
