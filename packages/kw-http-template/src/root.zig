@@ -151,6 +151,10 @@ pub fn WithTemplates(
         const Tmpl = Template(prefix, Inner, R.id);
 
         if (comptime is_html) {
+            // HTML pages/fragments are the bulk of the UI's byte weight, so render them through
+            // `Gzip`. `Gzip(Tmpl)` keeps `Tmpl`'s single `value` field and `text/html` content
+            // type, so the name-resolving handler builds it exactly like a bare `Tmpl`.
+            //const Gz = http.data.Gzip(Tmpl);
             const TH = TemplateOnlyHandler(Tmpl, OG);
             nroutes[i] = R.wrap(TH.create)
                 .mod(.{ .response = Tmpl });
