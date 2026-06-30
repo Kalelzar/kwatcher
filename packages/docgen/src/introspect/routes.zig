@@ -178,17 +178,22 @@ fn iconList(comptime backends: anytype) []const KindIcon {
 }
 
 /// One vendored frontend bundle, embedded into the binary so the UI loads its JS from this
-/// app's own origin instead of a public CDN. `tag` is the comptime `ETag` for revalidation.
+/// app's own origin instead of a public CDN. The embedded bytes are gzip-compressed (the
+/// `assets/vendor/*.gz` files), served verbatim under `Content-Encoding: gzip` — so there is no
+/// comptime or per-request compression. `tag` is the comptime `ETag` over those compressed bytes,
+/// which makes it a correct per-encoding validator with no extra bookkeeping. `name` is the
+/// *logical* (uncompressed) name the URL/`_head` partial uses, e.g. `htmx.min.js`.
 const Asset = struct { name: []const u8, bytes: []const u8, tag: []const u8 };
 
-/// The vendored frontend libraries the introspection UI's `_head` partial loads. All are
-/// JavaScript bundles, so they share one content type and one serving route. Versions are
-/// pinned by the vendored file contents; bump by re-vendoring under `assets/vendor/`.
+/// The vendored frontend libraries the introspection UI's `_head` partial loads, stored
+/// pre-gzipped. All are JavaScript bundles, so they share one content type and one serving route.
+/// Versions are pinned by the vendored file contents; bump by re-vendoring under `assets/vendor/`
+/// (download piped through `gzip -n -9` so the bytes — and thus the `ETag` — stay deterministic).
 const assets: []const Asset = &.{
-    .{ .name = "htmx.min.js", .bytes = @embedFile("assets/vendor/htmx.min.js"), .tag = http.data.etag(@embedFile("assets/vendor/htmx.min.js")) },
-    .{ .name = "idiomorph-ext.min.js", .bytes = @embedFile("assets/vendor/idiomorph-ext.min.js"), .tag = http.data.etag(@embedFile("assets/vendor/idiomorph-ext.min.js")) },
-    .{ .name = "tailwind-browser.js", .bytes = @embedFile("assets/vendor/tailwind-browser.js"), .tag = http.data.etag(@embedFile("assets/vendor/tailwind-browser.js")) },
-    .{ .name = "alpine.min.js", .bytes = @embedFile("assets/vendor/alpine.min.js"), .tag = http.data.etag(@embedFile("assets/vendor/alpine.min.js")) },
+    .{ .name = "htmx.min.js", .bytes = @embedFile("assets/vendor/htmx.min.js.gz"), .tag = http.data.etag(@embedFile("assets/vendor/htmx.min.js.gz")) },
+    .{ .name = "idiomorph-ext.min.js", .bytes = @embedFile("assets/vendor/idiomorph-ext.min.js.gz"), .tag = http.data.etag(@embedFile("assets/vendor/idiomorph-ext.min.js.gz")) },
+    .{ .name = "tailwind-browser.js", .bytes = @embedFile("assets/vendor/tailwind-browser.js.gz"), .tag = http.data.etag(@embedFile("assets/vendor/tailwind-browser.js.gz")) },
+    .{ .name = "alpine.min.js", .bytes = @embedFile("assets/vendor/alpine.min.js.gz"), .tag = http.data.etag(@embedFile("assets/vendor/alpine.min.js.gz")) },
 };
 
 /// Serves the vendored frontend bundles from this app's own origin. The URL is a stable path
@@ -207,6 +212,9 @@ const Assets = struct {
         inline for (assets) |a| {
             if (std.mem.eql(u8, a.name, body.captures.name)) {
                 body.response.header("Cache-Control", "public, max-age=86400");
+                // The embedded bytes are gzip; the `Content-Type` stays the JS type (set by
+                // `InternalFile`) and `Content-Encoding` advertises the wire format.
+                body.response.header("Content-Encoding", "gzip");
                 // Conditional GET: if the client already holds this exact build (its
                 // `If-None-Match` echoes our `ETag`), skip the body with a 304.
                 if (body.request.header("if-none-match")) |inm| {
