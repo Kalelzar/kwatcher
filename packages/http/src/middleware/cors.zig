@@ -26,6 +26,17 @@ const RType = response.Json(struct {}, &.{
     .bad_request,
 });
 
+fn isAllowedOrigin(origins: []const []const u8, origin: []const u8) bool {
+    // FIXME: This should build a StringMap once instead of linear searching.
+    // Config doesn't change atm.
+    for (origins) |o| {
+        if (std.mem.eql(u8, o, origin)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 const PreflightRouteHandlers = struct {
     pub fn create(comptime cache: Statuses) type {
         comptime var method_payload: []const u8 = "";
@@ -85,14 +96,7 @@ const PreflightRouteHandlers = struct {
 
                         // NOTE: Maybe we should cache this
                         const conf = try inj.require(*Config);
-                        const is_allowed = blk: {
-                            for (conf.allowed_origins) |o| {
-                                if (std.mem.eql(u8, o, origin.?)) {
-                                    break :blk true;
-                                }
-                            }
-                            break :blk false;
-                        };
+                        const is_allowed = isAllowedOrigin(conf.allowed_origins, origin.?);
                         if (is_allowed) {
                             res.header("Access-Control-Allow-Origin", origin.?);
                             res.header("Access-Control-Allow-Methods", method_payload);
@@ -146,17 +150,10 @@ const WrapRouteHandlers = struct {
                         const res = ctx.response;
                         const origin = req.header("origin");
 
-                        if (origin != null) {
+                        if (origin) |o| {
                             // NOTE: Maybe we should cache this
                             const conf = try inj.require(*Config);
-                            const is_allowed = blk: {
-                                for (conf.allowed_origins) |o| {
-                                    if (std.mem.eql(u8, o, origin.?)) {
-                                        break :blk true;
-                                    }
-                                }
-                                break :blk false;
-                            };
+                            const is_allowed = isAllowedOrigin(conf.allowed_origins, o);
 
                             if (is_allowed) {
                                 res.header("Access-Control-Allow-Origin", origin.?);

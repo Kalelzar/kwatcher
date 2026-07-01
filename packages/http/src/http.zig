@@ -89,6 +89,7 @@ pub fn DriverBuilder(
                     res: *httpz.Response,
                     captures: []const []const u8,
                     cond: *std.Thread.Condition,
+                    mutex: *std.Thread.Mutex,
                     ready: *State,
 
                     pub fn write(self: RequestData, w: *std.Io.Writer) !void {
@@ -186,6 +187,8 @@ pub fn DriverBuilder(
                         }
 
                         pub fn stop(self: *@This()) void {
+                            // FIXME: This invalidates in-flight requests an causes segfaults during drainage if we still had http events queued.
+                            // This will be fixed with the custom backend.
                             if (self.server) |s| s.stop();
                         }
 
@@ -253,6 +256,7 @@ pub fn DriverBuilder(
                                         // FIXME: Yikes
                                         .captures = try res.arena.dupe([]const u8, match.?.captures),
                                         .cond = &cond,
+                                        .mutex = &mut,
                                         .ready = &ready,
                                     },
                                 },
@@ -329,8 +333,10 @@ pub fn DriverBuilder(
                             const route = event.id;
                             // FIXME: We should only signal on the last attempt
                             defer {
-                                @atomicStore(State, event.ready, .done, .release);
+                                event.mutex.lock();
+                                event.ready.* = .done;
                                 event.cond.signal();
+                                event.mutex.unlock();
                             }
 
                             event.res.header("x-correlation-id", try std.fmt.allocPrint(event.res.arena, "{d}", .{evprop.correlation_id}));
