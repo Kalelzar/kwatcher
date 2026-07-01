@@ -360,7 +360,7 @@ const Connection = struct {
         defer self.lock.unlock();
         var timeval = std.c.timeval{
             .sec = 0,
-            .usec = @truncate(timeout orelse 0),
+            .usec = @truncate(@divFloor(timeout orelse 0, std.time.ns_per_us)),
         };
 
         const frame = try self.this.simple_wait_frame(if (timeout != null) &timeval else null);
@@ -414,7 +414,7 @@ const Connection = struct {
         defer self.lock.unlock();
         var timeval = std.c.timeval{
             .sec = 0,
-            .usec = @truncate(timeout),
+            .usec = @truncate(@divFloor(timeout, std.time.ns_per_us)),
         };
 
         log.debug("Attempting to consume", .{});
