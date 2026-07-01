@@ -81,6 +81,27 @@ pub const DepCtx = struct {
         return @call(.auto, fun, args);
     }
 
+    pub fn call(self: *DepCtx, comptime fun: anytype, extra_args: anytype) anyerror!klib.meta.Result(fun) {
+        if (comptime @typeInfo(@TypeOf(extra_args)) != .@"struct") {
+            @compileError("Expected a tuple of arguments");
+        }
+
+        const params = @typeInfo(klib.meta.Fn(@TypeOf(fun))).@"fn".params;
+        const fill_len = params.len - extra_args.len;
+
+        const types = comptime brk: {
+            var types: [params.len]type = undefined;
+            for (0..fill_len) |i| types[i] = params[i].type orelse @compileError("reached anytype");
+            for (fill_len..params.len) |i| types[i] = @TypeOf(extra_args[i - fill_len]);
+            break :brk &types;
+        };
+
+        var args: std.meta.Tuple(types) = undefined;
+        inline for (0..args.len) |i| args[i] = if (i >= fill_len) try self.require(@TypeOf(args[i])) else extra_args[i - fill_len];
+
+        return @call(.auto, fun, args);
+    }
+
     pub fn require(self: *DepCtx, comptime T: type) !T {
         // std.log.info("Getting {s}.", .{@typeName(T)});
         if (T == *DepCtx) return self;

@@ -193,26 +193,15 @@ pub fn Mod(comptime T: type, comptime i: usize, comptime As: []const T, comptime
     return &buf;
 }
 
-pub fn SetUnion(comptime T: type, comptime As: []const T, comptime Bs: []const T) []const T {
+pub inline fn SetUnion(comptime T: type, comptime As: []const T, comptime Bs: []const T) []const T {
     @setEvalBranchQuota((As.len + Bs.len) * 300);
-    var len: usize = 0;
-    const buf = comptime blk: {
-        var buf: [As.len + Bs.len]T = undefined;
-        for (As, 0..) |A, i| {
-            buf[i] = A;
-            len += 1;
+    const Ctx = struct {
+        pub fn eql(a: T, b: T) bool {
+            return a == b;
         }
-        outer: for (Bs) |B| {
-            for (0..len) |j| {
-                if (buf[j] == B) continue :outer;
-            }
-            buf[len] = B;
-            len += 1;
-        }
-        break :blk buf;
     };
 
-    return buf[0..len];
+    return SetUnionEql(T, As, Bs, Ctx);
 }
 
 pub fn SetUnionEql(comptime T: type, comptime As: anytype, comptime Bs: anytype, comptime EqlCtx: type) []const T {

@@ -180,7 +180,6 @@ pub fn StaticLenient(comptime T: type) type {
             const currentLen = self.len.load(.monotonic);
             if (currentLen == 0) return null;
 
-            //FIXME: This is not the tail
             const tailIdx = (self.head + currentLen - 1) % self.buffer.len;
             const tail = self.buffer[tailIdx];
 
@@ -208,7 +207,6 @@ pub fn StaticLenient(comptime T: type) type {
             const currentLen = self.len.load(.monotonic);
             if (currentLen == 0) return null;
 
-            //FIXME: This is not the tail
             const tailIdx = (self.head + currentLen - 1) % self.buffer.len;
 
             return &self.buffer[tailIdx];
