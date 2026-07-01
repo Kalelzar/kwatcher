@@ -106,7 +106,7 @@ pub fn withDefault(
             comptime Config: type,
         ) Return(category, Config, @TypeOf(dephub)) {
             if (@TypeOf(conf) != *Config) {
-                @compileError("Config mismatch! Expected " ++ @typeName(*Config) ++ " got " ++ @typeName(@TypeOf(config)));
+                @compileError("Config mismatch! Expected " ++ @typeName(*Config) ++ " got " ++ @typeName(@TypeOf(conf)));
             }
             return default(
                 category,

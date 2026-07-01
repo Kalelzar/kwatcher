@@ -232,11 +232,20 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                 const front = self.queue.peek();
                 if (front) |_| {
                     log.debug("T{d}: Trying", .{std.Thread.getCurrentId()});
-                    self.handle(true, injmap, rec) catch |e| {
-                        log.err("Caught error while draining: {s}", .{@errorName(e)});
+                    self.handle(true, injmap, rec) catch |e| switch (e) {
+                        error.Empty => {
+                            log.info("Queue drained. Shutting thread {d} down.", .{std.Thread.getCurrentId()});
+                            return;
+                        },
+                        error.Shutdown => {
+                            log.info("Shutdown thread {d} successfully.", .{std.Thread.getCurrentId()});
+                            return;
+                        },
+                        else => log.err("Caught error while draining: {s}", .{@errorName(e)}),
                     };
                     log.debug("T{d}: Drained 1", .{std.Thread.getCurrentId()});
                 } else {
+                    log.info("Queue drained. Shutting thread {d} down.", .{std.Thread.getCurrentId()});
                     return;
                 }
             }
@@ -248,7 +257,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
             injmap: []dep.DepCtx,
             rec: *recorder.Recorder,
         ) !void {
-            var maybe_next = if (is_draining) self.queue.tryPop(std.time.ns_per_ms * 5) orelse return else self.queue.pop();
+            var maybe_next = if (is_draining) self.queue.tryPop(std.time.ns_per_ms * 5) orelse return error.Empty else self.queue.pop();
 
             switch (maybe_next.event_type) {
                 .noop => {
@@ -264,6 +273,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                     } else {
                         log.debug("Draining. :)", .{});
                         _ = self.queue.push(maybe_next);
+                        return error.Shutdown;
                     }
                 },
                 inline else => |ev| {
