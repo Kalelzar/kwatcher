@@ -50,6 +50,10 @@
             .url = "git+https://github.com/karlseguin/http.zig?ref=master#1a4d53b95bc4ac6c84cbc081727428de40c8c635",
             .hash = "httpz-0.0.0-PNVzrNVOBwDlxyffzwONpI9j9dYqKWXxopU1ZCLt4C09",
         },
+        .zmpl = .{
+            .url = "git+https://github.com/Kalelzar/zmpl#6680cd0b64d88483929cc7426bb382ab8a834532",
+            .hash = "zmpl-0.0.1-SYFGBvCpAwBMy-Jq3m0JmYDjSUao_nxygGiePASA-SJj",
+        },
     },
     .paths = .{
         "build.zig",
