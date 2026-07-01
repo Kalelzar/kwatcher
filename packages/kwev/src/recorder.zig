@@ -43,6 +43,5 @@ pub const Recorder = struct {
             try self.rotate();
             try kwev.append(&self.writer, self.target, event);
         };
-        try self.writer.flush();
     }
 };

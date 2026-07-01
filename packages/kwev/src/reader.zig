@@ -55,7 +55,7 @@ pub const Reader = struct {
         }
 
         const end = self.reader.seek;
-        if (end < size - 12) {
+        if (end < size + 12) {
             std.log.err("Expected to read at least {d}, actually {d}", .{ size + 12, end });
             return error.FileCorrupt;
         }
