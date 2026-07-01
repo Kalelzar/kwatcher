@@ -84,7 +84,7 @@ pub fn SetBuilder(comptime Data: type, comptime Invariant: anytype) type {
                     inj: *dep.DepCtx,
                     data: Data,
                     invariant: *anyopaque,
-                ) anyerror!Data {
+                ) anyerror!?Data {
                     const types = comptime blk: {
                         const in_ti = @typeInfo(@TypeOf(Invariant)).@"struct";
                         var types: [in_ti.fields.len + 1]type = undefined;

@@ -183,6 +183,14 @@ pub fn autoCacheWithContexts(
             const C = struct {
                 var config: ?HotCold(Data) = null;
                 var contexts: TupleTToV(Context) = splatNull(Context);
+
+                pub fn load(comptime i: usize, inj2: *dep.DepCtx) !*Context[i] {
+                    return contexts[i] orelse blk: {
+                        @branchHint(.cold);
+                        contexts[i] = try inj2.require(*(Context[i]));
+                        break :blk contexts[i].?;
+                    };
+                }
             };
 
             const config = C.config orelse blk: {
@@ -197,22 +205,14 @@ pub fn autoCacheWithContexts(
             };
 
             inline for (0..Context.len) |i| {
-                var ctx = C.contexts[i] orelse blk: {
-                    @branchHint(.cold);
-                    C.contexts[i] = try inj.require(*(Context[i]));
-                    break :blk C.contexts[i].?;
-                };
+                var ctx = try C.load(i, inj);
 
                 if (try ctx.get(hash)) |r| {
                     if (comptime build_config.enable_metrics) {
                         try metrics.cacheHit(config.key, Context[i].id);
                     }
                     inline for (0..i) |j| {
-                        var other_context = C.contexts[j] orelse blk: {
-                            @branchHint(.cold);
-                            C.contexts[j] = try inj.require(*(Context[j]));
-                            break :blk C.contexts[j].?;
-                        };
+                        var other_context = try C.load(j, inj);
                         switch (@typeInfo(Data)) {
                             inline .@"struct" => {
                                 if (comptime @hasDecl(Data, "dupe")) {
@@ -237,11 +237,7 @@ pub fn autoCacheWithContexts(
             if (config.cold) |c| {
                 const data = try @call(.auto, c, .{ inj, invariant });
                 inline for (0..Context.len) |i| {
-                    var ctx = C.contexts[i] orelse blk: {
-                        @branchHint(.cold);
-                        C.contexts[i] = try inj.require(*(Context[i]));
-                        break :blk C.contexts[i].?;
-                    };
+                    var ctx = try C.load(i, inj);
                     try ctx.put(hash, data);
                     if (comptime build_config.enable_metrics) {
                         try metrics.cacheGrow(config.key, Context[i].id);
@@ -269,6 +265,14 @@ pub fn autoPushWithContexts(
             const C = struct {
                 var config: ?HotCold(Data) = null;
                 var contexts: TupleTToV(Context) = splatNull(Context);
+
+                pub fn load(comptime i: usize, inj2: *dep.DepCtx) !*Context[i] {
+                    return contexts[i] orelse blk: {
+                        @branchHint(.cold);
+                        contexts[i] = try inj2.require(*(Context[i]));
+                        break :blk contexts[i].?;
+                    };
+                }
             };
 
             const config = C.config orelse blk: {
@@ -283,11 +287,7 @@ pub fn autoPushWithContexts(
             };
 
             inline for (0..Context.len) |i| {
-                var ctx = C.contexts[i] orelse blk: {
-                    @branchHint(.cold);
-                    C.contexts[i] = try inj.require(*(Context[i]));
-                    break :blk C.contexts[i].?;
-                };
+                var ctx = try C.load(i, inj);
                 try ctx.put(hash, data);
                 if (comptime build_config.enable_metrics) {
                     try metrics.cacheGrow(config.key, Context[i].id);

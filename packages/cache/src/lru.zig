@@ -10,7 +10,7 @@ fn Node(comptime Data: type) type {
         data: Data,
         key: u64,
         pub fn underlying(self: @This()) Data {
-            return self;
+            return self.data;
         }
     };
 }
@@ -51,9 +51,27 @@ pub fn IndexedContext(
             },
         };
 
+        const RawHashContext = struct {
+            pub fn hash(self: @This(), key: u64) u32 {
+                _ = self;
+                return @truncate(key);
+            }
+
+            pub fn eql(self: @This(), a: u64, b: u64, b_index: usize) bool {
+                _ = self;
+                _ = b_index;
+                return a == b;
+            }
+        };
+
+        const MetaTable = if (key_type == .hash)
+            std.ArrayHashMapUnmanaged(u64, *Node(void), RawHashContext, false)
+        else
+            std.AutoArrayHashMapUnmanaged(u64, *Node(void));
+
         name: []const u8,
         buf: StorageContext,
-        metadata: std.AutoArrayHashMapUnmanaged(u64, *Node(void)),
+        metadata: MetaTable,
         allocator: std.mem.Allocator,
         prio: Priority,
 

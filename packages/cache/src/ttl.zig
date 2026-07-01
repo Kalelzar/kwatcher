@@ -7,7 +7,7 @@ fn Node(comptime Data: type) type {
         data: Data,
         expires_at: u64,
         pub fn underlying(self: @This()) Data {
-            return self;
+            return self.data;
         }
     };
 }
