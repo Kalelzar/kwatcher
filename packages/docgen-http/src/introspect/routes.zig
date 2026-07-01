@@ -96,7 +96,7 @@ fn Browser(comptime Docs: type) type {
                 return .{ .value = .{ .ok = .{ .key = body.captures.key, .operation = op } } };
             }
 
-            return notFound(Docs, try instanceId(depctx, allocator));
+            return .{ .value = notFound(Docs, try instanceId(depctx, allocator)) };
         }
 
         pub fn @"GET _introspect/http/{key}/op/{operationId}/try @httpTryForm"(
@@ -124,7 +124,7 @@ fn Browser(comptime Docs: type) type {
                 return .{ .value = .{ .ok = .{ .key = body.captures.key, .operation = op, .port = port } } };
             }
 
-            return notFoundHtml(Docs, try instanceId(depctx, allocator));
+            return .{ .value = notFound(Docs, try instanceId(depctx, allocator)) };
         }
     };
 }
@@ -145,33 +145,18 @@ fn Examples(comptime Docs: type) type {
                 return .{ .value = .{ .ok = .{ .key = body.captures.key, .operation = op } } };
             }
 
-            return notFoundHtml(Docs, try instanceId(depctx, allocator));
+            return .{ .value = notFound(Docs, try instanceId(depctx, allocator)) };
         }
     };
 }
 
-fn notFound(comptime Docs: type, instance: []const u8) http.data.Json(OpInfo(Docs), &.{ 200, 404 }) {
+fn notFound(comptime Docs: type, instance: []const u8) http.data.ApiResult(OpInfo(Docs), http.data.ProblemDetails, &.{ 200, 404 }) {
     return .{
-        .value = .{
-            .not_found = .{
-                .type = error.NotFound,
-                .title = "Operation not found",
-                .details = "No operation with that id is registered on this driver.",
-                .instance = instance,
-            },
-        },
-    };
-}
-
-fn notFoundHtml(comptime Docs: type, instance: []const u8) http.data.Html(OpInfo(Docs), &.{ 200, 404 }) {
-    return .{
-        .value = .{
-            .not_found = .{
-                .type = error.NotFound,
-                .title = "Operation not found",
-                .details = "No operation with that id is registered on this driver.",
-                .instance = instance,
-            },
+        .not_found = .{
+            .type = error.NotFound,
+            .title = "Operation not found",
+            .details = "No operation with that id is registered on this driver.",
+            .instance = instance,
         },
     };
 }

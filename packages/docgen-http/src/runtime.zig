@@ -219,14 +219,7 @@ fn typeString(a: std.mem.Allocator, schema: model.Schema) error{OutOfMemory}![]c
 /// that would break out of the literal.
 fn emitStr(w: *std.Io.Writer, s: []const u8) !void {
     try w.writeByte('"');
-    for (s) |c| switch (c) {
-        '"' => try w.writeAll("\\\""),
-        '\\' => try w.writeAll("\\\\"),
-        '\n' => try w.writeAll("\\n"),
-        '\r' => try w.writeAll("\\r"),
-        '\t' => try w.writeAll("\\t"),
-        else => try w.writeByte(c),
-    };
+    try std.zig.stringEscape(s, w);
     try w.writeByte('"');
 }
 

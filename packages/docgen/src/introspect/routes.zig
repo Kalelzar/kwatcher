@@ -56,6 +56,15 @@ fn Core(comptime Docs: type, comptime icons: []const KindIcon) type {
             return .{ .value = .{ .ok = .{ .title = "KW-IntrospectUI" } } };
         }
 
+        fn findDriver(kind: []const u8, key: []const u8) bool {
+            inline for (Docs.drivers) |D| {
+                if (std.mem.eql(u8, D.key, key) and std.mem.eql(u8, D.kind, kind)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         pub fn @"GET _introspect/{kind}/{key} @introspectDriver"(
             body: struct {
                 request: *http.Request,
@@ -65,10 +74,8 @@ fn Core(comptime Docs: type, comptime icons: []const KindIcon) type {
             depctx: *core.deps.DepCtx,
             allocator: core.mem.ScopedAllocator,
         ) !http.data.Html(Docs.DriverInfo, &.{ 200, 404 }) {
-            inline for (Docs.drivers) |D| {
-                if (std.mem.eql(u8, D.key, body.captures.key) and std.mem.eql(u8, D.kind, body.captures.kind)) {
-                    return .{ .value = .{ .ok = .{ .kind = D.kind, .key = D.key } } };
-                }
+            if (findDriver(body.captures.kind, body.captures.key)) {
+                return .{ .value = .{ .ok = .{ .kind = body.captures.kind, .key = body.captures.key } } };
             }
 
             const properties = try depctx.require(core.event.Properties);
@@ -95,14 +102,12 @@ fn Core(comptime Docs: type, comptime icons: []const KindIcon) type {
             depctx: *core.deps.DepCtx,
             allocator: core.mem.ScopedAllocator,
         ) !http.data.Html(IconCard, &.{ 200, 404 }) {
-            inline for (Docs.drivers) |D| {
-                if (std.mem.eql(u8, D.key, body.captures.key) and std.mem.eql(u8, D.kind, body.captures.kind)) {
-                    return .{ .value = .{ .ok = .{
-                        .kind = D.kind,
-                        .key = D.key,
-                        .fingerprint = fingerprintFor(D.kind),
-                    } } };
-                }
+            if (findDriver(body.captures.kind, body.captures.key)) {
+                return .{ .value = .{ .ok = .{
+                    .kind = body.captures.kind,
+                    .key = body.captures.key,
+                    .fingerprint = fingerprintFor(body.captures.kind),
+                } } };
             }
 
             const properties = try depctx.require(core.event.Properties);
@@ -127,10 +132,8 @@ fn Core(comptime Docs: type, comptime icons: []const KindIcon) type {
             }),
         ) http.data.Json(DriverResponse, &.{200}) {
             var active: Docs.DriverInfo = .{ .kind = "internal", .key = "internal" };
-            inline for (Docs.drivers) |D| {
-                if (std.mem.eql(u8, D.key, rq.query.key) and std.mem.eql(u8, D.kind, rq.query.kind)) {
-                    active = .{ .kind = D.kind, .key = D.key };
-                }
+            if (findDriver(rq.query.kind, rq.query.key)) {
+                active = .{ .kind = rq.query.kind, .key = rq.query.key };
             }
 
             return .{ .value = .{ .ok = .{ .drivers = Docs.drivers, .active = active } } };
