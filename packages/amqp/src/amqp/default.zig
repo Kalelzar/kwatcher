@@ -77,6 +77,10 @@ pub fn Static(comptime Context: type, comptime Config: type, comptime subpath: [
                 f.deinit();
                 self.fmt = null;
             }
+
+            if (comptime @hasDecl(Context, "deinit")) {
+                self.context.deinit(allocator);
+            }
         }
     };
 }

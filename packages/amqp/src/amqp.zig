@@ -631,7 +631,7 @@ pub fn DriverBuilder(
                                             };
                                         }
                                     }
-                                    var msg = client.consume(500000) catch |e| {
+                                    var msg = client.consume(1 * std.time.ns_per_s) catch |e| {
                                         std.log.warn(
                                             "Encountered an error '{s}' while consuming from queue.",
                                             .{@errorName(e)},
@@ -661,7 +661,7 @@ pub fn DriverBuilder(
                                                     );
 
                                                     _ = self.queue.?.tryPush(.{
-                                                        .event_type = .unrouted,
+                                                        .event_type = @field(ET, @tagName(key) ++ "_unrouted"),
                                                         .event_data = val,
                                                         .properties = .{
                                                             .correlation_id = if (correlation_id) |c|
@@ -697,7 +697,7 @@ pub fn DriverBuilder(
                                             );
 
                                             _ = self.queue.?.tryPush(.{
-                                                .event_type = .recv,
+                                                .event_type = @field(ET, @tagName(key) ++ "_recv"),
                                                 .event_data = val,
                                                 .properties = .{
                                                     .correlation_id = if (correlation_id) |c|
