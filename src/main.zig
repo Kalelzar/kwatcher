@@ -494,6 +494,8 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         .with(.public, kwatcher.default.config(http.middleware.Cors.Config, "middleware.cors"), allocator)
         // Register AMQP client pool and connection handling
         .with(.amqp, amqp.defaultFor(drivers.drivers, RouteContext), allocator)
+        // Register the type-erased cron scheduler shim (drives the introspection Timers tab)
+        .with(.cron, cron.defaultFor(drivers.drivers), allocator)
         // TODO: create a http.defaultFor
         .with(.public, kwatcher.default.config(http.Config, "driver.public"), allocator)
         // Register our custom counter as a static dependency

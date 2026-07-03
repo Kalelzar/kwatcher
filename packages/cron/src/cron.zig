@@ -28,13 +28,173 @@ pub const Meta = struct {
     expression: []const u8,
 };
 
+pub const TimingSource = union(enum) {
+    schedule: CronTemplate.VM.Schedule,
+    delay: i64,
+};
+
 pub const JobInfo = struct {
     oneshot: bool,
     scheduled_for: i64,
     kind: []const u8,
     id: []const u8,
     on_invoke_action: []const u8,
+    source: TimingSource,
 };
+
+/// Type-erased job identity. `route` carries the RouteKeys tag name (== the
+/// job's `R.id`); `anonymous` carries a dynamic timer id. Strings are borrowed
+/// from the caller — the scheduler never owns or frees them.
+pub const ShimId = union(enum) {
+    route: []const u8,
+    anonymous: []const u8,
+};
+
+/// Type-erased handle to a cron driver's scheduler.
+///
+/// The real `Yield(ET, EV).Scheduler` is parameterized by the app's event
+/// union and route enum — types only known once the driver set is assembled —
+/// so framework packages (e.g. the introspection UI) depend on this fixed
+/// vtable instead. All surface types are file-scope (`JobInfo`, `TimingSource`,
+/// `ShimId`), so unlike the AMQP shim no comptime parameter is needed.
+///
+/// Excluded from the erased surface: `once`/`after` (their payloads are the
+/// app event union; exposing them requires full-route-set instantiation, the
+/// way docgen sees the whole composition — future work) and `detach` (returns
+/// the driver's generic `Schedule`).
+pub const SchedulerShim = struct {
+    _queryFn: *const fn (*anyopaque, ShimId, std.mem.Allocator) anyerror!?JobInfo,
+    _listFn: *const fn (*anyopaque, std.mem.Allocator) anyerror![]JobInfo,
+    _cancelFn: *const fn (*anyopaque, ShimId) ?void,
+    _resurrectFn: *const fn (*anyopaque, []const u8) anyerror!void,
+    _triggerFn: *const fn (*anyopaque, ShimId) anyerror!?void,
+    _ctx: *anyopaque,
+
+    pub fn query(self: @This(), id: ShimId, allocator: std.mem.Allocator) !?JobInfo {
+        return self._queryFn(self._ctx, id, allocator);
+    }
+
+    pub fn list(self: @This(), allocator: std.mem.Allocator) ![]JobInfo {
+        return self._listFn(self._ctx, allocator);
+    }
+
+    pub fn cancel(self: @This(), id: ShimId) ?void {
+        return self._cancelFn(self._ctx, id);
+    }
+
+    pub fn resurrect(self: @This(), route_name: []const u8) !void {
+        return self._resurrectFn(self._ctx, route_name);
+    }
+
+    /// Fire any job (route or dynamic) ahead of schedule; an extra run, the
+    /// scheduled entry is untouched. Null = no such job.
+    pub fn trigger(self: @This(), id: ShimId) !?void {
+        return self._triggerFn(self._ctx, id);
+    }
+};
+
+/// Adapts a concrete cron `Scheduler` to the type-erased `SchedulerShim`
+/// vtable. Route names map to the driver's `RouteKeys` at runtime via
+/// `stringToEnum` — deliberately not `inline else` expansion.
+pub fn SchedulerBridge(comptime RealScheduler: type) type {
+    // Extract the driver's nested per-app types from method signatures.
+    const RouteKeys = @typeInfo(@TypeOf(RealScheduler.resurrect)).@"fn".params[1].type.?;
+    const Id = @typeInfo(@TypeOf(RealScheduler.cancel)).@"fn".params[1].type.?;
+
+    return struct {
+        real: RealScheduler,
+
+        fn toRealId(id: ShimId) ?Id {
+            return switch (id) {
+                .route => |name| .{ .route = std.meta.stringToEnum(RouteKeys, name) orelse return null },
+                .anonymous => |name| .{ .anonymous = name },
+            };
+        }
+
+        fn queryImpl(ctx: *anyopaque, id: ShimId, allocator: std.mem.Allocator) anyerror!?JobInfo {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            return self.real.query(toRealId(id) orelse return null, allocator);
+        }
+
+        fn listImpl(ctx: *anyopaque, allocator: std.mem.Allocator) anyerror![]JobInfo {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            return self.real.list(allocator);
+        }
+
+        fn cancelImpl(ctx: *anyopaque, id: ShimId) ?void {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            return self.real.cancel(toRealId(id) orelse return null);
+        }
+
+        fn resurrectImpl(ctx: *anyopaque, name: []const u8) anyerror!void {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            return self.real.resurrect(std.meta.stringToEnum(RouteKeys, name) orelse return error.UnknownRoute);
+        }
+
+        fn triggerImpl(ctx: *anyopaque, id: ShimId) anyerror!?void {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            return self.real.trigger(toRealId(id) orelse return null);
+        }
+
+        pub fn toShim(self: *@This()) SchedulerShim {
+            return .{
+                ._queryFn = &queryImpl,
+                ._listFn = &listImpl,
+                ._cancelFn = &cancelImpl,
+                ._resurrectFn = &resurrectImpl,
+                ._triggerFn = &triggerImpl,
+                ._ctx = @ptrCast(self),
+            };
+        }
+    };
+}
+
+/// DI factory wrapper that lazily builds a `SchedulerBridge` on first request.
+/// `shimSchedulerFac` depends on the concrete `RealScheduler`, which the DI
+/// system resolves from the `SchedulerCtx` the Server registers in `bind()`.
+pub fn BridgeShimCtx(comptime RealScheduler: type) type {
+    const BridgeType = SchedulerBridge(RealScheduler);
+    return struct {
+        bridge: ?BridgeType = null,
+
+        pub fn shimSchedulerFac(self: *@This(), real_sched: RealScheduler) SchedulerShim {
+            if (self.bridge == null) {
+                self.bridge = .{ .real = real_sched };
+            }
+            return self.bridge.?.toShim();
+        }
+    };
+}
+
+// NOTE: This assumes that category is the driver key, like amqp.defaultFor.
+/// Dephub extension registering the type-erased cron scheduler shim under
+/// `.all` (visible to every mount, including the private introspection UI).
+/// Wire with `.with(.<cron driver key>, cron.defaultFor(<registry>), allocator)`.
+pub fn defaultFor(comptime drv: core.DriverRegistry) type {
+    return struct {
+        pub fn apply(
+            dephub: anytype,
+            comptime category: anytype,
+            allocator: std.mem.Allocator,
+            comptime Config: type,
+        ) Return(category, Config, @TypeOf(dephub)) {
+            _ = allocator;
+            const drk: drv.DriverKeys() = category;
+            const Shim = BridgeShimCtx(drv.Schedulers()[@intFromEnum(drk)]);
+            const H = struct {
+                var shim = Shim{};
+            };
+            return dephub.static(.all, &H.shim);
+        }
+
+        pub fn Return(comptime category: anytype, comptime Config: type, comptime DH: type) type {
+            _ = Config;
+            const drk: drv.DriverKeys() = category;
+            const Shim = BridgeShimCtx(drv.Schedulers()[@intFromEnum(drk)]);
+            return DH.Static(.all, *Shim);
+        }
+    };
+}
 
 pub fn DriverBuilder(
     comptime driver_key: anytype,
@@ -101,8 +261,8 @@ pub fn DriverBuilder(
                                     .target = .{
                                         .event = event,
                                     },
-                                    .run_at = calcNext(std.time.timestamp() + 1, parsed),
-                                    .schedule = parsed,
+                                    .run_at = calcNext(std.time.timestamp() + 1, .{ .schedule = parsed }),
+                                    .source = .{ .schedule = parsed },
                                 };
                                 try self.parent.schedules.add(sch);
                                 self.parent.cond.broadcast();
@@ -127,7 +287,7 @@ pub fn DriverBuilder(
                                         .event = event,
                                     },
                                     .run_at = std.time.timestamp() + time_s,
-                                    .schedule = comptime .init("0 0 0 1 1 0"), // HACK: This is never read.
+                                    .source = .{ .delay = time_s },
                                 };
                                 try self.parent.schedules.add(sch);
                                 self.parent.cond.broadcast();
@@ -145,19 +305,54 @@ pub fn DriverBuilder(
                             }
 
                             pub fn cancel(self: @This(), target: Id) ?void {
+                                var schedule = self.detach(target) orelse return null;
+                                schedule.deinit(self.parent.schedules.allocator);
+                                return {};
+                            }
+
+                            pub fn detach(self: @This(), target: Id) ?Schedule {
                                 self.parent.mutex.lock();
                                 defer self.parent.mutex.unlock();
                                 const index = self.findJob(target) orelse return null;
-                                var schedule = self.parent.schedules.removeIndex(index);
-                                schedule.deinit(self.parent.schedules.allocator);
-                                return {};
+                                const schedule = self.parent.schedules.removeIndex(index);
+                                self.parent.cond.broadcast();
+                                return schedule;
+                            }
+
+                            pub fn resurrect(self: @This(), route: RouteKeys) !void {
+                                self.parent.mutex.lock();
+                                defer self.parent.mutex.unlock();
+                                const job = self.findJob(.{ .route = route });
+                                if (job != null) return;
+
+                                const now = std.time.timestamp();
+                                const id, const schedule = blk: switch (route) {
+                                    inline else => |r| {
+                                        const R = Routes[@intFromEnum(r)];
+                                        break :blk .{ R.id, R.schedule };
+                                    },
+                                };
+                                const next = calcNext(now, .{ .schedule = schedule });
+                                try self.parent.schedules.add(.{
+                                    .id = .{ .route = route },
+                                    .target = .{ .route = map.get(id).? },
+                                    .run_at = next,
+                                    .source = .{ .schedule = schedule },
+                                });
+                                self.parent.cond.broadcast();
                             }
 
                             pub fn query(self: @This(), job: Id, allocator: std.mem.Allocator) !?JobInfo {
                                 self.parent.mutex.lock();
                                 defer self.parent.mutex.unlock();
                                 const index = self.findJob(job) orelse return null;
-                                const schedule = self.parent.schedules.items[index];
+                                return try self.snapshotLocked(self.parent.schedules.items[index], allocator);
+                            }
+
+                            /// Project one queued schedule to a caller-owned JobInfo.
+                            /// `parent.mutex` must be held by the caller.
+                            fn snapshotLocked(self: @This(), schedule: Schedule, allocator: std.mem.Allocator) !JobInfo {
+                                _ = self;
                                 const on_invoke_action: []const u8 = try switch (schedule.target) {
                                     .route => |r| std.fmt.allocPrint(
                                         allocator,
@@ -184,27 +379,61 @@ pub fn DriverBuilder(
                                         }},
                                     ),
                                     .on_invoke_action = on_invoke_action,
-                                    // TODO: Add the schedule.
+                                    .source = schedule.source,
                                 };
                             }
 
-                            pub fn trigger(self: @This(), route: RouteKeys) !void {
-                                const value = @unionInit(
-                                    EV,
-                                    @tagName(key),
-                                    .{
-                                        .trigger_job = .{
-                                            .route = route,
-                                        },
-                                    },
-                                );
+                            /// Snapshot every pending job. The `id` and `on_invoke_action`
+                            /// strings in the returned JobInfos are duped into `allocator`
+                            /// and owned by the caller; `kind` is static memory. Order is
+                            /// heap order, not fire order.
+                            pub fn list(self: @This(), allocator: std.mem.Allocator) ![]JobInfo {
+                                self.parent.mutex.lock();
+                                defer self.parent.mutex.unlock();
+                                const items = self.parent.schedules.items;
+                                const out = try allocator.alloc(JobInfo, items.len);
+                                var done: usize = 0;
+                                errdefer {
+                                    for (out[0..done]) |ji| {
+                                        allocator.free(ji.id);
+                                        allocator.free(ji.on_invoke_action);
+                                    }
+                                    allocator.free(out);
+                                }
+                                for (items) |sch| {
+                                    out[done] = try self.snapshotLocked(sch, allocator);
+                                    done += 1;
+                                }
+                                return out;
+                            }
 
-                                const ev = E{
-                                    .event_data = value,
-                                    .event_type = .trigger_job,
+                            /// Fire a job ahead of schedule. This is always an *extra* run:
+                            /// the scheduled entry is untouched, so a oneshot triggered early
+                            /// still fires at its scheduled time as well. Null = no such job.
+                            pub fn trigger(self: @This(), target: Id) !?void {
+                                const ev: E = blk: {
+                                    self.parent.mutex.lock();
+                                    defer self.parent.mutex.unlock();
+                                    const index = self.findJob(target) orelse return null;
+                                    switch (self.parent.schedules.items[index].target) {
+                                        .route => |route| break :blk .{
+                                            .event_data = @unionInit(
+                                                EV,
+                                                @tagName(key),
+                                                .{
+                                                    .trigger_job = .{
+                                                        .route = route,
+                                                    },
+                                                },
+                                            ),
+                                            .event_type = @field(ET, @tagName(key) ++ "_trigger_job"),
+                                        },
+                                        .event => |event| break :blk event,
+                                    }
                                 };
 
-                                self.parent.queue.?.pushNoClobber(ev) catch |e| switch (e) {
+                                // Push outside the lock: the queue can block.
+                                _ = self.parent.queue.?.tryPush(ev, 100) catch |e| switch (e) {
                                     error.WouldBlock => {
                                         // FIXME: Words
                                         // Ideally we would want to be able to do:
@@ -219,6 +448,7 @@ pub fn DriverBuilder(
                                     },
                                     else => return e,
                                 };
+                                return {};
                             }
                         };
 
@@ -252,7 +482,7 @@ pub fn DriverBuilder(
                                 route: RouteKeys,
                                 event: E,
                             },
-                            schedule: CronTemplate.VM.Schedule,
+                            source: TimingSource,
 
                             pub fn deinit(self: *Schedule, allocator: std.mem.Allocator) void {
                                 self.id.deinit(allocator);
@@ -282,12 +512,12 @@ pub fn DriverBuilder(
 
                             const now = std.time.timestamp();
                             inline for (Routes, 0..) |R, i| {
-                                const next = calcNext(now, R.schedule);
+                                const next = calcNext(now, .{ .schedule = R.schedule });
                                 try q.add(.{
                                     .id = .{ .route = @enumFromInt(i) },
                                     .target = .{ .route = map.get(R.id).? },
                                     .run_at = next,
-                                    .schedule = R.schedule,
+                                    .source = .{ .schedule = R.schedule },
                                 });
                             }
                             return .{
@@ -333,72 +563,54 @@ pub fn DriverBuilder(
                         }
 
                         fn watch_inner(self: *@This()) void {
-                            var reserve: ?Schedule = null;
                             while (@atomicLoad(bool, &self.should_run, .acquire)) {
-                                self.watch_failing(&reserve) catch |e| {
+                                self.watch_failing() catch |e| {
                                     log.err("Cron loop failed with: {t}", .{e});
                                 };
                             }
                         }
 
-                        fn watch_failing(self: *@This(), reserve: *?Schedule) !void {
-                            self.mutex.lock(); // #1: This lock
-                            var sch = self.schedules.removeOrNull();
-                            {
-                                defer self.mutex.unlock(); // #1: Is always unlocked here. Very easy to miss.
-                                if (sch == null) {
-                                    self.cond.wait(&self.mutex);
-                                    return;
-                                } else {
-                                    if (reserve.*) |r| {
-                                        defer reserve.* = null;
-                                        self.schedules.add(r) catch @panic("Potential unsynchronized write. Cron queue was filled while under lock.");
-                                    }
-                                }
-                                // #1: Here ends critical section
-                            }
-
-                            var now = std.time.timestamp();
-                            const name = switch (sch.?.id) {
+                        fn jobName(sch: Schedule) []const u8 {
+                            return switch (sch.id) {
                                 .route => |r| @tagName(r),
                                 .anonymous => |a| a,
                             };
-                            while (now < sch.?.run_at) {
-                                log.info("Job '{s}' to fire in {d} seconds.", .{ name, @max(0, sch.?.run_at - now) });
-                                self.mutex.lock();
-                                self.cond.timedWait(&self.mutex, @as(u64, @intCast(@max(0, sch.?.run_at - now))) * std.time.ns_per_s) catch {
-                                    // We are using timeout to signal when we should run next rather than an error condition
-                                };
-                                // FIXME: We have to add the schedule back and get a new one.
-                                // We might ahve been woken up because a new schedule was added and that one might need to fire sooner
-                                self.mutex.unlock();
-                                if (!@atomicLoad(bool, &self.should_run, .acquire))
-                                    return;
-                                now = std.time.timestamp();
-                            }
-                            if (!sch.?.oneshot) {
-                                const next = calcNext(@max(now, sch.?.run_at), sch.?.schedule);
-                                log.info("Scheduling job '{s}' to fire in {d} seconds.", .{ name, @max(0, next - now) });
-                                sch.?.run_at = next;
+                        }
+
+                        fn watch_failing(self: *@This()) !void {
+                            const fired: Schedule = blk: {
                                 self.mutex.lock();
                                 defer self.mutex.unlock();
-                                // This can OOM but is unlikely
-                                // because we should have the original slot left
-                                // so long as it hasn't been filled with a oneshot.
-                                // That said, dropping a schedule is not an option here.
-                                // We are going to pop another one off right after
-                                // so space will be created that we can reuse.
-                                self.schedules.add(sch.?) catch |e| switch (e) {
-                                    error.OutOfMemory => {
-                                        reserve.* = sch;
-                                    },
-                                    else => return e,
-                                };
-                            }
-                            defer if (sch.?.oneshot) {
-                                sch.?.deinit(self.schedules.allocator);
+                                while (true) {
+                                    if (!@atomicLoad(bool, &self.should_run, .acquire)) return;
+                                    const head = self.schedules.peek() orelse {
+                                        self.cond.wait(&self.mutex);
+                                        continue;
+                                    };
+                                    const now = std.time.timestamp();
+                                    if (head.run_at <= now) {
+                                        const sch = self.schedules.remove();
+                                        if (!sch.oneshot) {
+                                            var next = sch;
+                                            next.run_at = calcNext(@max(now, sch.run_at), sch.source);
+                                            log.info("Scheduling job '{s}' to fire in {d} seconds.", .{ jobName(sch), @max(0, next.run_at - now) });
+                                            self.schedules.add(next) catch unreachable;
+                                        }
+                                        break :blk sch;
+                                    }
+                                    log.info("Job '{s}' to fire in {d} seconds.", .{ jobName(head), head.run_at - now });
+                                    self.cond.timedWait(&self.mutex, @as(u64, @intCast(head.run_at - now)) * std.time.ns_per_s) catch {
+                                        // We are using timeout to signal when we should run next rather than an error condition
+                                    };
+                                }
                             };
-                            switch (sch.?.target) {
+
+                            const name = jobName(fired);
+                            defer if (fired.oneshot) {
+                                var sch = fired;
+                                sch.deinit(self.schedules.allocator);
+                            };
+                            switch (fired.target) {
                                 .route => |route| {
                                     const data = @unionInit(EV, @tagName(key), .{
                                         .trigger_job = .{
@@ -639,14 +851,19 @@ pub fn RouteParser() type {
     };
 }
 
-pub fn calcNext(timestamp: i64, schedule: CronTemplate.VM.Schedule) i64 {
-    var candidate = timestamp + 1; // Start checking from next second
-    while (true) {
-        const n = nextOffset(schedule, candidate);
-        if (n == 0) {
-            return candidate;
-        }
-        candidate += n;
+pub fn calcNext(timestamp: i64, source: TimingSource) i64 {
+    switch (source) {
+        .delay => |delay| return timestamp + delay,
+        .schedule => |schedule| {
+            var candidate = timestamp + 1; // Start checking from next second
+            while (true) {
+                const n = nextOffset(schedule, candidate);
+                if (n == 0) {
+                    return candidate;
+                }
+                candidate += n;
+            }
+        },
     }
 }
 
@@ -658,41 +875,41 @@ test "Calculate next: 0 */5 * * * *" {
 
     try std.testing.expectEqual(
         300,
-        calcNext(0, schedule),
+        calcNext(0, .{ .schedule = schedule }),
     );
     try std.testing.expectEqual(
         600,
-        calcNext(300, schedule),
+        calcNext(300, .{ .schedule = schedule }),
     );
 
     try std.testing.expectEqual(
         300,
-        calcNext(5, schedule),
+        calcNext(5, .{ .schedule = schedule }),
     );
 
     try std.testing.expectEqual(
         300,
-        calcNext(299, schedule),
+        calcNext(299, .{ .schedule = schedule }),
     );
 
     try std.testing.expectEqual(
         3600,
-        calcNext(3300, schedule),
+        calcNext(3300, .{ .schedule = schedule }),
     );
 
     try std.testing.expectEqual(
         24 * 3600,
-        calcNext(24 * 3600 - 300, schedule),
+        calcNext(24 * 3600 - 300, .{ .schedule = schedule }),
     );
 
     try std.testing.expectEqual(
         31 * 24 * 3600,
-        calcNext(31 * 24 * 3600 - 300, schedule),
+        calcNext(31 * 24 * 3600 - 300, .{ .schedule = schedule }),
     );
 
     try std.testing.expectEqual(
         365 * 24 * 3600,
-        calcNext(365 * 24 * 3600 - 300, schedule),
+        calcNext(365 * 24 * 3600 - 300, .{ .schedule = schedule }),
     );
 }
 
@@ -704,25 +921,25 @@ test "Calculate next: 30 */5 * * * * (second-level offset)" {
     // Second 30 of minute 0
     try std.testing.expectEqual(
         30,
-        calcNext(0, schedule),
+        calcNext(0, .{ .schedule = schedule }),
     );
 
     // Second 30 of minute 5
     try std.testing.expectEqual(
         330,
-        calcNext(30, schedule),
+        calcNext(30, .{ .schedule = schedule }),
     );
 
     // From middle of minute 5, still lands on second 30
     try std.testing.expectEqual(
         330,
-        calcNext(300, schedule),
+        calcNext(300, .{ .schedule = schedule }),
     );
 
     // Second 30 of minute 10
     try std.testing.expectEqual(
         630,
-        calcNext(330, schedule),
+        calcNext(330, .{ .schedule = schedule }),
     );
 }
 
@@ -737,16 +954,16 @@ test "Calculate next: 0 0 0 1 * * (monthly on the 1st)" {
     const apr1: i64 = (31 + 28 + 31) * 24 * 3600;
 
     // Jan 1 00:00:00 → Feb 1 00:00:00
-    try std.testing.expectEqual(feb1, calcNext(jan1, schedule));
+    try std.testing.expectEqual(feb1, calcNext(jan1, .{ .schedule = schedule }));
 
     // Feb 1 00:00:00 → Mar 1 00:00:00
-    try std.testing.expectEqual(mar1, calcNext(feb1, schedule));
+    try std.testing.expectEqual(mar1, calcNext(feb1, .{ .schedule = schedule }));
 
     // Mar 1 00:00:00 → Apr 1 00:00:00
-    try std.testing.expectEqual(apr1, calcNext(mar1, schedule));
+    try std.testing.expectEqual(apr1, calcNext(mar1, .{ .schedule = schedule }));
 
     // Jan 31 23:59:59 → Feb 1 00:00:00
-    try std.testing.expectEqual(feb1, calcNext(feb1 - 1, schedule));
+    try std.testing.expectEqual(feb1, calcNext(feb1 - 1, .{ .schedule = schedule }));
 }
 
 test "Calculate next: 0 0 12 * * * (daily at noon)" {
@@ -757,13 +974,13 @@ test "Calculate next: 0 0 12 * * * (daily at noon)" {
     const noon: i64 = 12 * 3600;
 
     // Midnight → same day noon
-    try std.testing.expectEqual(noon, calcNext(0, schedule));
+    try std.testing.expectEqual(noon, calcNext(0, .{ .schedule = schedule }));
 
     // Noon → next day noon
-    try std.testing.expectEqual(noon + 24 * 3600, calcNext(noon, schedule));
+    try std.testing.expectEqual(noon + 24 * 3600, calcNext(noon, .{ .schedule = schedule }));
 
     // 1pm → next day noon
-    try std.testing.expectEqual(noon + 24 * 3600, calcNext(13 * 3600, schedule));
+    try std.testing.expectEqual(noon + 24 * 3600, calcNext(13 * 3600, .{ .schedule = schedule }));
 }
 
 fn nextOffset(schedule: CronTemplate.VM.Schedule, timestamp: i64) i64 {
@@ -796,7 +1013,7 @@ fn nextOffset(schedule: CronTemplate.VM.Schedule, timestamp: i64) i64 {
     }
 
     if (hoffset +| hour < 23 and hour != 23 and hoffset != 0) {
-        return @as(i64, hoffset) * 60 * 60 - minute * 60 - second;
+        return @as(i64, hoffset) * 60 * 60 - @as(i64, minute) * 60 - second;
     }
 
     if (doffset != 0 and doffset +| day < daysInMonth) {
@@ -881,5 +1098,89 @@ comptime {
     const Sch = Ds.SchedulerMap();
     _ = Sch(.cron);
 
+    // Shim machinery: generics are lazily analyzed, so force instantiation
+    // against the dummy driver's real scheduler type.
+    const Bridge = SchedulerBridge(Sch(.cron));
+    const Ctx = BridgeShimCtx(Sch(.cron));
+    _ = &Bridge.toShim;
+    _ = &Ctx.shimSchedulerFac;
+
     _ = E;
+}
+
+test "SchedulerShim: list/query/cancel/resurrect through the erased vtable" {
+    const Rs = struct {
+        pub fn @"simple 0 */5 * * * *"() void {}
+        pub fn @"withDI 0 0 12 * * *"(dependency: i64) void {
+            _ = dependency;
+        }
+    };
+
+    const Drv = Driver
+        .new(.cron)
+        .listen(false)
+        .jobs(0)
+        .routes(From(Rs))
+        .build();
+
+    const Ds = core.driver.Drivers.new().registerHandler(Drv);
+    // Index 0 is the auto-seeded internal driver; our cron handler is at 1.
+    const Handler = Ds.Handlers(Ds.EventList(), Ds.EventValues())[1];
+    const a = std.testing.allocator;
+
+    var h = try Handler.init(a);
+    defer h.deinit(a);
+
+    var bridge = SchedulerBridge(@TypeOf(h.scheduler())){ .real = h.scheduler() };
+    const shim = bridge.toShim();
+
+    // Both static route jobs are visible through the erased list.
+    {
+        const jobs = try shim.list(a);
+        defer {
+            for (jobs) |ji| {
+                a.free(ji.id);
+                a.free(ji.on_invoke_action);
+            }
+            a.free(jobs);
+        }
+        try std.testing.expectEqual(@as(usize, 2), jobs.len);
+        for (jobs) |ji| {
+            try std.testing.expectEqualStrings("route", ji.kind);
+            try std.testing.expect(std.mem.eql(u8, ji.id, "simple") or std.mem.eql(u8, ji.id, "withDI"));
+            try std.testing.expect(!ji.oneshot);
+        }
+    }
+
+    // Query by route name; unknown names are not-found, not errors.
+    {
+        const ji = (try shim.query(.{ .route = "simple" }, a)).?;
+        defer {
+            a.free(ji.id);
+            a.free(ji.on_invoke_action);
+        }
+        try std.testing.expectEqualStrings("simple", ji.id);
+    }
+    try std.testing.expectEqual(@as(?JobInfo, null), try shim.query(.{ .route = "nonsense" }, a));
+    try std.testing.expectEqual(@as(?JobInfo, null), try shim.query(.{ .anonymous = "nope" }, a));
+
+    // Cancel a route job, confirm it is gone, resurrect it, confirm it is back.
+    try std.testing.expect(shim.cancel(.{ .route = "simple" }) != null);
+    try std.testing.expectEqual(@as(?JobInfo, null), try shim.query(.{ .route = "simple" }, a));
+    try std.testing.expect(shim.cancel(.{ .route = "simple" }) == null);
+
+    try shim.resurrect("simple");
+    {
+        const ji = (try shim.query(.{ .route = "simple" }, a)).?;
+        defer {
+            a.free(ji.id);
+            a.free(ji.on_invoke_action);
+        }
+        try std.testing.expectEqualStrings("simple", ji.id);
+    }
+    try std.testing.expectError(error.UnknownRoute, shim.resurrect("nonsense"));
+
+    // Trigger's not-found paths return before touching the (unbound) queue.
+    try std.testing.expect((try shim.trigger(.{ .route = "nonsense" })) == null);
+    try std.testing.expect((try shim.trigger(.{ .anonymous = "nope" })) == null);
 }
