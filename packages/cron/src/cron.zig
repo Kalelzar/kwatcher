@@ -21,11 +21,26 @@ const Root = @This();
 
 pub const Driver = shared.DriverBuilder(DriverBuilder, false);
 
+pub const VMSchedule = CronTemplate.VM.Schedule;
+
+pub const Meta = struct {
+    raw: []const u8,
+    expression: []const u8,
+};
+
+pub const JobInfo = struct {
+    oneshot: bool,
+    scheduled_for: i64,
+    kind: []const u8,
+    id: []const u8,
+    on_invoke_action: []const u8,
+};
+
 pub fn DriverBuilder(
     comptime driver_key: anytype,
     comptime listen: bool,
     comptime _jobs: comptime_int,
-    comptime Routes: []const type,
+    comptime _Routes: []const type,
     comptime ErrorHandler: type,
 ) *const fn (comptime u12) type {
     _ = ErrorHandler;
@@ -36,6 +51,7 @@ pub fn DriverBuilder(
                 pub const jobs = _jobs;
                 pub const key = driver_key;
                 pub const kind = Root.kind;
+                pub const Routes = _Routes;
                 pub const RouteKeys = shared.EnumerateRoutes(Routes);
                 pub const CallContext = shared.UniteCallContext(Routes);
                 pub const Dependencies = shared.MergeDeps(Routes, &.{std.mem.Allocator});
@@ -64,11 +80,23 @@ pub fn DriverBuilder(
                         pub const Scheduler = struct {
                             parent: *Self,
 
-                            pub fn once(self: @This(), comptime schedule: []const u8, event: E) !void {
+                            pub fn once(self: @This(), comptime schedule: []const u8, event: E) !Id {
+                                const H = struct {
+                                    var seq: u64 = 0;
+                                };
+
+                                const parsed = comptime CronTemplate.VM.Schedule.init(schedule);
+                                const alloc = self.parent.schedules.allocator;
+                                const id = try std.fmt.allocPrint(alloc, "{t}_{s}once_{d}", .{
+                                    event.event_type,
+                                    (if (parsed.name) |name| name ++ "_" else ""),
+                                    @atomicRmw(u64, &H.seq, .Add, 1, .monotonic),
+                                });
+
                                 self.parent.mutex.lock();
                                 defer self.parent.mutex.unlock();
-                                const parsed = comptime CronTemplate.VM.Schedule.init(schedule);
                                 const sch = Schedule{
+                                    .id = .{ .anonymous = id },
                                     .oneshot = true,
                                     .target = .{
                                         .event = event,
@@ -78,21 +106,86 @@ pub fn DriverBuilder(
                                 };
                                 try self.parent.schedules.add(sch);
                                 self.parent.cond.broadcast();
+                                return .{ .anonymous = id };
                             }
 
-                            pub fn after(self: @This(), time_s: i64, event: E) !void {
+                            pub fn after(self: @This(), time_s: i64, event: E) !Id {
+                                const H = struct {
+                                    var seq: u64 = 0;
+                                };
+                                const alloc = self.parent.schedules.allocator;
+                                const id = try std.fmt.allocPrint(alloc, "{t}_after_{d}", .{
+                                    event.event_type,
+                                    @atomicRmw(u64, &H.seq, .Add, 1, .monotonic),
+                                });
                                 self.parent.mutex.lock();
                                 defer self.parent.mutex.unlock();
                                 const sch = Schedule{
                                     .oneshot = true,
+                                    .id = .{ .anonymous = id },
                                     .target = .{
                                         .event = event,
                                     },
                                     .run_at = std.time.timestamp() + time_s,
-                                    .schedule = comptime .init("0 0 0 1 1 0"),
+                                    .schedule = comptime .init("0 0 0 1 1 0"), // HACK: This is never read.
                                 };
                                 try self.parent.schedules.add(sch);
                                 self.parent.cond.broadcast();
+                                return .{ .anonymous = id };
+                            }
+
+                            fn findJob(self: @This(), target: Id) ?usize {
+                                var it = self.parent.schedules.iterator();
+                                while (it.next()) |n| {
+                                    if (n.id.eql(target)) {
+                                        return it.count - 1;
+                                    }
+                                }
+                                return null;
+                            }
+
+                            pub fn cancel(self: @This(), target: Id) ?void {
+                                self.parent.mutex.lock();
+                                defer self.parent.mutex.unlock();
+                                const index = self.findJob(target) orelse return null;
+                                var schedule = self.parent.schedules.removeIndex(index);
+                                schedule.deinit(self.parent.schedules.allocator);
+                                return {};
+                            }
+
+                            pub fn query(self: @This(), job: Id, allocator: std.mem.Allocator) !?JobInfo {
+                                self.parent.mutex.lock();
+                                defer self.parent.mutex.unlock();
+                                const index = self.findJob(job) orelse return null;
+                                const schedule = self.parent.schedules.items[index];
+                                const on_invoke_action: []const u8 = try switch (schedule.target) {
+                                    .route => |r| std.fmt.allocPrint(
+                                        allocator,
+                                        "route '{t}'",
+                                        .{r},
+                                    ),
+                                    .event => |e| std.fmt.allocPrint(
+                                        allocator,
+                                        "trigger '{t}'", // TODO: Maybe include some event values?
+                                        .{e.event_type},
+                                    ),
+                                };
+                                errdefer allocator.free(on_invoke_action);
+                                return .{
+                                    .oneshot = schedule.oneshot,
+                                    .scheduled_for = schedule.run_at,
+                                    .kind = @tagName(schedule.id),
+                                    .id = try std.fmt.allocPrint(
+                                        allocator,
+                                        "{s}",
+                                        .{switch (schedule.id) {
+                                            .route => |r| @tagName(r),
+                                            .anonymous => |a| a,
+                                        }},
+                                    ),
+                                    .on_invoke_action = on_invoke_action,
+                                    // TODO: Add the schedule.
+                                };
                             }
 
                             pub fn trigger(self: @This(), route: RouteKeys) !void {
@@ -129,7 +222,30 @@ pub fn DriverBuilder(
                             }
                         };
 
+                        const Id = union(enum) {
+                            route: RouteKeys,
+                            anonymous: []const u8,
+
+                            pub fn eql(self: Id, other: Id) bool {
+                                if (std.meta.activeTag(self) != std.meta.activeTag(other)) return false;
+                                return switch (self) {
+                                    .route => |r| r == other.route,
+                                    .anonymous => |a| std.mem.eql(u8, a, other.anonymous),
+                                };
+                            }
+
+                            pub fn deinit(self: *Id, allocator: std.mem.Allocator) void {
+                                switch (self.*) {
+                                    .route => {},
+                                    .anonymous => |a| {
+                                        allocator.free(a);
+                                    },
+                                }
+                            }
+                        };
+
                         const Schedule = struct {
+                            id: Id,
                             oneshot: bool = false,
                             run_at: i64,
                             target: union(enum) {
@@ -137,6 +253,10 @@ pub fn DriverBuilder(
                                 event: E,
                             },
                             schedule: CronTemplate.VM.Schedule,
+
+                            pub fn deinit(self: *Schedule, allocator: std.mem.Allocator) void {
+                                self.id.deinit(allocator);
+                            }
                         };
 
                         const SchCtx = struct {};
@@ -161,9 +281,10 @@ pub fn DriverBuilder(
                             var q = std.PriorityQueue(Schedule, SchCtx, compareSchedule).init(allocator, .{});
 
                             const now = std.time.timestamp();
-                            inline for (Routes) |R| {
+                            inline for (Routes, 0..) |R, i| {
                                 const next = calcNext(now, R.schedule);
                                 try q.add(.{
+                                    .id = .{ .route = @enumFromInt(i) },
                                     .target = .{ .route = map.get(R.id).? },
                                     .run_at = next,
                                     .schedule = R.schedule,
@@ -178,6 +299,11 @@ pub fn DriverBuilder(
                             _ = allocator;
                             self.mutex.lock();
                             defer self.mutex.unlock();
+                            var iter = self.schedules.iterator();
+                            while (iter.next()) |*n| {
+                                // HACK: Const
+                                @constCast(n).deinit(self.schedules.allocator);
+                            }
                             self.schedules.deinit();
                         }
 
@@ -233,9 +359,9 @@ pub fn DriverBuilder(
                             }
 
                             var now = std.time.timestamp();
-                            const name = switch (sch.?.target) {
+                            const name = switch (sch.?.id) {
                                 .route => |r| @tagName(r),
-                                .event => |e| @tagName(e.event_type),
+                                .anonymous => |a| a,
                             };
                             while (now < sch.?.run_at) {
                                 log.info("Job '{s}' to fire in {d} seconds.", .{ name, @max(0, sch.?.run_at - now) });
@@ -269,6 +395,9 @@ pub fn DriverBuilder(
                                     else => return e,
                                 };
                             }
+                            defer if (sch.?.oneshot) {
+                                sch.?.deinit(self.schedules.allocator);
+                            };
                             switch (sch.?.target) {
                                 .route => |route| {
                                     const data = @unionInit(EV, @tagName(key), .{
@@ -344,11 +473,13 @@ pub fn RouteBase(
     comptime sched: CronTemplate.VM.Schedule,
     comptime HandlerFac: anytype,
     comptime parsed_id: []const u8,
+    comptime route_meta: Meta,
 ) type {
     return struct {
         pub const Handler = HandlerFac(@This());
         pub const schedule = sched;
         pub const id = parsed_id;
+        pub const meta = route_meta;
 
         pub const CallContext = Handler.CallContext;
         pub const Dependencies = Handler.Dependencies;
@@ -360,6 +491,7 @@ pub fn RouteBase(
                 schedule,
                 NextHandler,
                 parsed_id,
+                route_meta,
             );
         }
 
@@ -368,11 +500,12 @@ pub fn RouteBase(
                 schedule,
                 NextHandlerFac(HandlerFac).make,
                 parsed_id,
+                route_meta,
             );
         }
 
         pub fn requires(comptime ct: anytype) void {
-            if (comptime !meta.hasKey(CapabilityType, ct)) {
+            if (comptime !core.meta.hasKey(CapabilityType, ct)) {
                 @compileError(
                     "Required capability '" ++ @tagName(ct) ++ "' is not supported by CRON routes.",
                 );
@@ -380,7 +513,7 @@ pub fn RouteBase(
         }
 
         pub fn satisfies(comptime ct: anytype) bool {
-            return meta.hasKey(CapabilityType, ct);
+            return core.meta.hasKey(CapabilityType, ct);
         }
 
         pub fn mod(
@@ -391,6 +524,7 @@ pub fn RouteBase(
                     schedule,
                     HandlerFac,
                     n,
+                    route_meta,
                 ),
             };
         }
@@ -494,7 +628,10 @@ pub fn RouteParser() type {
                     }
                 };
 
-                const RB = RouteBase(schedule, H.make, job_name);
+                const RB = RouteBase(schedule, H.make, job_name, .{
+                    .raw = fnname,
+                    .expression = std.mem.trim(u8, fnname[job_name.len..], " "),
+                });
 
                 return self.extend(RB);
             }
@@ -502,7 +639,7 @@ pub fn RouteParser() type {
     };
 }
 
-fn calcNext(timestamp: i64, schedule: CronTemplate.VM.Schedule) i64 {
+pub fn calcNext(timestamp: i64, schedule: CronTemplate.VM.Schedule) i64 {
     var candidate = timestamp + 1; // Start checking from next second
     while (true) {
         const n = nextOffset(schedule, candidate);
