@@ -12,6 +12,7 @@ const httpz = @import("httpz");
 
 const introspect = @import("kw-introspect");
 const introspect_http = @import("kw-introspect--http");
+const introspect_cron = @import("kw-introspect--cron");
 
 const docs = @import("kw-gen--docs");
 
@@ -374,7 +375,7 @@ const cron_driver = cron.Driver
 /// The private introspection-UI mount (a second `.private` HTTP driver) and its registry/dep
 /// wiring, all hardcoded in the library — see `kw-introspect`'s `Mount`. The docs manifest and
 /// the http backend are threaded in.
-const introspection = introspect.Mount(docs, .{introspect_http});
+const introspection = introspect.Mount(docs, .{ introspect_http, introspect_cron });
 
 const http_driver = http.Driver
     .new(.public)

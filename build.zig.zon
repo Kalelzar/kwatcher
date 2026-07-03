@@ -40,6 +40,9 @@
         .kw_docgen_amqp = .{
             .path = "packages/docgen-amqp",
         },
+        .kw_docgen_cron = .{
+            .path = "packages/docgen-cron",
+        },
         .kw_asyncapi = .{
             .path = "packages/asyncapi",
         },

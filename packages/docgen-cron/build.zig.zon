@@ -1,0 +1,29 @@
+.{
+    .name = .kw_docgen_cron,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0x83ad56b05781403c,
+    .dependencies = .{
+        .kw_docindex = .{
+            .path = "../docindex",
+        },
+        .kw_core = .{
+            .path = "../core",
+        },
+        .kw_http = .{
+            .path = "../http",
+        },
+        .kw_http_template = .{
+            .path = "../kw-http-template",
+        },
+        .kw_cron = .{
+            .path = "../cron",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "templates",
+    },
+}

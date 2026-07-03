@@ -43,8 +43,13 @@ fn wireApp(
         .optimize = optimize,
         .openapi_version = openapi_version,
     });
+    const kw_docgen_cron_dep = b.dependency("kw_docgen_cron", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const kw_introspect = kw_docgen_dep.module("kw-introspect");
     const kw_introspect_http = kw_docgen_http_dep.module("kw-introspect--http");
+    const kw_introspect_cron = kw_docgen_cron_dep.module("kw-introspect--cron");
 
     // The template machinery owns its own zmpl dependency; we hand it every contributing
     // template source (each with a prefix namespace) and it returns a module wired to a zmpl
@@ -57,6 +62,7 @@ fn wireApp(
         .sources = &.{
             http_template.packageSource(kw_docgen_dep, "core", &.{"templates"}),
             http_template.packageSource(kw_docgen_http_dep, "http", &.{"templates"}),
+            http_template.packageSource(kw_docgen_cron_dep, "cron", &.{"templates"}),
         },
     });
 
@@ -65,6 +71,7 @@ fn wireApp(
     // (whose manifest covers the core + http prefixes).
     kw_introspect.addImport("kw-http-template", kw_http_template);
     kw_introspect_http.addImport("kw-http-template", kw_http_template);
+    kw_introspect_cron.addImport("kw-http-template", kw_http_template);
 
     // Imports:
     app.addImport("kw-core", kw_core);
@@ -77,6 +84,7 @@ fn wireApp(
     app.addImport("httpz", httpz);
     app.addImport("kw-introspect", kw_introspect);
     app.addImport("kw-introspect--http", kw_introspect_http);
+    app.addImport("kw-introspect--cron", kw_introspect_cron);
 
     return app;
 }
@@ -173,6 +181,11 @@ pub fn build(b: *std.Build) !void {
         .asyncapi_version = asyncapi_version,
     }).module("kw-docgen--amqp");
 
+    const kw_docgen_cron = b.dependency("kw_docgen_cron", .{
+        .target = gen_target,
+        .optimize = optimize,
+    }).module("kw-docgen--cron");
+
     // Host-built copy of the app for the generators to introspect; only needed when the
     // installed app isn't itself host-native. `null` lets the helper derive it from the
     // consumer (reusing the installed app's modules).
@@ -191,7 +204,7 @@ pub fn build(b: *std.Build) !void {
         .entrypoint = entrypoint,
         .backends = &.{
             .{ .kind = "http", .module = kw_docgen_http },
-            .{ .kind = "cron", .module = kw_docgen_none },
+            .{ .kind = "cron", .module = kw_docgen_cron },
             .{ .kind = "amqp", .module = kw_docgen_amqp },
             .{ .kind = "action", .module = kw_docgen_none },
             .{ .kind = "signal", .module = kw_docgen_none },
