@@ -116,7 +116,7 @@ const AmqpRoutes = struct {
 /// Cron route handlers.
 /// Function names follow the pattern: "job_name schedule"
 const CronRoutes = struct {
-    /// Triggers every 5 seconds (second minute hour day month weekday)
+    /// Triggers every 5 seconds.
     pub fn @"heartbeat_tick */5 * * * * *"(inj: *core.deps.DepCtx) !void {
         const scheduler = try inj.require(Scheduler(.amqp));
         const timestamp = std.time.microTimestamp();
@@ -134,6 +134,22 @@ const CronRoutes = struct {
 const ActionRoutes = struct {
     pub fn greet(ctx: struct { []const u8 }) void {
         log.info("[action:greet] {s}", .{ctx.@"0"});
+    }
+
+    // TODO: This would ideally take in a union for both anon and named timers.
+    pub fn cancel(
+        ctx: struct { []const u8 },
+        inj: *core.deps.DepCtx,
+        persistent: std.mem.Allocator,
+    ) !void {
+        defer persistent.free(ctx.@"0");
+        log.info("Cancelling job: {s}", .{ctx.@"0"});
+        const scheduler = try inj.require(Scheduler(.cron));
+        if (scheduler.cancel(.{ .anonymous = ctx.@"0" })) |_| {
+            log.info("Job cancelled successfully: {s}", .{ctx.@"0"});
+        } else {
+            log.info("Job was already done: {s}", .{ctx.@"0"});
+        }
     }
 };
 
@@ -165,14 +181,25 @@ const HTTPRoutes = struct {
         return &.{};
     }
 
-    pub fn @"GET /api/v1/ok @okExample"(_: http.data.Request(null), inj: *core.deps.DepCtx) !http.data.Json(
+    pub fn @"GET /api/v1/ok @okExample"(
+        _: http.data.Request(null),
+        inj: *core.deps.DepCtx,
+        persistent: std.mem.Allocator,
+    ) !http.data.Json(
         HeartbeatMessage,
         .{.ok},
     ) {
         const act: Scheduler(.action) = try inj.require(Scheduler(.action));
         const scron: Scheduler(.cron) = try inj.require(Scheduler(.cron));
         const ev = try act.callLater(.{ .greet = .{"hello from /ok"} }, .{ .inj = inj });
-        try scron.after(5, ev);
+        const id = try scron.after(5, ev);
+        log.info("Scheduled: {s}", .{id.anonymous});
+
+        // The idea is that we schedule the job to be canceled if it has taken too long to run.
+        // A better example would be debouncing, we can cache the id of the last job we emitted here and cancel the last one.
+        const cev = try act.callLater(.{ .cancel = .{try persistent.dupe(u8, id.anonymous)} }, .{ .inj = inj });
+        const cid = try scron.after(8, cev);
+        log.info("Scheduled: {s}", .{cid.anonymous});
         return .{
             .value = .{
                 .ok = .{
