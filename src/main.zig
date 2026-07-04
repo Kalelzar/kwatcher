@@ -38,6 +38,7 @@ const log = std.log.scoped(.example);
 /// The application configuration schema.
 /// This maps to a JSON config file (e.g., example.json)
 pub const Config = struct {
+    server: kwatcher.server.Config = .{},
     driver: struct {
         amqp: core.config.BaseConfig,
         public: http.Config,
@@ -491,6 +492,8 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         }), allocator)
         // Register app-specific config resolver
         .with(.all, kwatcher.default.config(AppConfig, "app"), allocator)
+        // Register the base server's own config (kwev recording directory etc.)
+        .with(.all, kwatcher.default.config(kwatcher.server.Config, "server"), allocator)
         .with(.public, kwatcher.default.config(http.middleware.Cors.Config, "middleware.cors"), allocator)
         // Register AMQP client pool and connection handling
         .with(.amqp, amqp.defaultFor(drivers.drivers, RouteContext), allocator)

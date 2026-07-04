@@ -26,6 +26,18 @@ const PropCtx = struct {
     props: Props,
 };
 
+/// Configuration for the base server itself. Apps expose it in their config
+/// file and register it like any other config subtree:
+/// `.with(.all, kwatcher.default.config(kwatcher.server.Config, "server"), allocator)`.
+/// When no app registers it, every option falls back to its default.
+pub const Config = struct {
+    kwev: struct {
+        /// The directory event recordings are written to. Created on
+        /// startup if missing.
+        base_dir: []const u8 = ".",
+    } = .{},
+};
+
 pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
     const EventType = D.EventList();
     const EventValues = D.EventValues();
@@ -49,6 +61,12 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
         const Self = @This();
 
         should_run: bool,
+        /// Taken once at startup and prefixed onto every recorder file so
+        /// runs never overwrite each other's recordings.
+        run_stamp: i64,
+        /// Where recorder files are written; a slice into the app's config,
+        /// which outlives the server.
+        kwev_base_dir: []const u8,
         consumers: u8,
         allocator: std.mem.Allocator,
         queue: MCMPQueue(E),
@@ -59,14 +77,33 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
         rand: std.Random.Xoshiro256 = std.Random.DefaultPrng.init(0),
 
         pub fn init(alloc: std.mem.Allocator, context: _Deps, consumers: u8) !Self {
-            var f = try kwev.KWEV.init("static.kwev", 512 * 1024);
-            defer f.deinit();
-            const fs = try kwev.inscribe(&f, D);
-            try f.finalize(fs);
+            const run_stamp = std.time.milliTimestamp();
+            const kwev_base_dir = resolveKwevBaseDir(context);
+            try std.fs.cwd().makePath(kwev_base_dir);
+
+            // Stage the definitions file as .part and only give it its real
+            // name once fully inscribed, so a crash can't leave a
+            // half-written file under the name the event files link to.
+            var name_buf: [256]u8 = undefined;
+            const part_name = try std.fmt.bufPrint(
+                &name_buf,
+                "{s}/{d}-static.kwev.part",
+                .{ kwev_base_dir, run_stamp },
+            );
+            const name = part_name[0 .. part_name.len - ".part".len];
+            {
+                var f = try kwev.KWEV.init(part_name, 512 * 1024);
+                defer f.deinit();
+                const fs = try kwev.inscribe(&f, D);
+                try f.finalize(fs);
+            }
+            try std.fs.cwd().rename(part_name, name);
 
             const size = 1024;
             return .{
                 .should_run = true,
+                .run_stamp = run_stamp,
+                .kwev_base_dir = kwev_base_dir,
                 .allocator = alloc,
                 .queue = .init(try alloc.alignedAlloc(
                     E,
@@ -76,6 +113,23 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                 .deps = context.become(Deps),
                 .consumers = consumers,
             };
+        }
+
+        /// Pulls the server config out of the dependency graph the same way
+        /// drivers get theirs. Apps that don't register it get defaults.
+        fn resolveKwevBaseDir(context: _Deps) []const u8 {
+            const default_dir = (Config{}).kwev.base_dir;
+            var buffer: [8 * 1024]u8 = undefined;
+            var fba = std.heap.FixedBufferAllocator.init(&buffer);
+            var deps = context;
+            var ctx = deps.compile(.internal, .scoped, fba.allocator()) catch return default_dir;
+            deps.prepare(&ctx, .internal, .scoped, fba.allocator()) catch return default_dir;
+            defer _Deps.reset(&ctx, .internal, .scoped, fba.allocator());
+            const conf = ctx.require(*Root.Config) catch {
+                log.debug("No server config registered; kwev files go to '{s}'", .{default_dir});
+                return default_dir;
+            };
+            return conf.kwev.base_dir;
         }
 
         pub fn deinit(self: *Self) void {
@@ -193,10 +247,19 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
             var fba = std.heap.FixedBufferAllocator.init(&buffer);
             var driver_map: [D.drivers.len]dep.DepCtx = undefined;
             var rec: recorder.Recorder = undefined;
+            var static_name_buf: [64]u8 = undefined;
+            const static_name = std.fmt.bufPrint(
+                &static_name_buf,
+                "{d}-static.kwev",
+                .{self.run_stamp},
+            ) catch unreachable;
             recorder.Recorder.initPinned(
                 &rec,
                 std.Thread.getCurrentId(),
                 256 * 1024,
+                self.run_stamp,
+                self.kwev_base_dir,
+                static_name,
             ) catch unreachable;
             defer rec.deinit();
             inline for (D.drivers, 0..) |Driver, i| {
