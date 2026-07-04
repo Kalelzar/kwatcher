@@ -6,6 +6,7 @@ pub const ChunkType = enum {
     event_type,
     link,
     event,
+    streamed_event,
     eof,
 };
 
@@ -64,12 +65,41 @@ pub const Event = struct {
     };
 };
 
+/// A terminal chunk written by rolling recorders. It diverges from the
+/// regular chunk framing: no size field and no trailing chunk CRC. Instead it
+/// carries a per-chunk random salt, self-delimiting records (each with its own
+/// CRC over salt || size || body), and a 44-byte end marker. Mutually
+/// exclusive with EOF!; only further SEVT chunks may follow it.
+pub const StreamedEvent = struct {
+    salt: [32]u8,
+    records: []const Event.EventData,
+    /// False when the chunk was torn: `records` holds only the valid prefix
+    /// and all bytes beyond it are untrusted.
+    sealed: bool = true,
+
+    /// A record body is one EVNT event on the wire: u16 event id, u16 data
+    /// length, u16 properties length, data, properties.
+    pub fn parseRecord(body: []const u8) error{Malformed}!Event.EventData {
+        if (body.len < 6) return error.Malformed;
+        const event_id = std.mem.readInt(u16, body[0..2], .big);
+        const data_len = std.mem.readInt(u16, body[2..4], .big);
+        const prop_len = std.mem.readInt(u16, body[4..6], .big);
+        if (body.len != 6 + @as(usize, data_len) + prop_len) return error.Malformed;
+        return .{
+            .event_id = event_id,
+            .data = body[6 .. 6 + data_len],
+            .properties = body[6 + data_len ..],
+        };
+    }
+};
+
 pub const ChunkData = union(ChunkType) {
     header_a: HeaderA,
     drivers: Drivers,
     event_type: EventType,
     link: Link,
     event: Event,
+    streamed_event: StreamedEvent,
     eof: void,
 };
 
@@ -79,6 +109,7 @@ pub const ChunkNames = std.EnumArray(ChunkType, []const u8).init(.{
     .event_type = "ETYP",
     .link = "LINK",
     .event = "EVNT",
+    .streamed_event = "SEVT",
     .eof = "EOF!",
 });
 
@@ -88,5 +119,6 @@ pub const ChunkTypes = std.StaticStringMap(ChunkType).initComptime(&.{
     .{ "ETYP", .event_type },
     .{ "LINK", .link },
     .{ "EVNT", .event },
+    .{ "SEVT", .streamed_event },
     .{ "EOF!", .eof },
 });
