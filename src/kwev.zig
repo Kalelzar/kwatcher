@@ -47,12 +47,68 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     } else if (std.mem.eql(u8, command, "inspect")) {
         try inspect(arena.allocator(), stdout, file);
     } else if (std.mem.eql(u8, command, "consolidate")) {
-        var inputs = std.ArrayList([]const u8){};
+        var compression: ?kwev.structures.CompressionType = null;
+        var dict_path: ?[]const u8 = null;
+        var positionals = std.ArrayList([]const u8){};
+        try positionals.append(arena.allocator(), file);
         while (arg_it.next()) |arg| {
-            try inputs.append(arena.allocator(), arg);
+            try positionals.append(arena.allocator(), arg);
         }
-        if (inputs.items.len == 0) return usage(stderr);
-        try consolidate(arena.allocator(), stdout, stderr, file, inputs.items);
+        var inputs = std.ArrayList([]const u8){};
+        for (positionals.items) |arg| {
+            if (std.mem.eql(u8, arg, "--compress")) {
+                compression = .zstd;
+            } else if (std.mem.startsWith(u8, arg, "--compress=")) {
+                const mode = arg["--compress=".len..];
+                compression = std.meta.stringToEnum(kwev.structures.CompressionType, mode) orelse
+                    return usage(stderr);
+                if (compression == .xz or compression == .lz4) {
+                    std.log.err("writing {s} is not supported (use zstd or none)", .{mode});
+                    return error.UnsupportedCompression;
+                }
+            } else if (std.mem.startsWith(u8, arg, "--dict=")) {
+                dict_path = arg["--dict=".len..];
+            } else {
+                try inputs.append(arena.allocator(), arg);
+            }
+        }
+        if (dict_path != null) {
+            // A dictionary is only meaningful for a compressed archive.
+            if (compression == null) compression = .zstd;
+            if (compression == .none) {
+                std.log.err("--dict requires compression (drop --compress=none)", .{});
+                return error.BadArguments;
+            }
+        }
+        if (inputs.items.len < 2) return usage(stderr);
+        try consolidate(arena.allocator(), stdout, stderr, inputs.items[0], inputs.items[1..], compression, dict_path);
+    } else if (std.mem.eql(u8, command, "train")) {
+        var dict_id: u16 = 1;
+        var dict_version: u16 = 1;
+        var max_size: usize = 112640;
+        var positionals = std.ArrayList([]const u8){};
+        try positionals.append(arena.allocator(), file);
+        while (arg_it.next()) |arg| {
+            try positionals.append(arena.allocator(), arg);
+        }
+        var inputs = std.ArrayList([]const u8){};
+        for (positionals.items) |arg| {
+            if (std.mem.startsWith(u8, arg, "--dict-id=")) {
+                dict_id = try std.fmt.parseInt(u16, arg["--dict-id=".len..], 10);
+            } else if (std.mem.startsWith(u8, arg, "--dict-version=")) {
+                dict_version = try std.fmt.parseInt(u16, arg["--dict-version=".len..], 10);
+            } else if (std.mem.startsWith(u8, arg, "--max-size=")) {
+                max_size = try std.fmt.parseInt(usize, arg["--max-size=".len..], 10);
+            } else {
+                try inputs.append(arena.allocator(), arg);
+            }
+        }
+        if (dict_id == 0 or dict_version == 0) {
+            std.log.err("dictionary id and version must be non-zero (0 is reserved)", .{});
+            return error.BadArguments;
+        }
+        if (inputs.items.len < 2) return usage(stderr);
+        try train(arena.allocator(), stdout, inputs.items[0], inputs.items[1..], dict_id, dict_version, max_size);
     } else if (std.mem.eql(u8, command, "graph")) {
         var inputs = std.ArrayList([]const u8){};
         while (arg_it.next()) |arg| {
@@ -68,7 +124,8 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
 fn usage(stderr: *std.Io.Writer) error{BadArguments} {
     stderr.print(
         \\Usage: kwev <dump|inspect> <filepath>
-        \\       kwev consolidate <output> <input...>
+        \\       kwev consolidate [--compress[=zstd|none]] [--dict=<dict.kwev>] <output> <input...>
+        \\       kwev train [--dict-id=N] [--dict-version=N] [--max-size=N] <output.kwev> <input...>
         \\       kwev graph <output.dot> <input...>
         \\
     , .{}) catch {};
@@ -84,6 +141,7 @@ fn readChunks(allocator: std.mem.Allocator, path: []const u8) ![]const kwev.stru
 
 fn dump(allocator: std.mem.Allocator, stdout: *std.Io.Writer, file: []const u8) !void {
     const chunks = try readChunks(allocator, file);
+    var dicts = std.ArrayList(kwev.structures.Dict){};
     for (chunks, 0..) |c, i| {
         try stdout.print("[{d:04}] {t} | ", .{ i, std.meta.activeTag(c) });
         switch (c) {
@@ -115,6 +173,42 @@ fn dump(allocator: std.mem.Allocator, stdout: *std.Io.Writer, file: []const u8) 
                 try stdout.print("{d} route op hash(es) for driver {d}\n", .{ r.mappings.len, r.driver_id });
                 for (r.mappings) |m| {
                     try stdout.print("[{x:0>8}] {s}\n", .{ m.hash, m.identifier });
+                }
+            },
+            .dict => |d| {
+                try dicts.append(allocator, d);
+                try stdout.print("dictionary {d} version {d}: {t}, {d} byte(s)\n", .{
+                    d.id, d.version, d.algorithm, d.dictionary.len,
+                });
+            },
+            .evnc => |e| {
+                try stdout.print("{t}, dictionary {d} version {d}, {d} -> {d} byte(s)\n", .{
+                    e.compression,
+                    e.dictionary_id,
+                    e.dictionary_version,
+                    e.compressed_data.len,
+                    e.uncompressed_size,
+                });
+                const dict: ?[]const u8 = blk: {
+                    if (e.dictionary_id == 0) break :blk null;
+                    for (dicts.items) |d| {
+                        if (d.id == e.dictionary_id and
+                            (e.dictionary_version == 0 or d.version == e.dictionary_version))
+                            break :blk d.dictionary;
+                    }
+                    break :blk null;
+                };
+                const inner = kwev.compress.expandEvnc(allocator, e, dict) catch |err| {
+                    try stdout.print("[????] cannot expand: {t}\n", .{err});
+                    continue;
+                };
+                for (inner) |ic| {
+                    try stdout.print("[EVNT] {d} event(s)\n", .{ic.event.events.len});
+                    for (ic.event.events) |r| {
+                        try stdout.print("[----] ---{d}---\n", .{r.event_id});
+                        try stdout.print("[DATA] {s}\n", .{r.data});
+                        try stdout.print("[META] {s}\n", .{r.properties});
+                    }
                 }
             },
             .link => |l| {
@@ -155,6 +249,7 @@ const Inspection = struct {
     drivers: []const kwev.structures.Drivers.Driver = &.{},
     etyps: std.ArrayList(kwev.structures.EventType) = .{},
     rophs: std.ArrayList(kwev.structures.RouteOpHash) = .{},
+    dicts: std.ArrayList(kwev.structures.Dict) = .{},
     /// Events from the primary file only; linked files contribute
     /// definitions, not payloads.
     batches: std.ArrayList(Batch) = .{},
@@ -163,6 +258,9 @@ const Inspection = struct {
     /// Links that were not followed (unsupported kind, depth, read failure).
     skipped: std.ArrayList([]const u8) = .{},
     notes: std.ArrayList([]const u8) = .{},
+    /// Total uncompressed bytes expanded out of EVNC chunks — output-size
+    /// budgeting must count these on top of the input file sizes.
+    expanded_bytes: usize = 0,
 
     const Batch = struct {
         records: []const kwev.structures.Event.EventData,
@@ -178,6 +276,20 @@ const Inspection = struct {
     fn findDriver(self: *const Inspection, driver_id: u16) ?kwev.structures.Drivers.Driver {
         if (driver_id < self.drivers.len) return self.drivers[driver_id];
         return null;
+    }
+
+    /// Dictionary for an EVNC reference; version 0 means "latest".
+    fn findDict(self: *const Inspection, id: u16, version: u16) ?[]const u8 {
+        var best: ?kwev.structures.Dict = null;
+        for (self.dicts.items) |d| {
+            if (d.id != id) continue;
+            if (version != 0) {
+                if (d.version == version) return d.dictionary;
+                continue;
+            }
+            if (best == null or d.version > best.?.version) best = d;
+        }
+        return if (best) |b| b.dictionary else null;
     }
 
     /// Route operation hash (as carried in correlation ids) -> route id.
@@ -243,6 +355,28 @@ fn load(
             },
             .event_type => |e| try insp.etyps.append(allocator, e),
             .route_op_hash => |r| try insp.rophs.append(allocator, r),
+            .dict => |d| try insp.dicts.append(allocator, d),
+            .evnc => |e| if (primary) {
+                const dict: ?[]const u8 = if (e.dictionary_id == 0)
+                    null
+                else
+                    insp.findDict(e.dictionary_id, e.dictionary_version) orelse {
+                        std.log.err("{s}: EVNC references unknown dictionary {d} (version {d})", .{
+                            path, e.dictionary_id, e.dictionary_version,
+                        });
+                        return error.UnknownDictionary;
+                    };
+                insp.expanded_bytes += e.uncompressed_size;
+                // Expansion yields EVNT chunks only (anything else errors).
+                const inner = try kwev.compress.expandEvnc(allocator, e, dict);
+                for (inner) |ic| {
+                    try insp.batches.append(allocator, .{
+                        .records = ic.event.events,
+                        .streamed = false,
+                        .sealed = true,
+                    });
+                }
+            },
             .event => |e| if (primary) {
                 try insp.batches.append(allocator, .{
                     .records = e.events,
@@ -338,6 +472,11 @@ fn inspect(allocator: std.mem.Allocator, stdout: *std.Io.Writer, file: []const u
         header.conf_by,
     });
 
+    for (insp.dicts.items) |d| {
+        try stdout.print("[DICT] {d} version {d}: {t}, {d} byte(s)\n", .{
+            d.id, d.version, d.algorithm, d.dictionary.len,
+        });
+    }
     try stdout.print("[DRVS] {d} driver(s)\n", .{insp.drivers.len});
     for (0..insp.drivers.len) |id| {
         var seen = false;
@@ -406,6 +545,11 @@ fn rophLessThan(_: void, a: kwev.structures.RouteOpHash, b: kwev.structures.Rout
     return a.driver_id < b.driver_id;
 }
 
+fn dictLessThan(_: void, a: kwev.structures.Dict, b: kwev.structures.Dict) bool {
+    if (a.id != b.id) return a.id < b.id;
+    return a.version < b.version;
+}
+
 /// Loads one input for consolidation: resolve links, sort the event type
 /// chunks so definition comparison is chunk-order insensitive, and enforce
 /// the same referential integrity `inspect` demands.
@@ -425,6 +569,7 @@ fn loadValidated(allocator: std.mem.Allocator, path: []const u8) !Inspection {
         }
     }
     std.mem.sort(kwev.structures.RouteOpHash, insp.rophs.items, {}, rophLessThan);
+    std.mem.sort(kwev.structures.Dict, insp.dicts.items, {}, dictLessThan);
     for (insp.rophs.items) |roph| {
         if (insp.findDriver(roph.driver_id) == null) {
             std.log.err("{s}: ROPH chunk references unknown driver {d}", .{ path, roph.driver_id });
@@ -487,6 +632,19 @@ fn expectSameDefs(reference: *const Inspection, insp: *const Inspection, path: [
         }
     }
 
+    if (reference.dicts.items.len != insp.dicts.items.len) {
+        std.log.err("{s}: dictionary set differs from the first input's", .{path});
+        return error.DefinitionMismatch;
+    }
+    for (reference.dicts.items, insp.dicts.items) |rd, id| {
+        if (rd.id != id.id or rd.version != id.version or rd.algorithm != id.algorithm or
+            !std.mem.eql(u8, rd.dictionary, id.dictionary))
+        {
+            std.log.err("{s}: dictionary {d} differs from the first input's", .{ path, id.id });
+            return error.DefinitionMismatch;
+        }
+    }
+
     if (reference.rophs.items.len != insp.rophs.items.len) {
         std.log.err("{s}: route op hash set differs from the first input's", .{path});
         return error.DefinitionMismatch;
@@ -537,13 +695,43 @@ fn collectInputs(allocator: std.mem.Allocator, inputs: []const []const u8) ![]co
     return files.items;
 }
 
+/// Load a standalone dictionary file (produced by `kwev train`): exactly one
+/// dictionary id must be present; the highest version of it wins.
+fn loadDictFile(allocator: std.mem.Allocator, path: []const u8) !kwev.structures.Dict {
+    const chunks = try readChunks(allocator, path);
+    var best: ?kwev.structures.Dict = null;
+    for (chunks) |c| {
+        switch (c) {
+            .dict => |d| {
+                if (best) |b| {
+                    if (d.id != b.id) {
+                        std.log.err("{s}: contains multiple dictionary ids ({d}, {d})", .{ path, b.id, d.id });
+                        return error.AmbiguousDictionary;
+                    }
+                    if (d.version > b.version) best = d;
+                } else {
+                    best = d;
+                }
+            },
+            else => {},
+        }
+    }
+    return best orelse {
+        std.log.err("{s}: contains no DICT chunk", .{path});
+        return error.MissingDictionary;
+    };
+}
+
 fn consolidate(
     allocator: std.mem.Allocator,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
     output: []const u8,
     inputs: []const []const u8,
+    compression: ?kwev.structures.CompressionType,
+    dict_path: ?[]const u8,
 ) !void {
+    const dict: ?kwev.structures.Dict = if (dict_path) |p| try loadDictFile(allocator, p) else null;
     const files = try collectInputs(allocator, inputs);
 
     var reference: ?Inspection = null;
@@ -556,6 +744,7 @@ fn consolidate(
     for (files) |path| {
         total_size += (try std.fs.cwd().statFile(path)).size;
         const insp = try loadValidated(allocator, path);
+        total_size += insp.expanded_bytes;
         if (reference) |*ref| {
             try expectSameDefs(ref, &insp, path);
         } else {
@@ -584,7 +773,66 @@ fn consolidate(
     try chunks.append(allocator, .{ .drivers = .{ .drivers = ref.drivers } });
     for (ref.etyps.items) |e| try chunks.append(allocator, .{ .event_type = e });
     for (ref.rophs.items) |r| try chunks.append(allocator, .{ .route_op_hash = r });
-    try chunks.appendSlice(allocator, events.items);
+    for (ref.dicts.items) |d| {
+        // The LINK emitted below supersedes carried copies of the same
+        // dictionary (e.g. re-consolidating an archive that linked it):
+        // embedding it too would defeat the shared-dictionary point.
+        if (dict != null and d.id == dict.?.id) continue;
+        try chunks.append(allocator, .{ .dict = d });
+    }
+
+    if (dict_path) |p| {
+        // The dictionary is shared via LINK, never embedded — rel links
+        // resolve relative to the linking file, so store the path relative
+        // to where the OUTPUT lives (or absolute if given absolute).
+        if (std.fs.path.isAbsolute(p)) {
+            try chunks.append(allocator, .{ .link = .{ .abs = p } });
+        } else {
+            const out_dir = std.fs.path.dirname(output) orelse ".";
+            const rel = try std.fs.path.relative(allocator, out_dir, p);
+            try chunks.append(allocator, .{ .link = .{ .rel = rel } });
+        }
+    }
+
+    if (compression) |algo| {
+        // One EVNC per group of event chunks, each group bounded by an
+        // uncompressed-size budget — a chunk has framing and buffers cap out,
+        // so a single unbounded EVNC is only reasonable while it fits.
+        const max_evnc_uncompressed = 4 * 1024 * 1024;
+        var start_idx: usize = 0;
+        var group_size: usize = 0;
+        for (events.items, 0..) |ec, idx| {
+            var chunk_size: usize = 18;
+            for (ec.event.events) |ev| chunk_size += 6 + ev.data.len + ev.properties.len;
+            if (group_size != 0 and group_size + chunk_size > max_evnc_uncompressed) {
+                const evnc = try kwev.compress.compressChunks(
+                    allocator,
+                    events.items[start_idx..idx],
+                    algo,
+                    if (dict) |d| d.id else 0,
+                    if (dict) |d| d.version else 0,
+                    if (dict) |d| d.dictionary else null,
+                );
+                try chunks.append(allocator, .{ .evnc = evnc });
+                start_idx = idx;
+                group_size = 0;
+            }
+            group_size += chunk_size;
+        }
+        if (start_idx < events.items.len) {
+            const evnc = try kwev.compress.compressChunks(
+                allocator,
+                events.items[start_idx..],
+                algo,
+                if (dict) |d| d.id else 0,
+                if (dict) |d| d.version else 0,
+                if (dict) |d| d.dictionary else null,
+            );
+            try chunks.append(allocator, .{ .evnc = evnc });
+        }
+    } else {
+        try chunks.appendSlice(allocator, events.items);
+    }
 
     // The output is strictly smaller than its inputs (SEVT framing and
     // per-file definitions collapse); the slack covers framing and defs.
@@ -600,8 +848,80 @@ fn consolidate(
     try std.fs.cwd().rename(part, output);
 
     try stdout.print("consolidated {d} file(s), {d} record(s)", .{ files.len, total_records });
+    if (compression) |algo| try stdout.print(" ({t}-compressed)", .{algo});
+    if (dict) |d| try stdout.print(" (dictionary {d} version {d})", .{ d.id, d.version });
     if (salvaged != 0) try stdout.print(" ({d} salvaged from torn chunks)", .{salvaged});
     try stdout.print(" -> {s} ({d} bytes)\n", .{ output, size });
+}
+
+/// Train a zstd dictionary from every event record in the inputs and write
+/// it to a standalone kwev file (HDRA + DICT + EOF!) meant to be shared via
+/// LINK chunks (`consolidate --dict=<this file>`).
+fn train(
+    allocator: std.mem.Allocator,
+    stdout: *std.Io.Writer,
+    output: []const u8,
+    inputs: []const []const u8,
+    dict_id: u16,
+    dict_version: u16,
+    max_size: usize,
+) !void {
+    const files = try collectInputs(allocator, inputs);
+
+    // Samples are the per-event wire bytes (header + data + properties),
+    // mirroring the byte stream EVNC compresses.
+    var samples = std.ArrayList([]const u8){};
+    var corpus_bytes: usize = 0;
+    var header: ?kwev.structures.HeaderA = null;
+    for (files) |path| {
+        const insp = try loadValidated(allocator, path);
+        if (header == null) header = insp.header;
+        for (insp.batches.items) |b| {
+            for (b.records) |r| {
+                const sample = try allocator.alloc(u8, 6 + r.data.len + r.properties.len);
+                std.mem.writeInt(u16, sample[0..2], r.event_id, .big);
+                std.mem.writeInt(u16, sample[2..4], @intCast(r.data.len), .big);
+                std.mem.writeInt(u16, sample[4..6], @intCast(r.properties.len), .big);
+                @memcpy(sample[6..][0..r.data.len], r.data);
+                @memcpy(sample[6 + r.data.len ..], r.properties);
+                try samples.append(allocator, sample);
+                corpus_bytes += sample.len;
+            }
+        }
+    }
+    if (samples.items.len == 0) {
+        std.log.err("no event records in the inputs", .{});
+        return error.NoSamples;
+    }
+
+    const dict = try kwev.compress.trainDict(allocator, samples.items, max_size);
+
+    const chunks = [_]kwev.structures.ChunkData{
+        .{ .header_a = header.? },
+        .{ .dict = .{
+            .id = dict_id,
+            .version = dict_version,
+            .algorithm = .zstd,
+            .dictionary = dict,
+        } },
+    };
+    const buf = try allocator.alloc(u8, dict.len + 4096);
+    var w = std.Io.Writer.fixed(buf);
+    var writer = kwev.Writer{ .writer = &w };
+    const size = try writer.writeAll(&chunks);
+
+    const part = try std.fmt.allocPrint(allocator, "{s}.part", .{output});
+    try std.fs.cwd().writeFile(.{ .sub_path = part, .data = buf[0..size] });
+    try std.fs.cwd().rename(part, output);
+
+    try stdout.print("trained dictionary {d} version {d}: {d} sample(s), {d} corpus byte(s) -> {d} dictionary byte(s) -> {s}\n", .{
+        dict_id,
+        dict_version,
+        samples.items.len,
+        corpus_bytes,
+        dict.len,
+        output,
+    });
 }
 
 const GraphItem = struct {
