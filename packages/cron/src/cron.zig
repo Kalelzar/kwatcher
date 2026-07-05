@@ -67,7 +67,7 @@ pub const SchedulerShim = struct {
     _listFn: *const fn (*anyopaque, std.mem.Allocator) anyerror![]JobInfo,
     _cancelFn: *const fn (*anyopaque, ShimId) ?void,
     _resurrectFn: *const fn (*anyopaque, []const u8) anyerror!void,
-    _triggerFn: *const fn (*anyopaque, ShimId) anyerror!?void,
+    _triggerFn: *const fn (*anyopaque, ShimId, ?*dep.DepCtx) anyerror!?void,
     _ctx: *anyopaque,
 
     pub fn query(self: @This(), id: ShimId, allocator: std.mem.Allocator) !?JobInfo {
@@ -87,9 +87,10 @@ pub const SchedulerShim = struct {
     }
 
     /// Fire any job (route or dynamic) ahead of schedule; an extra run, the
-    /// scheduled entry is untouched. Null = no such job.
-    pub fn trigger(self: @This(), id: ShimId) !?void {
-        return self._triggerFn(self._ctx, id);
+    /// scheduled entry is untouched. Null = no such job. Pass the caller's
+    /// injector so the triggered job continues the caller's trace.
+    pub fn trigger(self: @This(), id: ShimId, inj: ?*dep.DepCtx) !?void {
+        return self._triggerFn(self._ctx, id, inj);
     }
 };
 
@@ -131,9 +132,9 @@ pub fn SchedulerBridge(comptime RealScheduler: type) type {
             return self.real.resurrect(std.meta.stringToEnum(RouteKeys, name) orelse return error.UnknownRoute);
         }
 
-        fn triggerImpl(ctx: *anyopaque, id: ShimId) anyerror!?void {
+        fn triggerImpl(ctx: *anyopaque, id: ShimId, inj: ?*dep.DepCtx) anyerror!?void {
             const self: *@This() = @ptrCast(@alignCast(ctx));
-            return self.real.trigger(toRealId(id) orelse return null);
+            return self.real.trigger(toRealId(id) orelse return null, .{ .inj = inj });
         }
 
         pub fn toShim(self: *@This()) SchedulerShim {
@@ -410,8 +411,8 @@ pub fn DriverBuilder(
                             /// Fire a job ahead of schedule. This is always an *extra* run:
                             /// the scheduled entry is untouched, so a oneshot triggered early
                             /// still fires at its scheduled time as well. Null = no such job.
-                            pub fn trigger(self: @This(), target: Id) !?void {
-                                const ev: E = blk: {
+                            pub fn trigger(self: @This(), target: Id, extra: struct { inj: ?*dep.DepCtx = null }) !?void {
+                                var ev: E = blk: {
                                     self.parent.mutex.lock();
                                     defer self.parent.mutex.unlock();
                                     const index = self.findJob(target) orelse return null;
@@ -431,6 +432,14 @@ pub fn DriverBuilder(
                                         .event => |event| break :blk event,
                                     }
                                 };
+
+                                if (extra.inj) |inj| {
+                                    const p = try inj.require(core.event.Properties);
+                                    if (p.correlation_id.isUnset()) {
+                                        log.err("triggering a job from a handler without a correlation id (bug)", .{});
+                                    }
+                                    ev.properties.correlation_id = p.correlation_id;
+                                }
 
                                 // Push outside the lock: the queue can block.
                                 _ = self.parent.queue.?.tryPush(ev, 100) catch |e| switch (e) {
@@ -645,6 +654,7 @@ pub fn DriverBuilder(
                                     switch (ev.trigger_job.route) {
                                         inline else => |r| {
                                             const R = comptime Routes[@intFromEnum(r)];
+                                            _ = try core.event.stampRoute(inj, R.id);
                                             try R.call(inj, .{});
                                         },
                                     }
@@ -1181,6 +1191,6 @@ test "SchedulerShim: list/query/cancel/resurrect through the erased vtable" {
     try std.testing.expectError(error.UnknownRoute, shim.resurrect("nonsense"));
 
     // Trigger's not-found paths return before touching the (unbound) queue.
-    try std.testing.expect((try shim.trigger(.{ .route = "nonsense" })) == null);
-    try std.testing.expect((try shim.trigger(.{ .anonymous = "nope" })) == null);
+    try std.testing.expect((try shim.trigger(.{ .route = "nonsense" }, null)) == null);
+    try std.testing.expect((try shim.trigger(.{ .anonymous = "nope" }, null)) == null);
 }

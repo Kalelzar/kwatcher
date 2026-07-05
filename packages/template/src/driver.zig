@@ -100,6 +100,9 @@ pub fn DriverBuilder(
 
                                 if (extra.inj) |inj| {
                                     const p = try inj.require(EventProperties);
+                                    if (p.correlation_id.isUnset()) {
+                                        std.log.err("scheduling from a handler without a correlation id (bug)", .{});
+                                    }
                                     ev.properties.correlation_id = p.correlation_id;
                                 }
 
@@ -114,7 +117,7 @@ pub fn DriverBuilder(
                                 };
                             }
 
-                            pub fn callLater(self: @This(), data: CallContext) E {
+                            pub fn callLater(self: @This(), data: CallContext, extra: struct { inj: ?*dep.DepCtx = null }) !E {
                                 _ = self;
                                 const value = @unionInit(
                                     EV,
@@ -124,10 +127,20 @@ pub fn DriverBuilder(
                                     },
                                 );
 
-                                return E{
+                                var ev = E{
                                     .event_data = value,
                                     .event_type = .call,
                                 };
+
+                                if (extra.inj) |inj| {
+                                    const p = try inj.require(EventProperties);
+                                    if (p.correlation_id.isUnset()) {
+                                        std.log.err("scheduling from a handler without a correlation id (bug)", .{});
+                                    }
+                                    ev.properties.correlation_id = p.correlation_id;
+                                }
+
+                                return ev;
                             }
 
                             pub fn callImmediate(self: @This(), data: CallContext, inj: *dep.DepCtx) anyerror!void {
@@ -140,6 +153,7 @@ pub fn DriverBuilder(
                             switch (data) {
                                 inline else => |rctx, tag| {
                                     const R = comptime Routes[@intFromEnum(tag)];
+                                    _ = try server.event.stampRoute(inj, R.id);
                                     try R.call(inj, rctx);
                                 },
                             }

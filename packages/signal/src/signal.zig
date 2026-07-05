@@ -118,8 +118,9 @@ pub fn DriverBuilder(
                     signum: Signal,
 
                     pub fn write(self: SignalData, w: *std.Io.Writer) !void {
-                        _ = self;
-                        try w.writeAll(".{ .type = SIG }");
+                        switch (self.signum) {
+                            inline else => |s| try w.print(".{{.signame = \"{t}\", .signum = {d}}}", .{ s, @intFromEnum(s) }),
+                        }
                     }
                 };
 
@@ -156,6 +157,7 @@ pub fn DriverBuilder(
                                 inline else => |rctx| {
                                     const R = comptime ForSignal(rctx, Routes);
                                     inline for (R) |Route| {
+                                        _ = try server.event.stampRoute(inj, Route.id);
                                         try Route.call(inj, data.signal_info);
                                     }
                                 },
@@ -251,7 +253,7 @@ pub fn DriverBuilder(
                                     .event_type = @field(ET, @tagName(key) ++ "_signal"),
                                     .event_data = val,
                                     .properties = .{
-                                        .correlation_id = 0,
+                                        .correlation_id = .unset,
                                     },
                                 });
                             }

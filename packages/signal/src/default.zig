@@ -14,12 +14,12 @@ const InternalSchedulerShim = @import("kw-core").scheduler.InternalSchedulerShim
 const SignalInfo = @import("signal.zig").SignalInfo;
 
 pub const Shutdown = struct {
-    pub fn @"INT @shutdown"(_: SignalInfo, inj: *dep.DepCtx) !void {
+    pub fn @"INT @shutdown-int"(_: SignalInfo, inj: *dep.DepCtx) !void {
         const scheduler = try inj.require(InternalSchedulerShim);
         try scheduler.shutdown(.{ .inj = inj });
     }
 
-    pub fn @"TERM @shutdown"(_: SignalInfo, inj: *dep.DepCtx) !void {
+    pub fn @"TERM @shutdown-term"(_: SignalInfo, inj: *dep.DepCtx) !void {
         const scheduler = try inj.require(InternalSchedulerShim);
         try scheduler.shutdown(.{ .inj = inj });
     }

@@ -79,6 +79,9 @@ pub fn DriverBuilder(
 
                                 if (extra.inj) |inj| {
                                     const p = try inj.require(EventProperties);
+                                    if (p.correlation_id.isUnset()) {
+                                        log.err("scheduling an action from a handler without a correlation id (bug)", .{});
+                                    }
                                     ev.properties.correlation_id = p.correlation_id;
                                 }
 
@@ -114,6 +117,9 @@ pub fn DriverBuilder(
 
                                 if (extra.inj) |inj| {
                                     const p = try inj.require(EventProperties);
+                                    if (p.correlation_id.isUnset()) {
+                                        log.err("scheduling an action from a handler without a correlation id (bug)", .{});
+                                    }
                                     ev.properties.correlation_id = p.correlation_id;
                                 }
 
@@ -130,6 +136,7 @@ pub fn DriverBuilder(
                             switch (data) {
                                 inline else => |rctx, tag| {
                                     const R = comptime Routes[@intFromEnum(tag)];
+                                    _ = try server.event.stampRoute(inj, R.id);
                                     try R.call(inj, rctx);
                                 },
                             }
