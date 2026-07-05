@@ -211,7 +211,8 @@ pub fn DriverBuilder(
                 pub const kind = Root.kind;
                 pub const key = driver_key;
                 pub const Routes = _Routes;
-                pub const RouteKeys = shared.EnumerateRoutes(Routes);
+                const Uniq = ConsRoutes ++ PubRoutes;
+                pub const RouteKeys = shared.EnumerateRoutes(Uniq);
                 pub const PubRoutes = FilterRoutes(Routes, .publish);
                 pub const PubRouteKeys = shared.EnumerateRoutes(PubRoutes);
                 pub const PubCallContext = shared.UniteCallContext(PubRoutes);
@@ -302,6 +303,9 @@ pub fn DriverBuilder(
 
                                 if (extra.inj) |inj| {
                                     const p = try inj.require(EventProperties);
+                                    if (p.correlation_id.isUnset()) {
+                                        std.log.err("scheduling a publish from a handler without a correlation id (bug)", .{});
+                                    }
                                     ev.properties.correlation_id = p.correlation_id;
                                 }
 
@@ -325,7 +329,7 @@ pub fn DriverBuilder(
                                 };
                             }
 
-                            pub fn publishLater(self: @This(), data: PublishData) E {
+                            pub fn publishLater(self: @This(), data: PublishData, extra: struct { inj: ?*dep.DepCtx = null }) !E {
                                 _ = self;
                                 const value = @unionInit(
                                     EV,
@@ -335,10 +339,18 @@ pub fn DriverBuilder(
                                     },
                                 );
 
-                                const ev = E{
+                                var ev = E{
                                     .event_data = value,
                                     .event_type = @field(ET, @tagName(key) ++ "_send"),
                                 };
+
+                                if (extra.inj) |inj| {
+                                    const p = try inj.require(EventProperties);
+                                    if (p.correlation_id.isUnset()) {
+                                        std.log.err("scheduling a publish from a handler without a correlation id (bug)", .{});
+                                    }
+                                    ev.properties.correlation_id = p.correlation_id;
+                                }
 
                                 return ev;
                             }
@@ -474,14 +486,11 @@ pub fn DriverBuilder(
 
                                         if (h.options.correlation_id == null) {
                                             var correlation_id: [128]u8 = undefined;
-                                            const end = std.fmt.printInt(
+                                            h.options.correlation_id = std.fmt.bufPrint(
                                                 &correlation_id,
-                                                evprop.correlation_id,
-                                                10,
-                                                .lower,
-                                                .{},
-                                            );
-                                            h.options.correlation_id = correlation_id[0..end];
+                                                "{f}",
+                                                .{evprop.correlation_id},
+                                            ) catch unreachable;
                                         }
 
                                         try client.publish(h, .{});
@@ -665,9 +674,9 @@ pub fn DriverBuilder(
                                                         .event_data = val,
                                                         .properties = .{
                                                             .correlation_id = if (correlation_id) |c|
-                                                                std.fmt.parseInt(u128, c, 10) catch 0
+                                                                core.event.CorrelationID.parse(c) orelse .unset
                                                             else
-                                                                0,
+                                                                .unset,
                                                         },
                                                     }, std.time.ns_per_ms * 1) catch {};
                                                 } else {
@@ -701,9 +710,9 @@ pub fn DriverBuilder(
                                                 .event_data = val,
                                                 .properties = .{
                                                     .correlation_id = if (correlation_id) |c|
-                                                        std.fmt.parseInt(u128, c, 10) catch 0
+                                                        core.event.CorrelationID.parse(c) orelse .unset
                                                     else
-                                                        0,
+                                                        .unset,
                                                 },
                                             }, std.time.ns_per_ms * 1) catch {
                                                 client.reject(in.delivery_tag, true, .{}) catch |e| {
@@ -773,22 +782,26 @@ pub fn DriverBuilder(
                             client: Client,
                         ) anyerror!void {
                             const route = std.meta.activeTag(event);
+                            var evp = evprop;
+                            switch (route) {
+                                inline else => |e| {
+                                    const R = comptime PubRoutes[@intFromEnum(e)];
+                                    evp.correlation_id = (try core.event.stampRoute(inj, R.id)).correlation_id;
+                                },
+                            }
                             var h = try dispatchPublish(
                                 route,
                                 inj,
                                 event,
-                                evprop,
+                                evp,
                             );
                             if (h.options.correlation_id == null) {
                                 var correlation_id: [128]u8 = undefined;
-                                const end = std.fmt.printInt(
+                                h.options.correlation_id = std.fmt.bufPrint(
                                     &correlation_id,
-                                    evprop.correlation_id,
-                                    10,
-                                    .lower,
-                                    .{},
-                                );
-                                h.options.correlation_id = correlation_id[0..end];
+                                    "{f}",
+                                    .{evp.correlation_id},
+                                ) catch unreachable;
                             }
                             // std.log.info("Publish: {t}", .{route});
                             try client.publish(h, .{});
@@ -820,9 +833,9 @@ pub fn DriverBuilder(
                                         .event_data = val,
                                         .properties = .{
                                             .correlation_id = if (correlation_id) |c|
-                                                std.fmt.parseInt(u128, c, 10) catch 0
+                                                core.event.CorrelationID.parse(c) orelse .unset
                                             else
-                                                0,
+                                                .unset,
                                         },
                                     }, std.time.ns_per_ms * 1) catch unreachable;
                                 } else {
@@ -838,11 +851,20 @@ pub fn DriverBuilder(
                             injector: *dep.DepCtx,
                         ) anyerror!void {
                             _ = self;
+                            var evp = evprop;
+                            if (comptime UnroutedRoutes.len != 0) {
+                                switch (event.publisher_tag) {
+                                    inline else => |e| {
+                                        const R = comptime UnroutedRoutes[@intFromEnum(e)];
+                                        evp.correlation_id = (try core.event.stampRoute(injector, R.id)).correlation_id;
+                                    },
+                                }
+                            }
                             try dispatchUnrouted(
                                 event.publisher_tag,
                                 injector,
                                 &event,
-                                evprop,
+                                evp,
                             );
                         }
 
@@ -856,11 +878,20 @@ pub fn DriverBuilder(
                             _ = self;
                             defer @constCast(&event.internal).deinit();
                             const route = event.consumer_tag;
+                            var evp = evprop;
+                            if (comptime ConsRoutes.len != 0) {
+                                switch (route) {
+                                    inline else => |e| {
+                                        const R = comptime ConsRoutes[@intFromEnum(e)];
+                                        evp.correlation_id = (try core.event.stampRoute(injector, R.id)).correlation_id;
+                                    },
+                                }
+                            }
                             try dispatchConsume(
                                 route,
                                 injector,
                                 event.body,
-                                evprop,
+                                evp,
                                 &event,
                                 client,
                             );
