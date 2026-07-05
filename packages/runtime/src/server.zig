@@ -74,7 +74,6 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
         schedulers: std.meta.Tuple(&SchCtx) = std.mem.zeroInit(std.meta.Tuple(&SchCtx), .{}),
         shim_ctx: ShimCtx = .{},
         deps: Deps,
-        rand: std.Random.Xoshiro256 = std.Random.DefaultPrng.init(0),
 
         pub fn init(alloc: std.mem.Allocator, context: _Deps, consumers: u8) !Self {
             const run_stamp = std.time.milliTimestamp();
@@ -355,12 +354,10 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                             self.deps.actualize(Driver.key, .scoped, inj_ctx) catch |e| break :fail e;
                             defer Deps.deactualize(inj_ctx, Driver.key, .scoped);
 
-                            if (maybe_next.properties.correlation_id == 0) {
-                                var buf: [16]u8 = undefined;
-                                std.Random.bytes(self.rand.random(), &buf);
-                                maybe_next.properties.correlation_id = std.mem.bytesToValue(u128, &buf);
-                            }
-
+                            // The correlation id is stamped by the driver at
+                            // dispatch, once the handling route is known:
+                            // unset -> new trace root, set -> hop. The stamp
+                            // mutates this PropCtx through the injector.
                             var prop_ctx = PropCtx{ .props = maybe_next.properties };
                             const o = inj_ctx.require(ScopedAllocator) catch |e| break :fail e;
                             var v = dep.DependencyContainer(struct {}).newBlank(D, o.value).static(
@@ -378,8 +375,15 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
                                 ev,
                                 maybe_next,
                                 &cm,
-                            }) catch |e| break :fail e;
+                            }) catch |e| {
+                                // Record the properties as stamped at
+                                // dispatch even when the handler fails.
+                                maybe_next.properties = prop_ctx.props;
+                                break :fail e;
+                            };
 
+                            // Record the properties as stamped at dispatch.
+                            maybe_next.properties = prop_ctx.props;
                             try rec.append(maybe_next);
                         }
                     };
