@@ -269,7 +269,7 @@ pub fn DriverBuilder(
                                     .event_type = @field(ET, @tagName(key) ++ "_recv"),
                                     .event_data = val,
                                     .properties = .{
-                                        .correlation_id = if (correlation) |c| std.fmt.parseInt(u128, c, 10) catch 0 else 0,
+                                        .correlation_id = if (correlation) |c| core.event.CorrelationID.parse(c) orelse .unset else .unset,
                                     },
                                 },
                                 std.time.ns_per_s * 5,
@@ -339,12 +339,22 @@ pub fn DriverBuilder(
                                 event.mutex.unlock();
                             }
 
-                            event.res.header("x-correlation-id", try std.fmt.allocPrint(event.res.arena, "{d}", .{evprop.correlation_id}));
+                            var evp = evprop;
+                            if (comptime Routes.len != 0) {
+                                switch (route) {
+                                    inline else => |e| {
+                                        const R = comptime Routes[@intFromEnum(e)];
+                                        evp.correlation_id = (try core.event.stampRoute(injector, R.id)).correlation_id;
+                                    },
+                                }
+                            }
+
+                            event.res.header("x-correlation-id", try std.fmt.allocPrint(event.res.arena, "{f}", .{evp.correlation_id}));
 
                             dispatchRequest(
                                 route,
                                 injector,
-                                evprop,
+                                evp,
                                 @constCast(&event),
                             ) catch |e| {
                                 const final = ErrorHandler.postQueue(e, event.req, event.res);
