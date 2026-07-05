@@ -5,6 +5,7 @@ pub const MappedFile = @import("mapped_file.zig").MappedFile;
 pub const structures = @import("structure.zig");
 pub const recorder = @import("recorder.zig");
 const drivers = @import("kw-core").driver;
+const correlation = @import("kw-core").correlation;
 
 pub const KWEV = struct {
     file: MappedFile,
@@ -149,6 +150,25 @@ pub fn inscribe(kwev: *KWEV, driver: drivers.Drivers) !usize {
                 .driver_id = i,
                 .mappings = ev,
             } }};
+
+            // Route op hashes: RouteKeys' enum field names ARE the route ids
+            // stampRoute hashes into correlation ids, so mapping and stamp
+            // cannot disagree. The internal driver has no routes.
+            if (@hasDecl(drv, "RouteKeys")) {
+                var ops: []const structures.RouteOpHash.Mapping = &.{};
+                for (@typeInfo(drv.RouteKeys).@"enum".fields) |f| {
+                    ops = ops ++ .{structures.RouteOpHash.Mapping{
+                        .hash = correlation.CorrelationID.hash(f.name),
+                        .identifier = f.name,
+                    }};
+                }
+                if (ops.len != 0) {
+                    chunks = chunks ++ .{structures.ChunkData{ .route_op_hash = .{
+                        .driver_id = i,
+                        .mappings = ops,
+                    } }};
+                }
+            }
         }
 
         chunks = chunks ++ .{structures.ChunkData{

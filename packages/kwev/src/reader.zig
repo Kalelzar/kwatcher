@@ -78,6 +78,7 @@ pub const Reader = struct {
             .drivers => try self.readDrivers(chunk, allocator),
             .event => try self.readEvents(chunk, allocator),
             .event_type => try self.readEventTypes(chunk, allocator),
+            .route_op_hash => try self.readRouteOpHashes(chunk, allocator),
             .link => try self.readLink(chunk),
             .streamed_event => unreachable,
         }
@@ -178,6 +179,29 @@ pub const Reader = struct {
         h.mappings = try d.toOwnedSlice(allocator);
 
         chunk.* = .{ .event_type = h };
+    }
+
+    pub fn readRouteOpHashes(
+        self: *Reader,
+        chunk: *kwev.ChunkData,
+        allocator: std.mem.Allocator,
+    ) (Error || error{OutOfMemory})!void {
+        var h = std.mem.zeroInit(kwev.RouteOpHash, .{});
+        var d = std.ArrayList(kwev.RouteOpHash.Mapping){};
+        errdefer d.deinit(allocator);
+        h.driver_id = try self.reader.takeInt(u16, .big);
+        const size = try self.reader.takeInt(u16, .big);
+        try d.ensureUnusedCapacity(allocator, size);
+        for (0..size) |_| {
+            var next = d.addOneAssumeCapacity();
+            next.hash = try self.reader.takeInt(u32, .big);
+            const identifier_len = try self.reader.takeInt(u16, .big);
+            next.identifier = try self.reader.take(identifier_len);
+        }
+
+        h.mappings = try d.toOwnedSlice(allocator);
+
+        chunk.* = .{ .route_op_hash = h };
     }
 
     /// Walks a SEVT chunk record by record per the recovery procedure: a
@@ -311,6 +335,15 @@ fn expectChunkEql(expected: kwev.ChunkData, actual: kwev.ChunkData) !void {
                 try t.expectEqualStrings(em.identifier, am.identifier);
             }
         },
+        .route_op_hash => |e| {
+            const a = actual.route_op_hash;
+            try t.expectEqual(e.driver_id, a.driver_id);
+            try t.expectEqual(e.mappings.len, a.mappings.len);
+            for (e.mappings, a.mappings) |em, am| {
+                try t.expectEqual(em.hash, am.hash);
+                try t.expectEqualStrings(em.identifier, am.identifier);
+            }
+        },
         .event => |e| {
             const a = actual.event;
             try t.expectEqual(e.events.len, a.events.len);
@@ -407,6 +440,18 @@ test "roundtrip: ETYP" {
             .mappings = &.{
                 .{ .value = 0, .identifier = "started" },
                 .{ .value = 1, .identifier = "stopped" },
+            },
+        } },
+    });
+}
+
+test "roundtrip: ROPH" {
+    try expectRoundtrip(&.{
+        .{ .route_op_hash = .{
+            .driver_id = 1,
+            .mappings = &.{
+                .{ .hash = 0x07CA1195, .identifier = "heartbeat_tick" },
+                .{ .hash = 0xA79E4417, .identifier = "publish heartbeat" },
             },
         } },
     });

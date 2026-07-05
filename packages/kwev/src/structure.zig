@@ -4,6 +4,7 @@ pub const ChunkType = enum {
     header_a,
     drivers,
     event_type,
+    route_op_hash,
     link,
     event,
     streamed_event,
@@ -55,6 +56,18 @@ pub const EventType = struct {
     };
 };
 
+/// Maps a driver's route operation hashes (FNV-1a-32 of the route id, as
+/// carried in correlation ids) back to the route id strings. ETYP's sibling.
+pub const RouteOpHash = struct {
+    driver_id: u16,
+    mappings: []const Mapping,
+
+    pub const Mapping = struct {
+        hash: u32,
+        identifier: []const u8,
+    };
+};
+
 pub const Event = struct {
     events: []const EventData,
 
@@ -97,6 +110,7 @@ pub const ChunkData = union(ChunkType) {
     header_a: HeaderA,
     drivers: Drivers,
     event_type: EventType,
+    route_op_hash: RouteOpHash,
     link: Link,
     event: Event,
     streamed_event: StreamedEvent,
@@ -107,6 +121,7 @@ pub const ChunkNames = std.EnumArray(ChunkType, []const u8).init(.{
     .header_a = "HDRA",
     .drivers = "DRVS",
     .event_type = "ETYP",
+    .route_op_hash = "ROPH",
     .link = "LINK",
     .event = "EVNT",
     .streamed_event = "SEVT",
@@ -117,6 +132,7 @@ pub const ChunkTypes = std.StaticStringMap(ChunkType).initComptime(&.{
     .{ "HDRA", .header_a },
     .{ "DRVS", .drivers },
     .{ "ETYP", .event_type },
+    .{ "ROPH", .route_op_hash },
     .{ "LINK", .link },
     .{ "EVNT", .event },
     .{ "SEVT", .streamed_event },

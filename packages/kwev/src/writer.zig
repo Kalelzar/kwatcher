@@ -1,6 +1,15 @@
 const std = @import("std");
 const kwev = @import("structure.zig");
 
+// TODO: Add a streaming writer that does not require the whole output to sit
+// in one fixed buffer. The current design leans on that assumption twice:
+// chunk sizes are patched into the buffer after the payload is written
+// (writableArray + mem.writeInt), and CRCs are computed over
+// `writer.buffer[start..end]`. A streaming variant needs to either buffer
+// per chunk (sizes and CRCs are then known before flushing downstream) or
+// compute sizes up front like writeStreamRecord already does. Consumers that
+// outgrow the in-memory buffer today: `kwev consolidate` (allocates
+// sum-of-inputs) and any future archival/compression pipeline.
 pub const Writer = struct {
     writer: *std.Io.Writer,
 
@@ -39,6 +48,7 @@ pub const Writer = struct {
             .header_a => |a| try self.writeHeaderA(a),
             .drivers => |d| try self.writeDrivers(d),
             .event_type => |e| try self.writeEventTypes(e),
+            .route_op_hash => |r| try self.writeRouteOpHashes(r),
             .link => |l| try self.writeLink(l),
             .event => |e| try self.writeEvent(e),
             .streamed_event => unreachable,
@@ -96,6 +106,16 @@ pub const Writer = struct {
         try self.writer.writeInt(u16, @truncate(d.mappings.len), .big);
         for (d.mappings) |m| {
             try self.writer.writeInt(u16, @intCast(m.value), .big);
+            try self.writer.writeInt(u16, @intCast(m.identifier.len), .big);
+            try self.writer.writeAll(m.identifier);
+        }
+    }
+
+    pub fn writeRouteOpHashes(self: *Writer, d: kwev.RouteOpHash) !void {
+        try self.writer.writeInt(u16, @intCast(d.driver_id), .big);
+        try self.writer.writeInt(u16, @truncate(d.mappings.len), .big);
+        for (d.mappings) |m| {
+            try self.writer.writeInt(u32, m.hash, .big);
             try self.writer.writeInt(u16, @intCast(m.identifier.len), .big);
             try self.writer.writeAll(m.identifier);
         }
@@ -254,6 +274,30 @@ test "writeChunk: ETYP golden bytes" {
         "\x00\x07" ++ // mapping 1: identifier length = 7
         "stopped" ++ // mapping 1: identifier
         "\xE1\x5B\x63\xE7"; // CRC32-iSCSI(name ++ size ++ payload)
+    try std.testing.expectEqualSlices(u8, expected, actual);
+}
+
+test "writeChunk: ROPH golden bytes" {
+    var buf: [64]u8 = undefined;
+    const actual = try writeChunkToBuf(&buf, .{ .route_op_hash = .{
+        .driver_id = 1,
+        .mappings = &.{
+            .{ .hash = 0x07CA1195, .identifier = "heartbeat" },
+            .{ .hash = 0xA79E4417, .identifier = "publish tick" },
+        },
+    } });
+
+    const expected = "ROPH" ++ // chunk name
+        "\x00\x00\x00\x00\x00\x00\x00\x25" ++ // payload size = 37
+        "\x00\x01" ++ // driver id = 1
+        "\x00\x02" ++ // mapping count = 2
+        "\x07\xCA\x11\x95" ++ // mapping 0: hash
+        "\x00\x09" ++ // mapping 0: identifier length = 9
+        "heartbeat" ++ // mapping 0: identifier
+        "\xA7\x9E\x44\x17" ++ // mapping 1: hash
+        "\x00\x0C" ++ // mapping 1: identifier length = 12
+        "publish tick" ++ // mapping 1: identifier
+        "\x35\x3A\xE3\x65"; // CRC32-iSCSI(name ++ size ++ payload)
     try std.testing.expectEqualSlices(u8, expected, actual);
 }
 
