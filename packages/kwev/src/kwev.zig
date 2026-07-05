@@ -4,6 +4,7 @@ pub const Reader = @import("reader.zig").Reader;
 pub const MappedFile = @import("mapped_file.zig").MappedFile;
 pub const structures = @import("structure.zig");
 pub const recorder = @import("recorder.zig");
+pub const compress = @import("compress.zig");
 const drivers = @import("kw-core").driver;
 const correlation = @import("kw-core").correlation;
 

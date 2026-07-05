@@ -5,10 +5,44 @@ pub const ChunkType = enum {
     drivers,
     event_type,
     route_op_hash,
+    dict,
     link,
     event,
+    evnc,
     streamed_event,
     eof,
+};
+
+pub const CompressionType = enum(u8) {
+    none = 0,
+    zstd = 1,
+    xz = 2,
+    lz4 = 3,
+};
+
+pub const DictAlgorithm = enum(u8) {
+    zstd = 0,
+    lz4 = 1,
+};
+
+/// A pre-trained compression dictionary (definition chunk). Referenced by
+/// EVNC chunks via (id, version); version 0 in a reference means "latest".
+pub const Dict = struct {
+    id: u16,
+    version: u16,
+    algorithm: DictAlgorithm,
+    dictionary: []const u8,
+};
+
+/// Compressed event chunks for archival storage. The compressed data, when
+/// decompressed, is a stream of framed EVNT (later EMTA/EDAT) chunks — see
+/// compress.expandEvnc; the bytes are kept raw here.
+pub const Evnc = struct {
+    compression: CompressionType,
+    dictionary_id: u16,
+    dictionary_version: u16,
+    uncompressed_size: u64,
+    compressed_data: []const u8,
 };
 
 pub const LinkType = enum {
@@ -111,8 +145,10 @@ pub const ChunkData = union(ChunkType) {
     drivers: Drivers,
     event_type: EventType,
     route_op_hash: RouteOpHash,
+    dict: Dict,
     link: Link,
     event: Event,
+    evnc: Evnc,
     streamed_event: StreamedEvent,
     eof: void,
 };
@@ -122,8 +158,10 @@ pub const ChunkNames = std.EnumArray(ChunkType, []const u8).init(.{
     .drivers = "DRVS",
     .event_type = "ETYP",
     .route_op_hash = "ROPH",
+    .dict = "DICT",
     .link = "LINK",
     .event = "EVNT",
+    .evnc = "EVNC",
     .streamed_event = "SEVT",
     .eof = "EOF!",
 });
@@ -133,8 +171,10 @@ pub const ChunkTypes = std.StaticStringMap(ChunkType).initComptime(&.{
     .{ "DRVS", .drivers },
     .{ "ETYP", .event_type },
     .{ "ROPH", .route_op_hash },
+    .{ "DICT", .dict },
     .{ "LINK", .link },
     .{ "EVNT", .event },
+    .{ "EVNC", .evnc },
     .{ "SEVT", .streamed_event },
     .{ "EOF!", .eof },
 });

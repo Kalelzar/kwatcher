@@ -79,7 +79,9 @@ pub const Reader = struct {
             .event => try self.readEvents(chunk, allocator),
             .event_type => try self.readEventTypes(chunk, allocator),
             .route_op_hash => try self.readRouteOpHashes(chunk, allocator),
+            .dict => try self.readDict(chunk),
             .link => try self.readLink(chunk),
+            .evnc => try self.readEvnc(chunk, size),
             .streamed_event => unreachable,
         }
 
@@ -202,6 +204,39 @@ pub const Reader = struct {
         h.mappings = try d.toOwnedSlice(allocator);
 
         chunk.* = .{ .route_op_hash = h };
+    }
+
+    pub fn readDict(self: *Reader, chunk: *kwev.ChunkData) Error!void {
+        const id = try self.reader.takeInt(u16, .big);
+        const version = try self.reader.takeInt(u16, .big);
+        const algorithm = try self.reader.takeInt(u8, .big);
+        const size = try self.reader.takeInt(u32, .big);
+        chunk.* = .{ .dict = .{
+            .id = id,
+            .version = version,
+            .algorithm = std.meta.intToEnum(kwev.DictAlgorithm, algorithm) catch
+                return error.FileCorrupt,
+            .dictionary = try self.reader.take(size),
+        } };
+    }
+
+    /// The compressed data runs to the end of the chunk, so this is the one
+    /// payload reader that needs the chunk size.
+    pub fn readEvnc(self: *Reader, chunk: *kwev.ChunkData, size: u64) Error!void {
+        const envelope = 1 + 2 + 2 + 8;
+        if (size < envelope) return error.FileCorrupt;
+        const compression = try self.reader.takeInt(u8, .big);
+        const dictionary_id = try self.reader.takeInt(u16, .big);
+        const dictionary_version = try self.reader.takeInt(u16, .big);
+        const uncompressed_size = try self.reader.takeInt(u64, .big);
+        chunk.* = .{ .evnc = .{
+            .compression = std.meta.intToEnum(kwev.CompressionType, compression) catch
+                return error.FileCorrupt,
+            .dictionary_id = dictionary_id,
+            .dictionary_version = dictionary_version,
+            .uncompressed_size = uncompressed_size,
+            .compressed_data = try self.reader.take(@intCast(size - envelope)),
+        } };
     }
 
     /// Walks a SEVT chunk record by record per the recovery procedure: a
@@ -366,6 +401,21 @@ fn expectChunkEql(expected: kwev.ChunkData, actual: kwev.ChunkData) !void {
                 },
             }
         },
+        .dict => |e| {
+            const a = actual.dict;
+            try t.expectEqual(e.id, a.id);
+            try t.expectEqual(e.version, a.version);
+            try t.expectEqual(e.algorithm, a.algorithm);
+            try t.expectEqualSlices(u8, e.dictionary, a.dictionary);
+        },
+        .evnc => |e| {
+            const a = actual.evnc;
+            try t.expectEqual(e.compression, a.compression);
+            try t.expectEqual(e.dictionary_id, a.dictionary_id);
+            try t.expectEqual(e.dictionary_version, a.dictionary_version);
+            try t.expectEqual(e.uncompressed_size, a.uncompressed_size);
+            try t.expectEqualSlices(u8, e.compressed_data, a.compressed_data);
+        },
         .streamed_event => |e| {
             const a = actual.streamed_event;
             try t.expectEqualSlices(u8, &e.salt, &a.salt);
@@ -453,6 +503,29 @@ test "roundtrip: ROPH" {
                 .{ .hash = 0x07CA1195, .identifier = "heartbeat_tick" },
                 .{ .hash = 0xA79E4417, .identifier = "publish heartbeat" },
             },
+        } },
+    });
+}
+
+test "roundtrip: DICT" {
+    try expectRoundtrip(&.{
+        .{ .dict = .{
+            .id = 3,
+            .version = 2,
+            .algorithm = .zstd,
+            .dictionary = "raw dictionary bytes",
+        } },
+    });
+}
+
+test "roundtrip: EVNC (raw bytes carried opaquely)" {
+    try expectRoundtrip(&.{
+        .{ .evnc = .{
+            .compression = .zstd,
+            .dictionary_id = 3,
+            .dictionary_version = 2,
+            .uncompressed_size = 1234,
+            .compressed_data = "opaque compressed payload",
         } },
     });
 }

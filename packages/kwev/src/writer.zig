@@ -49,8 +49,10 @@ pub const Writer = struct {
             .drivers => |d| try self.writeDrivers(d),
             .event_type => |e| try self.writeEventTypes(e),
             .route_op_hash => |r| try self.writeRouteOpHashes(r),
+            .dict => |d| try self.writeDict(d),
             .link => |l| try self.writeLink(l),
             .event => |e| try self.writeEvent(e),
+            .evnc => |e| try self.writeEvnc(e),
             .streamed_event => unreachable,
             .eof => {
                 try self.writer.writeInt(u32, 0xAAAAAAAA, .big);
@@ -119,6 +121,24 @@ pub const Writer = struct {
             try self.writer.writeInt(u16, @intCast(m.identifier.len), .big);
             try self.writer.writeAll(m.identifier);
         }
+    }
+
+    pub fn writeDict(self: *Writer, d: kwev.Dict) !void {
+        try self.writer.writeInt(u16, d.id, .big);
+        try self.writer.writeInt(u16, d.version, .big);
+        try self.writer.writeInt(u8, @intFromEnum(d.algorithm), .big);
+        try self.writer.writeInt(u32, @intCast(d.dictionary.len), .big);
+        try self.writer.writeAll(d.dictionary);
+    }
+
+    /// The compressed data has no inner length field: it runs to the end of
+    /// the chunk (the chunk size delimits it).
+    pub fn writeEvnc(self: *Writer, e: kwev.Evnc) !void {
+        try self.writer.writeInt(u8, @intFromEnum(e.compression), .big);
+        try self.writer.writeInt(u16, e.dictionary_id, .big);
+        try self.writer.writeInt(u16, e.dictionary_version, .big);
+        try self.writer.writeInt(u64, e.uncompressed_size, .big);
+        try self.writer.writeAll(e.compressed_data);
     }
 
     pub fn writeLink(self: *Writer, d: kwev.Link) !void {
@@ -298,6 +318,49 @@ test "writeChunk: ROPH golden bytes" {
         "\x00\x0C" ++ // mapping 1: identifier length = 12
         "publish tick" ++ // mapping 1: identifier
         "\x35\x3A\xE3\x65"; // CRC32-iSCSI(name ++ size ++ payload)
+    try std.testing.expectEqualSlices(u8, expected, actual);
+}
+
+test "writeChunk: DICT golden bytes" {
+    var buf: [64]u8 = undefined;
+    const actual = try writeChunkToBuf(&buf, .{ .dict = .{
+        .id = 3,
+        .version = 2,
+        .algorithm = .zstd,
+        .dictionary = "dictionary",
+    } });
+
+    const expected = "DICT" ++ // chunk name
+        "\x00\x00\x00\x00\x00\x00\x00\x13" ++ // payload size = 19
+        "\x00\x03" ++ // dictionary id = 3
+        "\x00\x02" ++ // dictionary version = 2
+        "\x00" ++ // algorithm = zstd (0)
+        "\x00\x00\x00\x0A" ++ // dictionary size = 10
+        "dictionary" ++ // dictionary bytes
+        "\x55\x99\xA7\x81"; // CRC32-iSCSI(name ++ size ++ payload)
+    try std.testing.expectEqualSlices(u8, expected, actual);
+}
+
+test "writeChunk: EVNC golden bytes" {
+    // Compression 'none' so the payload bytes are deterministic; zstd output
+    // varies by library version and never belongs in a golden test.
+    var buf: [64]u8 = undefined;
+    const actual = try writeChunkToBuf(&buf, .{ .evnc = .{
+        .compression = .none,
+        .dictionary_id = 3,
+        .dictionary_version = 2,
+        .uncompressed_size = 7,
+        .compressed_data = "payload",
+    } });
+
+    const expected = "EVNC" ++ // chunk name
+        "\x00\x00\x00\x00\x00\x00\x00\x14" ++ // payload size = 20
+        "\x00" ++ // compression = none (0)
+        "\x00\x03" ++ // dictionary id = 3
+        "\x00\x02" ++ // dictionary version = 2
+        "\x00\x00\x00\x00\x00\x00\x00\x07" ++ // uncompressed size = 7
+        "payload" ++ // compressed data (runs to end of chunk)
+        "\xE7\xAB\xBC\xA1"; // CRC32-iSCSI(name ++ size ++ payload)
     try std.testing.expectEqualSlices(u8, expected, actual);
 }
 

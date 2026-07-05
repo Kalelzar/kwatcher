@@ -217,4 +217,5 @@ pub fn build(b: *std.Build) !void {
     // kwev tooling:
     const kw_kwev = b.dependency("kw_kwev", .{ .target = target, .optimize = optimize }).module("kw-kwev");
     kwatcher_kwev.addImport("kw-kwev", kw_kwev);
+    kwatcher_kwev.addImport("kw-core", b.dependency("kw_core", .{ .target = target, .optimize = optimize }).module("kw-core"));
 }

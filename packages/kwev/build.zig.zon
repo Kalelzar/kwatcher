@@ -7,6 +7,9 @@
         .kw_core = .{
             .path = "../core",
         },
+        .zstd = .{
+            .path = "../../vendor/zstd",
+        },
     },
     .paths = .{
         "build.zig",

@@ -78,7 +78,21 @@ pub fn build(b: *std.Build) !void {
     // 1st Party:
     const kw_core = b.dependency("kw_core", .{ .target = target, .optimize = optimize }).module("kw-core");
 
+    // 3rd Party:
+    // Always ReleaseFast: vendored C, never debugged from here, and Debug
+    // zstd is unusably slow. No legacy-format decoders (we only read what we
+    // write) and no multi-threading (one-shot API only; drops pthreads).
+    const zstd = b.dependency("zstd", .{
+        .target = target,
+        .optimize = std.builtin.OptimizeMode.ReleaseFast,
+        .@"legacy-support" = @as(usize, 0),
+        .@"multi-thread" = false,
+    }).artifact("zstd");
+
     // Imports:
     // 1st Party:
     kw_kwev.addImport("kw-core", kw_core);
+
+    // Links:
+    kw_kwev.linkLibrary(zstd);
 }
