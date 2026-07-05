@@ -43,6 +43,9 @@ pub const Internal = struct {
 
                     if (extra.inj) |inj| {
                         const p = try inj.require(event.Properties);
+                        if (p.correlation_id.isUnset()) {
+                            std.log.err("scheduling a shutdown from a handler without a correlation id (bug)", .{});
+                        }
                         ev.properties.correlation_id = p.correlation_id;
                     }
 

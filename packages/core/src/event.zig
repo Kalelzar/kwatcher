@@ -1,5 +1,9 @@
 const std = @import("std");
 const klib = @import("klib");
+const schema = @import("schema.zig");
+const DepCtx = @import("dep/ctx.zig").DepCtx;
+
+pub const CorrelationID = @import("correlation.zig").CorrelationID;
 
 /// Builds a predicate that tests whether an event id `e` falls within the
 /// id-block bounds of event-type enum `T`.
@@ -40,8 +44,34 @@ pub const BaseValues = union(Base) {
 
 pub const Properties = struct {
     attempts: u8 = 0,
-    correlation_id: u128 = 0,
+    correlation_id: CorrelationID = .unset,
 };
+
+/// Stamp the current event's correlation id for the route about to handle
+/// it: an unset id means this event is a trace root (cron fire, signal,
+/// ingress without a wire id); a set id (scheduler copy or wire header) is
+/// continued with a hop. Drivers call this exactly once per dispatch, at the
+/// earliest moment the handling route is known; nothing else may write the
+/// id afterwards. Returns the stamped properties.
+pub fn stampRoute(inj: *DepCtx, comptime route_id: []const u8) !Properties {
+    return stampOp(inj, comptime CorrelationID.hash(route_id));
+}
+
+/// `stampRoute` for the rare runtime-known operation (cron anonymous jobs):
+/// takes a pre-hashed op id so no dispatch ever hashes at runtime.
+pub fn stampOp(inj: *DepCtx, op_id: u32) !Properties {
+    const props = try inj.require(*Properties);
+    if (props.correlation_id.isUnset()) {
+        const user: u32 = if (inj.require(*schema.UserInfo)) |u|
+            CorrelationID.hash(u.id)
+        else |_|
+            0;
+        props.correlation_id = .newRoot(user, op_id);
+    } else {
+        props.correlation_id = props.correlation_id.hop(op_id);
+    }
+    return props.*;
+}
 
 pub const ExtendedProperties = klib.meta.MergeStructs(
     Properties,

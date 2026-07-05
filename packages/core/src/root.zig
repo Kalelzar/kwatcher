@@ -4,6 +4,7 @@
 // types & DI
 pub const schema = @import("schema.zig");
 pub const event = @import("event.zig");
+pub const correlation = @import("correlation.zig");
 pub const deps = @import("dep.zig");
 pub const driver = @import("driver.zig");
 pub const scheduler = @import("scheduler.zig");
