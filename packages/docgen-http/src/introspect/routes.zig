@@ -54,7 +54,7 @@ fn findOp(comptime Docs: type, key: []const u8, operationId: []const u8) ?Docs.H
 /// can't see it).
 fn instanceId(depctx: *core.deps.DepCtx, allocator: core.mem.ScopedAllocator) ![]const u8 {
     const properties = try depctx.require(core.event.Properties);
-    return std.fmt.allocPrint(allocator.value, "{d}", .{properties.correlation_id});
+    return std.fmt.allocPrint(allocator.value, "{f}", .{properties.correlation_id});
 }
 
 /// Routes whose templates live under the `http` prefix.

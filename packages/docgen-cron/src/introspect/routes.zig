@@ -199,7 +199,7 @@ fn dynamicSnapshot(ji: cron.JobInfo, now: i64, allocator: std.mem.Allocator) !Jo
 /// can't see it).
 fn instanceId(depctx: *core.deps.DepCtx, allocator: core.mem.ScopedAllocator) ![]const u8 {
     const properties = try depctx.require(core.event.Properties);
-    return std.fmt.allocPrint(allocator.value, "{d}", .{properties.correlation_id});
+    return std.fmt.allocPrint(allocator.value, "{f}", .{properties.correlation_id});
 }
 
 fn notFound(comptime Docs: type, instance: []const u8) http.data.ApiResult(CronNext(Docs), http.data.ProblemDetails, &.{ 200, 404 }) {
@@ -298,8 +298,9 @@ fn Routes(comptime Docs: type) type {
                     .{ .anonymous = body.captures.name };
                 // Fire-and-keep: an extra run, the schedule is untouched. Null
                 // (job already gone) and push errors both resolve to the same
-                // UI outcome — the reloaded pane shows reality.
-                _ = shim.trigger(id) catch null;
+                // UI outcome — the reloaded pane shows reality. The injector
+                // makes the triggered job a hop of this request's trace.
+                _ = shim.trigger(id, depctx) catch null;
             }
 
             return .{ .value = .{ .ok = .{
