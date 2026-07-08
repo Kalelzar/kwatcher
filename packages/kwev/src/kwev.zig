@@ -1,4 +1,5 @@
 const std = @import("std");
+const Crc32c = @import("crc.zig").Crc32c;
 pub const Writer = @import("writer.zig").Writer;
 pub const Reader = @import("reader.zig").Reader;
 pub const MappedFile = @import("mapped_file.zig").MappedFile;
@@ -102,7 +103,7 @@ fn appendRecord(w: *std.Io.Writer, salt: [32]u8, evt: anytype) !void {
     );
     std.mem.writeInt(u16, prop_len_target, @intCast(w.end - prop_start), .big);
     std.mem.writeInt(u32, size_target, @intCast(w.end - body_start), .big);
-    var crc = std.hash.crc.Crc32Iscsi.init();
+    var crc = Crc32c.init();
     crc.update(&salt);
     crc.update(size_target);
     crc.update(w.buffer[body_start..w.end]);

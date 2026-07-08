@@ -1,4 +1,5 @@
 const std = @import("std");
+const Crc32c = @import("crc.zig").Crc32c;
 const kwev = @import("structure.zig");
 
 // TODO: Add a streaming writer that does not require the whole output to sit
@@ -64,7 +65,7 @@ pub const Writer = struct {
 
         const end = self.writer.end;
         std.mem.writeInt(u64, size_target, end - start, .big);
-        var crc = std.hash.crc.Crc32Iscsi.init();
+        var crc = Crc32c.init();
         // CRC includes chuck name (4 bytes) and the chunk length (8 bytes) in addition to
         // the actual data cotents (end - start) bytes so we need to offset by 12.
         crc.update(self.writer.buffer[start - 12 .. end]);
@@ -179,7 +180,7 @@ pub const Writer = struct {
         try self.writer.writeAll(&header);
         try self.writer.writeAll(record.data);
         try self.writer.writeAll(record.properties);
-        var crc = std.hash.crc.Crc32Iscsi.init();
+        var crc = Crc32c.init();
         crc.update(&salt);
         crc.update(&header);
         crc.update(record.data);
@@ -194,7 +195,7 @@ pub const Writer = struct {
         try self.writer.writeAll(&zeroes);
         try self.writer.writeAll(&salt);
         try self.writer.writeAll("SEVT");
-        var crc = std.hash.crc.Crc32Iscsi.init();
+        var crc = Crc32c.init();
         crc.update(&zeroes);
         crc.update(&salt);
         crc.update("SEVT");

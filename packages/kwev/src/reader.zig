@@ -1,4 +1,5 @@
 const std = @import("std");
+const Crc32c = @import("crc.zig").Crc32c;
 const kwev = @import("structure.zig");
 
 pub const Reader = struct {
@@ -91,7 +92,7 @@ pub const Reader = struct {
             return error.FileCorrupt;
         }
         const start = end - size - 12;
-        var crc = std.hash.crc.Crc32Iscsi.init();
+        var crc = Crc32c.init();
         // CRC includes chuck name (4 bytes) and the chunk length (8 bytes) in addition to
         // the actual data cotents (end - start) bytes so we need to offset by 12.
         crc.update(self.reader.buffer[start..end]);
@@ -268,7 +269,7 @@ pub const Reader = struct {
                 const msalt = try self.reader.takeArray(32);
                 const mname = try self.reader.takeArray(4);
                 const mcrc = try self.reader.takeInt(u32, .big);
-                var crc = std.hash.crc.Crc32Iscsi.init();
+                var crc = Crc32c.init();
                 crc.update(&[_]u8{ 0, 0, 0, 0 });
                 crc.update(msalt);
                 crc.update(mname);
@@ -281,7 +282,7 @@ pub const Reader = struct {
             if (self.reader.bufferedLen() < @as(u64, size) + 4) break :walk; // torn
             const body = try self.reader.take(size);
             const rcrc = try self.reader.takeInt(u32, .big);
-            var crc = std.hash.crc.Crc32Iscsi.init();
+            var crc = Crc32c.init();
             crc.update(&salt);
             var size_be: [4]u8 = undefined;
             std.mem.writeInt(u32, &size_be, size, .big);
@@ -714,7 +715,7 @@ test "SEVT recovery: record body that is not an event tears the chunk" {
     // (here: lengths that disagree with the record size) is invalid.
     const salt = testSalt(1);
     const body = "\x00\x00" ++ "\x00\xFF" ++ "\x00\x03" ++ "hi" ++ ".{}";
-    var crc = std.hash.crc.Crc32Iscsi.init();
+    var crc = Crc32c.init();
     crc.update(&salt);
     crc.update("\x00\x00\x00\x0B"); // record size = 11
     crc.update(body);
