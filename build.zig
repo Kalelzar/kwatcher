@@ -104,9 +104,12 @@ pub fn build(b: *std.Build) !void {
     const kwatcher_example = wireApp(b, target, optimize, openapi_version);
 
     const kwatcher_kwev = b.createModule(.{
-        .root_source_file = b.path("src/kwev.zig"),
+        .root_source_file = b.path("src/kwev/main.zig"),
         .target = target,
-        .optimize = optimize,
+        // The kwev tool crunches multi-GB archives (CRC32 over everything,
+        // millions of record parses); a Debug build of it pins a core for
+        // ages. Debug builds of the repo still get an optimized tool.
+        .optimize = if (optimize == .Debug) .ReleaseSafe else optimize,
         .dwarf_format = .@"64",
         .link_libc = false,
         .omit_frame_pointer = false,
