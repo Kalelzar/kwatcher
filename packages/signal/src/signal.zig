@@ -156,8 +156,18 @@ pub fn DriverBuilder(
                             switch (data.signum) {
                                 inline else => |rctx| {
                                     const R = comptime ForSignal(rctx, Routes);
-                                    inline for (R) |Route| {
-                                        _ = try server.event.stampRoute(inj, Route.id);
+                                    inline for (R, 0..) |Route, ri| {
+                                        // A signal fans out to every matching
+                                        // route but produces ONE recorded
+                                        // event, which can carry only one
+                                        // stamp: stamping per route would
+                                        // mint spans no record ever backs
+                                        // (phantom "?" parents in graphs).
+                                        // The first route's stamp wins; the
+                                        // siblings run under the same span.
+                                        if (comptime ri == 0) {
+                                            _ = try server.event.stampRoute(inj, Route.id);
+                                        }
                                         try Route.call(inj, data.signal_info);
                                     }
                                 },

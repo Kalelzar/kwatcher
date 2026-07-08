@@ -128,15 +128,21 @@ pub fn DriverBuilder(
 
                             pub fn callImmediate(self: @This(), data: CallContext, inj: *dep.DepCtx) anyerror!void {
                                 _ = self;
-                                return dispatch(data, inj);
+                                // Runs inside the CURRENT event's scope: no
+                                // stamp — the event record can only carry
+                                // one, and re-stamping here would orphan
+                                // anything the outer route already scheduled.
+                                return dispatch(data, inj, false);
                             }
                         };
 
-                        fn dispatch(data: CallContext, inj: *dep.DepCtx) anyerror!void {
+                        fn dispatch(data: CallContext, inj: *dep.DepCtx, comptime stamp: bool) anyerror!void {
                             switch (data) {
                                 inline else => |rctx, tag| {
                                     const R = comptime Routes[@intFromEnum(tag)];
-                                    _ = try server.event.stampRoute(inj, R.id);
+                                    if (comptime stamp) {
+                                        _ = try server.event.stampRoute(inj, R.id);
+                                    }
                                     try R.call(inj, rctx);
                                 },
                             }
@@ -184,7 +190,7 @@ pub fn DriverBuilder(
                             _ = self;
 
                             switch (et) {
-                                inline .call => try dispatch(ev.call, inj),
+                                inline .call => try dispatch(ev.call, inj, true),
                             }
                         }
                     };
