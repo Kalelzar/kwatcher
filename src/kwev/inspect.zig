@@ -9,9 +9,9 @@ const kwev = @import("kw-kwev");
 const inspection = @import("inspection.zig");
 const Inspection = inspection.Inspection;
 
-pub fn run(allocator: std.mem.Allocator, stdout: *std.Io.Writer, file: []const u8) !void {
+pub fn run(allocator: std.mem.Allocator, gpa: std.mem.Allocator, stdout: *std.Io.Writer, file: []const u8) !void {
     var insp = Inspection{};
-    try inspection.load(allocator, &insp, file, true, 4);
+    try inspection.load(allocator, gpa, &insp, file, true, 4);
     try inspection.validateRefs(&insp, file);
     const header = insp.header.?;
 

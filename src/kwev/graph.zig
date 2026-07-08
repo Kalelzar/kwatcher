@@ -6,12 +6,18 @@
 const std = @import("std");
 
 const core = @import("kw-core");
+const kwev = @import("kw-kwev");
 
 const archive = @import("archive.zig");
 const inspection = @import("inspection.zig");
+const Inspection = inspection.Inspection;
 
 pub fn run(
     allocator: std.mem.Allocator,
+    // Everything per-record fans out on thread pools; big containers use
+    // the real (thread-safe) allocator: at millions of records, arena'd
+    // growth (no-op frees on every resize) retained gigabytes.
+    gpa: std.mem.Allocator,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
     output: []const u8,
@@ -19,22 +25,14 @@ pub fn run(
 ) !void {
     const files = try archive.collectInputs(allocator, inputs);
 
-    // Collect every correlated record with its resolved label parts. The
-    // correlation id is parsed back out of the zon-encoded properties.
-    // Aggregation containers use a real allocator: at millions of records,
-    // arena'd hashmap growth (no-op frees on every resize) and per-trace
-    // maps retained gigabytes.
-    const gpa = std.heap.smp_allocator;
-    var items = std.ArrayList(GraphItem){};
-    defer items.deinit(gpa);
+    // Load every input (EVNC groups already expand in parallel inside
+    // loadValidated) and flatten its batches into extraction tasks.
     var op_names = std.AutoHashMap(u32, []const u8).init(allocator);
+    var tasks = std.ArrayList(ExtractTask){};
     var total_records: usize = 0;
-    var uncorrelated: usize = 0;
-    var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer scratch.deinit();
-
     for (files) |path| {
-        const insp = try inspection.loadValidated(allocator, path);
+        const insp = try allocator.create(Inspection);
+        insp.* = try inspection.loadValidated(allocator, gpa, path);
         // Identical by construction where inputs overlap; last write wins.
         for (insp.rophs.items) |roph| {
             for (roph.mappings) |m| {
@@ -42,43 +40,96 @@ pub fn run(
             }
         }
         for (insp.batches.items) |b| {
-            for (b.records) |r| {
-                total_records += 1;
-                const cid = parseCidFast(r.properties) orelse blk: {
-                    // Non-canonical properties (foreign writer, older
-                    // format): pay for a real zon parse.
-                    defer _ = scratch.reset(.retain_capacity);
-                    const source = try scratch.allocator().dupeZ(u8, r.properties);
-                    const props = std.zon.parse.fromSlice(core.event.Properties, scratch.allocator(), source, null, .{
-                        .ignore_unknown_fields = true,
-                    }) catch |e| switch (e) {
-                        error.ParseZon => {
-                            uncorrelated += 1;
-                            continue;
-                        },
-                        else => return e,
-                    };
-                    break :blk props.correlation_id;
-                };
-                if (cid.isUnset()) {
-                    uncorrelated += 1;
-                    continue;
-                }
-                // loadValidated guarantees these resolve.
-                const res = insp.resolveEvent(r.event_id).?;
-                const drv = insp.findDriver(res.driver_id).?;
-                try items.append(gpa, .{
-                    .cid = cid,
-                    .kind = drv.type,
-                    .key = drv.name,
-                    .event_name = res.identifier,
-                });
-            }
+            if (b.records.len == 0) continue;
+            try tasks.append(allocator, .{ .records = b.records, .insp = insp, .gpa = gpa, .out = undefined });
+            total_records += b.records.len;
         }
     }
 
-    var agg = try aggregateTraces(gpa, items.items);
+    // Extract correlation ids in parallel: every task fills its own disjoint
+    // range of one preallocated array (skipped records leave a gap at the
+    // range tail; `len` marks the used prefix).
+    const slots = try gpa.alloc(GraphItem, total_records);
+    defer gpa.free(slots);
+    {
+        var offset: usize = 0;
+        for (tasks.items) |*t| {
+            t.out = slots[offset..][0..t.records.len];
+            offset += t.records.len;
+        }
+    }
+    try forEachParallel(allocator, ExtractTask, tasks.items, extractTask);
+
+    var uncorrelated: usize = 0;
+    var extracted: usize = 0;
+    for (tasks.items) |t| {
+        if (t.err) |e| return e;
+        uncorrelated += t.uncorrelated;
+        extracted += t.len;
+    }
+
+    // Scatter into trace-identity shards: a trace never spans shards, so
+    // each shard can sort and aggregate independently (parent matching
+    // stays trace-scoped). Cursors are prefix-summed from the per-task
+    // shard counts, so all writes land in disjoint slots.
+    const sharded = try gpa.alloc(GraphItem, extracted);
+    defer gpa.free(sharded);
+    var shard_totals: [shard_count]usize = [_]usize{0} ** shard_count;
+    for (tasks.items) |t| {
+        for (t.shard_counts, 0..) |c, w| shard_totals[w] += c;
+    }
+    var shard_starts: [shard_count]usize = undefined;
+    {
+        var offset: usize = 0;
+        for (shard_totals, 0..) |c, w| {
+            shard_starts[w] = offset;
+            offset += c;
+        }
+    }
+    const scatters = try allocator.alloc(ScatterTask, tasks.items.len);
+    var cursors = shard_starts;
+    for (tasks.items, scatters) |t, *s| {
+        s.* = .{ .src = t.out[0..t.len], .cursors = cursors, .dst = sharded };
+        for (t.shard_counts, 0..) |c, w| cursors[w] += c;
+    }
+    try forEachParallel(allocator, ScatterTask, scatters, scatterTask);
+
+    // Sort + aggregate each shard in parallel, then merge the per-shard
+    // maps — they are tiny (distinct ops, not records), so the merge is
+    // trivially cheap.
+    var shards: [shard_count]ShardTask = undefined;
+    for (&shards, shard_starts, shard_totals) |*st, start, total| {
+        st.* = .{ .items = sharded[start..][0..total], .gpa = gpa };
+    }
+    try forEachParallel(allocator, ShardTask, &shards, shardTask);
+
+    var agg = TraceAggregation{
+        .nodes = std.AutoHashMap(NodeKey, NodeInfo).init(gpa),
+        .edges = std.AutoHashMap(EdgeKey, usize).init(gpa),
+    };
     defer agg.deinit();
+    for (&shards) |*st| {
+        if (st.err) |e| return e;
+        var nit = st.agg.nodes.iterator();
+        while (nit.next()) |kv| {
+            const gop = try agg.nodes.getOrPut(kv.key_ptr.*);
+            if (!gop.found_existing) {
+                gop.value_ptr.* = kv.value_ptr.*;
+            } else {
+                gop.value_ptr.count += kv.value_ptr.count;
+            }
+        }
+        var eit = st.agg.edges.iterator();
+        while (eit.next()) |kv| {
+            const gop = try agg.edges.getOrPut(kv.key_ptr.*);
+            if (!gop.found_existing) gop.value_ptr.* = 0;
+            gop.value_ptr.* += kv.value_ptr.*;
+        }
+        agg.orphaned += st.agg.orphaned;
+        agg.trace_count += st.agg.trace_count;
+        st.agg.deinit();
+    }
+
     const rendered = try renderDot(allocator, &op_names, &agg);
     try archive.writeAtomic(allocator, output, rendered.dot);
 
@@ -93,6 +144,132 @@ pub fn run(
     });
     if (agg.orphaned != 0) try stdout.print(" ({d} orphaned record(s) hang off \"?\")", .{agg.orphaned});
     try stdout.print(" -> {s}\n", .{output});
+}
+
+/// Fixed shard fan-out for the sort/aggregate phase. More shards than cores
+/// so a hot shard doesn't serialize the tail; cheap enough that small inputs
+/// don't care (empty shards are free).
+const shard_count = 64;
+
+/// Shard by the immutable trace identity — entropy is random per trace, but
+/// fold in the rest so degenerate ids still spread.
+fn shardOf(cid: core.correlation.CorrelationID) usize {
+    const mixed = cid.timestamp ^
+        (@as(u64, cid.root_op_id) << 16) ^
+        (@as(u64, cid.user_id) << 8) ^
+        @as(u64, cid.entropy);
+    return @intCast(mixed % shard_count);
+}
+
+/// Run `func(&tasks[i])` for every task, fanning out on a thread pool when
+/// there is more than one. Workers must not touch the shared arena; they
+/// report failure through their task's `err` field.
+fn forEachParallel(
+    allocator: std.mem.Allocator,
+    comptime T: type,
+    tasks: []T,
+    comptime func: fn (*T) void,
+) !void {
+    if (tasks.len == 0) return;
+    if (tasks.len == 1) return func(&tasks[0]);
+    var pool: std.Thread.Pool = undefined;
+    try pool.init(.{
+        .allocator = allocator,
+        .n_jobs = @min(tasks.len, std.Thread.getCpuCount() catch 1),
+    });
+    defer pool.deinit();
+    var wg = std.Thread.WaitGroup{};
+    for (tasks) |*t| pool.spawnWg(&wg, func, .{t});
+    pool.waitAndWork(&wg);
+}
+
+const ExtractTask = struct {
+    records: []const kwev.structures.Event.EventData,
+    insp: *const Inspection,
+    /// Thread-safe allocator backing this worker's zon-fallback scratch.
+    gpa: std.mem.Allocator,
+    /// This task's disjoint range of the shared slot array; extracted items
+    /// are written compactly from the start.
+    out: []GraphItem,
+    len: usize = 0,
+    shard_counts: [shard_count]u32 = [_]u32{0} ** shard_count,
+    uncorrelated: usize = 0,
+    err: ?anyerror = null,
+};
+
+fn extractTask(t: *ExtractTask) void {
+    var scratch = std.heap.ArenaAllocator.init(t.gpa);
+    defer scratch.deinit();
+    for (t.records) |r| {
+        const cid = parseCidFast(r.properties) orelse blk: {
+            // Non-canonical properties (foreign writer, older format): pay
+            // for a real zon parse.
+            defer _ = scratch.reset(.retain_capacity);
+            const source = scratch.allocator().dupeZ(u8, r.properties) catch |e| {
+                t.err = e;
+                return;
+            };
+            const props = std.zon.parse.fromSlice(core.event.Properties, scratch.allocator(), source, null, .{
+                .ignore_unknown_fields = true,
+            }) catch |e| switch (e) {
+                error.ParseZon => {
+                    t.uncorrelated += 1;
+                    continue;
+                },
+                else => {
+                    t.err = e;
+                    return;
+                },
+            };
+            break :blk props.correlation_id;
+        };
+        if (cid.isUnset()) {
+            t.uncorrelated += 1;
+            continue;
+        }
+        // loadValidated guarantees these resolve.
+        const res = t.insp.resolveEvent(r.event_id).?;
+        const drv = t.insp.findDriver(res.driver_id).?;
+        t.out[t.len] = .{
+            .cid = cid,
+            .kind = drv.type,
+            .key = drv.name,
+            .event_name = res.identifier,
+        };
+        t.len += 1;
+        t.shard_counts[shardOf(cid)] += 1;
+    }
+}
+
+const ScatterTask = struct {
+    src: []const GraphItem,
+    /// Write cursor per shard; prefix-summed so tasks never collide even
+    /// though `dst` is shared.
+    cursors: [shard_count]usize,
+    dst: []GraphItem,
+};
+
+fn scatterTask(t: *ScatterTask) void {
+    for (t.src) |item| {
+        const w = shardOf(item.cid);
+        t.dst[t.cursors[w]] = item;
+        t.cursors[w] += 1;
+    }
+}
+
+const ShardTask = struct {
+    items: []GraphItem,
+    /// Thread-safe allocator for this shard's aggregation maps.
+    gpa: std.mem.Allocator,
+    agg: TraceAggregation = undefined,
+    err: ?anyerror = null,
+};
+
+fn shardTask(t: *ShardTask) void {
+    t.agg = aggregateTraces(t.gpa, t.items) catch |e| {
+        t.err = e;
+        return;
+    };
 }
 
 /// Fast path for pulling the correlation id out of the canonical zon the

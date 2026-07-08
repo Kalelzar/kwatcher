@@ -18,6 +18,10 @@ pub const Inspection = struct {
     /// Events from the primary file only; linked files contribute
     /// definitions, not payloads.
     batches: std.ArrayList(Batch) = .{},
+    /// Batch sources in file order, collected during the walk. EVNC
+    /// decompression is deferred so independent groups can expand in
+    /// parallel; `expandPending` flattens this into `batches`.
+    pending: std.ArrayList(BatchSource) = .{},
     /// Linked definition files that were loaded.
     sources: std.ArrayList([]const u8) = .{},
     /// Links that were not followed (unsupported kind, depth, read failure).
@@ -81,6 +85,7 @@ pub const Inspection = struct {
 
 pub fn load(
     allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     insp: *Inspection,
     path: []const u8,
     primary: bool,
@@ -132,33 +137,25 @@ pub fn load(
                         return error.UnknownDictionary;
                     };
                 insp.expanded_bytes += e.uncompressed_size;
-                // Expansion yields EVNT chunks only (anything else errors).
-                const inner = try kwev.compress.expandEvnc(allocator, e, dict);
-                for (inner) |ic| {
-                    try insp.batches.append(allocator, .{
-                        .records = ic.event.events,
-                        .streamed = false,
-                        .sealed = true,
-                    });
-                }
+                try insp.pending.append(allocator, .{ .evnc = .{ .chunk = e, .dict = dict } });
             },
             .event => |e| if (primary) {
-                try insp.batches.append(allocator, .{
+                try insp.pending.append(allocator, .{ .direct = .{
                     .records = e.events,
                     .streamed = false,
                     .sealed = true,
-                });
+                } });
             },
             .streamed_event => |s| if (primary) {
-                try insp.batches.append(allocator, .{
+                try insp.pending.append(allocator, .{ .direct = .{
                     .records = s.records,
                     .streamed = true,
                     .sealed = s.sealed,
-                });
+                } });
             },
             .link => |l| switch (l) {
-                .rel => |rel| try followLink(allocator, insp, try archive.resolveRelative(allocator, path, rel), depth),
-                .abs => |abs| try followLink(allocator, insp, abs, depth),
+                .rel => |rel| try followLink(allocator, gpa, insp, try archive.resolveRelative(allocator, path, rel), depth),
+                .abs => |abs| try followLink(allocator, gpa, insp, abs, depth),
                 .jump => |j| try insp.skipped.append(allocator, try std.fmt.allocPrint(
                     allocator,
                     "jump to {s} at offset {d} (unsupported)",
@@ -173,14 +170,81 @@ pub fn load(
             .eof => {},
         }
     }
+
+    if (primary) try expandPending(allocator, gpa, insp);
 }
 
-fn followLink(allocator: std.mem.Allocator, insp: *Inspection, target: []const u8, depth: u8) anyerror!void {
+const BatchSource = union(enum) {
+    direct: Inspection.Batch,
+    evnc: PendingEvnc,
+};
+
+const PendingEvnc = struct {
+    chunk: kwev.structures.Evnc,
+    dict: ?[]const u8,
+};
+
+const ExpandResult = anyerror![]const kwev.structures.ChunkData;
+
+/// Decompress every pending EVNC group — decompress + inner-chunk parse +
+/// CRC per group is independent, so groups fan out on a thread pool — then
+/// flatten the ordered sources into `batches`. Expansion yields EVNT chunks
+/// only (anything else errors).
+fn expandPending(allocator: std.mem.Allocator, gpa: std.mem.Allocator, insp: *Inspection) !void {
+    var n: usize = 0;
+    for (insp.pending.items) |s| {
+        if (s == .evnc) n += 1;
+    }
+    const results = try allocator.alloc(ExpandResult, n);
+
+    if (n > 1) {
+        var pool: std.Thread.Pool = undefined;
+        try pool.init(.{ .allocator = allocator, .n_jobs = @min(n, std.Thread.getCpuCount() catch 1) });
+        defer pool.deinit();
+        var wg = std.Thread.WaitGroup{};
+        var i: usize = 0;
+        for (insp.pending.items) |s| {
+            if (s != .evnc) continue;
+            pool.spawnWg(&wg, expandOne, .{ s.evnc, gpa, &results[i] });
+            i += 1;
+        }
+        pool.waitAndWork(&wg);
+    } else if (n == 1) {
+        for (insp.pending.items) |s| {
+            if (s == .evnc) expandOne(s.evnc, gpa, &results[0]);
+        }
+    }
+
+    var i: usize = 0;
+    for (insp.pending.items) |s| switch (s) {
+        .direct => |b| try insp.batches.append(allocator, b),
+        .evnc => {
+            const inner = try results[i];
+            i += 1;
+            for (inner) |ic| {
+                try insp.batches.append(allocator, .{
+                    .records = ic.event.events,
+                    .streamed = false,
+                    .sealed = true,
+                });
+            }
+        },
+    };
+    insp.pending.clearRetainingCapacity();
+}
+
+/// Pool worker: expanded data must come from the caller's thread-safe
+/// allocator — the shared arena is not thread-safe.
+fn expandOne(pending: PendingEvnc, gpa: std.mem.Allocator, out: *ExpandResult) void {
+    out.* = kwev.compress.expandEvnc(gpa, pending.chunk, pending.dict);
+}
+
+fn followLink(allocator: std.mem.Allocator, gpa: std.mem.Allocator, insp: *Inspection, target: []const u8, depth: u8) anyerror!void {
     if (depth == 0) {
         std.log.err("link depth limit reached at {s} (link cycle?)", .{target});
         return error.TooManyLinks;
     }
-    try load(allocator, insp, target, false, depth - 1);
+    try load(allocator, gpa, insp, target, false, depth - 1);
 }
 
 /// Referential integrity every strict command demands: a HDRA must exist,
@@ -216,9 +280,9 @@ pub fn validateRefs(insp: *const Inspection, path: []const u8) !void {
 /// Loads one input for consolidation: resolve links, sort the definition
 /// chunks so definition comparison is chunk-order insensitive, and enforce
 /// the same referential integrity `inspect` demands.
-pub fn loadValidated(allocator: std.mem.Allocator, path: []const u8) !Inspection {
+pub fn loadValidated(allocator: std.mem.Allocator, gpa: std.mem.Allocator, path: []const u8) !Inspection {
     var insp = Inspection{};
-    try load(allocator, &insp, path, true, 4);
+    try load(allocator, gpa, &insp, path, true, 4);
     std.mem.sort(kwev.structures.EventType, insp.etyps.items, {}, etypLessThan);
     std.mem.sort(kwev.structures.RouteOpHash, insp.rophs.items, {}, rophLessThan);
     std.mem.sort(kwev.structures.Dict, insp.dicts.items, {}, dictLessThan);

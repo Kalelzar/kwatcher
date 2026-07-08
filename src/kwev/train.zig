@@ -11,6 +11,7 @@ const inspection = @import("inspection.zig");
 
 pub fn run(
     allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     stdout: *std.Io.Writer,
     output: []const u8,
     inputs: []const []const u8,
@@ -26,7 +27,7 @@ pub fn run(
     var corpus_bytes: usize = 0;
     var header: ?kwev.structures.HeaderA = null;
     for (files) |path| {
-        const insp = try inspection.loadValidated(allocator, path);
+        const insp = try inspection.loadValidated(allocator, gpa, path);
         if (header == null) header = insp.header;
         for (insp.batches.items) |b| {
             for (b.records) |r| {

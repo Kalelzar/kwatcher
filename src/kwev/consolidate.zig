@@ -12,6 +12,7 @@ const Inspection = inspection.Inspection;
 
 pub fn run(
     allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
     output: []const u8,
@@ -31,7 +32,7 @@ pub fn run(
 
     for (files) |path| {
         total_size += (try std.fs.cwd().statFile(path)).size;
-        const insp = try inspection.loadValidated(allocator, path);
+        const insp = try inspection.loadValidated(allocator, gpa, path);
         total_size += insp.expanded_bytes;
         if (reference) |*ref| {
             try expectSameDefs(ref, &insp, path);
@@ -86,22 +87,45 @@ pub fn run(
         // One EVNC per group of event chunks, each group bounded by an
         // uncompressed-size budget — a chunk has framing and buffers cap out,
         // so a single unbounded EVNC is only reasonable while it fits.
+        // Boundaries are computed up front so the groups (independent zstd
+        // jobs) can compress on a thread pool; results append in order, so
+        // the output stays byte-identical to the serial path.
         const max_evnc_uncompressed = 4 * 1024 * 1024;
+        const Group = struct { start: usize, end: usize };
+        var groups = std.ArrayList(Group){};
         var start_idx: usize = 0;
         var group_size: usize = 0;
         for (events.items, 0..) |ec, idx| {
             var chunk_size: usize = 18;
             for (ec.event.events) |ev| chunk_size += 6 + ev.data.len + ev.properties.len;
             if (group_size != 0 and group_size + chunk_size > max_evnc_uncompressed) {
-                try appendEvnc(allocator, &chunks, events.items[start_idx..idx], algo, dict);
+                try groups.append(allocator, .{ .start = start_idx, .end = idx });
                 start_idx = idx;
                 group_size = 0;
             }
             group_size += chunk_size;
         }
         if (start_idx < events.items.len) {
-            try appendEvnc(allocator, &chunks, events.items[start_idx..], algo, dict);
+            try groups.append(allocator, .{ .start = start_idx, .end = events.items.len });
         }
+
+        const results = try allocator.alloc(CompressResult, groups.items.len);
+        if (groups.items.len > 1) {
+            var pool: std.Thread.Pool = undefined;
+            try pool.init(.{
+                .allocator = allocator,
+                .n_jobs = @min(groups.items.len, std.Thread.getCpuCount() catch 1),
+            });
+            defer pool.deinit();
+            var wg = std.Thread.WaitGroup{};
+            for (groups.items, results) |g, *out| {
+                pool.spawnWg(&wg, compressOne, .{ events.items[g.start..g.end], algo, dict, gpa, out });
+            }
+            pool.waitAndWork(&wg);
+        } else if (groups.items.len == 1) {
+            compressOne(events.items, algo, dict, gpa, &results[0]);
+        }
+        for (results) |r| try chunks.append(allocator, .{ .evnc = try r });
     } else {
         try chunks.appendSlice(allocator, events.items);
     }
@@ -221,20 +245,23 @@ fn loadDictFile(allocator: std.mem.Allocator, path: []const u8) !kwev.structures
     };
 }
 
-fn appendEvnc(
-    allocator: std.mem.Allocator,
-    chunks: *std.ArrayList(kwev.structures.ChunkData),
+const CompressResult = anyerror!kwev.structures.Evnc;
+
+/// Pool worker: compressed groups must come from the caller's thread-safe
+/// allocator — the shared arena is not thread-safe.
+fn compressOne(
     group: []const kwev.structures.ChunkData,
     algo: kwev.structures.CompressionType,
     dict: ?kwev.structures.Dict,
-) !void {
-    const evnc = try kwev.compress.compressChunks(
-        allocator,
+    gpa: std.mem.Allocator,
+    out: *CompressResult,
+) void {
+    out.* = kwev.compress.compressChunks(
+        gpa,
         group,
         algo,
         if (dict) |d| d.id else 0,
         if (dict) |d| d.version else 0,
         if (dict) |d| d.dictionary else null,
     );
-    try chunks.append(allocator, .{ .evnc = evnc });
 }

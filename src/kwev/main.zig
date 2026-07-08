@@ -44,12 +44,15 @@ const commands = std.StaticStringMap(Cmd).initComptime(&.{
 
 const Ctx = struct {
     arena: std.mem.Allocator,
+    /// Thread-safe allocator for pool workers and their results — the arena
+    /// is not thread-safe and must never cross into a worker.
+    gpa: std.mem.Allocator,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 };
 
 pub fn juicyMain(allocator: std.mem.Allocator) !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     var arg_it = try std.process.argsWithAllocator(allocator);
@@ -71,12 +74,12 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     const file = arg_it.next() orelse return usage(stderr);
     const cmd = commands.get(command) orelse return usage(stderr);
 
-    const ctx = Ctx{ .arena = arena.allocator(), .stdout = stdout, .stderr = stderr };
+    const ctx = Ctx{ .arena = arena.allocator(), .gpa = allocator, .stdout = stdout, .stderr = stderr };
     const args = try collectArgs(ctx.arena, &arg_it, file);
 
     switch (cmd) {
         .dump => try dump.run(ctx.arena, stdout, args[0]),
-        .inspect => try inspect.run(ctx.arena, stdout, args[0]),
+        .inspect => try inspect.run(ctx.arena, ctx.gpa, stdout, args[0]),
         .consolidate => try cmdConsolidate(ctx, args),
         .train => try cmdTrain(ctx, args),
         .graph => try cmdGraph(ctx, args),
@@ -132,7 +135,7 @@ fn cmdConsolidate(ctx: Ctx, args: []const []const u8) !void {
         }
     }
     if (inputs.items.len < 2) return usage(ctx.stderr);
-    try consolidate.run(ctx.arena, ctx.stdout, ctx.stderr, inputs.items[0], inputs.items[1..], compression, dict_path);
+    try consolidate.run(ctx.arena, ctx.gpa, ctx.stdout, ctx.stderr, inputs.items[0], inputs.items[1..], compression, dict_path);
 }
 
 fn cmdTrain(ctx: Ctx, args: []const []const u8) !void {
@@ -156,12 +159,12 @@ fn cmdTrain(ctx: Ctx, args: []const []const u8) !void {
         return error.BadArguments;
     }
     if (inputs.items.len < 2) return usage(ctx.stderr);
-    try train.run(ctx.arena, ctx.stdout, inputs.items[0], inputs.items[1..], dict_id, dict_version, max_size);
+    try train.run(ctx.arena, ctx.gpa, ctx.stdout, inputs.items[0], inputs.items[1..], dict_id, dict_version, max_size);
 }
 
 fn cmdGraph(ctx: Ctx, args: []const []const u8) !void {
     if (args.len < 2) return usage(ctx.stderr);
-    try graph.run(ctx.arena, ctx.stdout, ctx.stderr, args[0], args[1..]);
+    try graph.run(ctx.arena, ctx.gpa, ctx.stdout, ctx.stderr, args[0], args[1..]);
 }
 
 fn usage(stderr: *std.Io.Writer) error{BadArguments} {
