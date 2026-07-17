@@ -121,18 +121,22 @@ fn unbind(
 }
 
 /// You can't consume a message while recording
-// This is a noop and always returns null
+// This always returns null, but honors the blocking contract of consume
+// (wait up to timeout_ns) so polling consumers don't hot-spin on it.
 fn consume(ptr: *anyopaque, timeout_ns: i64) anyerror!?Response {
     const self = getSelf(ptr);
     _ = try self.writer.print("consume({})\n", .{timeout_ns});
+    if (timeout_ns > 0) std.Thread.sleep(@intCast(timeout_ns));
     return null;
 }
 
 /// You can't return a message while recording
-// This is a noop and always returns null
+// This always returns null, but honors the blocking contract of getReturns
+// (wait up to timeout_ns) so polling consumers don't hot-spin on it.
 pub fn getReturns(ptr: *anyopaque, timeout_ns: i64) !?Client.ReturnedMessage {
     const self = getSelf(ptr);
     _ = try self.writer.print("returns({})\n", .{timeout_ns});
+    if (timeout_ns > 0) std.Thread.sleep(@intCast(timeout_ns));
     return null;
 }
 

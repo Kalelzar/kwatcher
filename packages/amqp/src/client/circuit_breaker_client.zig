@@ -95,16 +95,21 @@ fn recordSuccess(self: *CircuitBreakingClient) !void {
     }
 }
 
+/// Connectivity errors count toward tripping the breaker and are safe to
+/// forward to the fallback; application errors are neither.
+fn isConnectivityError(err: anyerror) bool {
+    return switch (err) {
+        error.Disconnected => true,
+        else => false,
+    };
+}
+
 fn recordFailure(self: *CircuitBreakingClient, err: anyerror) !void {
     self.mutex.lock();
     defer self.mutex.unlock();
     log.err("Error {t}", .{err});
-    // Only count specific errors as failures
-    switch (err) {
-        error.Disconnected,
-        => {},
-        else => return, // Don't trip on application errors
-    }
+    // Don't trip on application errors
+    if (!isConnectivityError(err)) return;
 
     self.last_failure_time = std.time.milliTimestamp();
 
@@ -144,8 +149,10 @@ fn executeWithCircuitBreaker(
         } else |err| {
             try self.recordFailure(err);
 
-            // If we failed on main and are now open, retry on fallback
-            if (self.state == .open and client_instance.ptr == self.main_client.ptr) {
+            // Forward connectivity failures on the main client straight to
+            // the fallback — waiting for the breaker to trip would lose the
+            // operations that accumulate the failure count.
+            if (isConnectivityError(err) and client_instance.ptr == self.main_client.ptr) {
                 log.debug("Retrying operation on fallback client", .{});
                 return @call(.auto, op, .{self.fallback_client} ++ args);
             }
@@ -170,6 +177,14 @@ fn getId(ptr: *anyopaque) []const u8 {
 
 pub fn connect(ptr: *anyopaque) anyerror!void {
     const self = getSelf(ptr);
+    // Route the fault by breaker state: an open circuit connects the
+    // fallback without paying for a doomed (and potentially slow) main
+    // attempt; once getCurrentClient hands main back (half-open), the
+    // attempt below doubles as the recovery probe.
+    const current = self.getCurrentClient();
+    if (current.ptr != self.main_client.ptr) {
+        return current.connect();
+    }
     // Try main first
     self.main_client.connect() catch |err| {
         try self.recordFailure(err);

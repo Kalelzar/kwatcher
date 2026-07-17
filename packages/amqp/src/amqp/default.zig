@@ -3,6 +3,8 @@ const std = @import("std");
 const dep = @import("kw-core").deps;
 const DriverRegistry = @import("kw-core").driver.Drivers;
 const Client = @import("../client/client.zig");
+const LoggingClient = @import("../client/logging_client.zig");
+const BreakerRegistry = @import("../client/breaker_registry.zig");
 const Resolver = @import("kw-core").resolver.Resolver;
 const InternFmtCache = @import("kw-core").InternFmtCache;
 
@@ -15,6 +17,7 @@ pub fn Static(comptime Context: type, comptime Config: type, comptime subpath: [
         lock: Lock = .{},
         client_pool: ?Pool = null,
         fmt: ?InternFmtCache = null,
+        breakers: ?BreakerRegistry = null,
         context: Context = .{},
 
         pub fn ourConfig(inj: *dep.DepCtx, config: *Config) !*OurConfig {
@@ -45,6 +48,25 @@ pub fn Static(comptime Context: type, comptime Config: type, comptime subpath: [
             return &self.client_pool.?;
         }
 
+        pub fn breakerRegistry(self: *@This(), allocator: std.mem.Allocator) *BreakerRegistry {
+            if (self.breakers) |*b| {
+                @branchHint(.likely);
+                return b;
+            }
+
+            self.lock.mutex.lock();
+            defer self.lock.mutex.unlock();
+
+            if (self.breakers) |*b| {
+                @branchHint(.cold);
+                return b;
+            }
+
+            self.breakers = .init(allocator);
+
+            return &self.breakers.?;
+        }
+
         pub fn fmtCache(self: *@This(), allocator: std.mem.Allocator) *InternFmtCache {
             if (self.fmt) |*p| {
                 @branchHint(.likely);
@@ -68,6 +90,11 @@ pub fn Static(comptime Context: type, comptime Config: type, comptime subpath: [
         pub fn deconstruct(self: *@This(), allocator: std.mem.Allocator) void {
             //self.lock.mutex.lock();
             //defer self.lock.mutex.unlock();
+            if (self.breakers) |*b| {
+                b.deinit();
+                self.breakers = null;
+            }
+
             if (self.client_pool) |*p| {
                 p.deinit(allocator);
                 self.client_pool = null;
@@ -86,14 +113,34 @@ pub fn Static(comptime Context: type, comptime Config: type, comptime subpath: [
 }
 
 const Scoped = struct {
+    /// The injectable Client: the leased pool client tied to the logging
+    /// fallback through the persistent circuit breaker.
     client: Client = undefined,
+    fallback: LoggingClient = undefined,
+    writer: std.fs.File.Writer = undefined,
+    buffer: [4096]u8 = undefined,
+    /// Optional so compile() skips it: a second Client-typed field would
+    /// steal the injection slot from `client`.
+    lease: ?Client = null,
 
-    pub fn construct(self: *Scoped, pool: *Pool) !void {
-        self.client = try pool.lease();
+    pub fn construct(self: *Scoped, pool: *Pool, breakers: *BreakerRegistry) !void {
+        const lease = try pool.leaseNow();
+        errdefer pool.release(lease) catch {};
+        self.lease = lease;
+        // Streaming mode: plain writer() does positional I/O from pos 0,
+        // which overwrites the start of a redirected stderr on every flush.
+        self.writer = std.fs.File.stderr().writerStreaming(&self.buffer);
+        self.fallback = .init(&self.writer.interface);
+        self.client = try breakers.wrap(lease, self.fallback.client());
+        // Fault through the breaker: if the broker is unreachable this
+        // engages the fallback now, so the injected Client is already
+        // routed correctly by the time it reaches a user.
+        try self.client.connect();
     }
 
     pub fn deconstruct(self: *Scoped, pool: *Pool) void {
-        pool.release(self.client) catch {};
+        self.fallback.deinit();
+        if (self.lease) |lease| pool.release(lease) catch {};
     }
 };
 

@@ -52,13 +52,21 @@ pub const ClientPool = struct {
     }
 
     pub fn lease(self: *ClientPool) !Client {
-        const client: Client = try self.pool.lease();
+        const client: Client = try self.leaseNow();
         const internal: *AmqpClient = @ptrCast(@alignCast(client.ptr));
         if (internal.state != .connected) {
             try client.connect();
         }
 
         return client;
+    }
+
+    /// Leases a client without pre-faulting the connection. Callers that
+    /// route through a fault-handling wrapper (e.g. a circuit breaker)
+    /// connect through that wrapper instead, so an unreachable broker
+    /// engages the fallback rather than failing the lease.
+    pub fn leaseNow(self: *ClientPool) !Client {
+        return self.pool.lease();
     }
 
     pub fn release(self: *ClientPool, c: Client) !void {

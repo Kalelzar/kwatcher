@@ -3,6 +3,7 @@
 pub const Amqp = @import("amqp_client.zig");
 pub const Logging = @import("logging_client.zig");
 pub const CircuitBreaker = @import("circuit_breaker_client.zig");
+pub const BreakerRegistry = @import("breaker_registry.zig");
 
 const std = @import("std");
 const amqp = @import("zamqp");
