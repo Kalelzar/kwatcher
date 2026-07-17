@@ -15,6 +15,7 @@ pub const mem = @import("mem/mem.zig");
 pub const config = @import("utils/config.zig");
 pub const metrics = @import("utils/metrics.zig");
 pub const InternFmtCache = @import("utils/intern_fmt_cache.zig");
+pub const recorder = @import("utils/recorder.zig");
 pub const meta = @import("utils/meta.zig");
 pub const shared = @import("utils/shared.zig");
 pub const queue = @import("utils/queue.zig");
