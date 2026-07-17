@@ -101,12 +101,14 @@ pub const Internal = struct {
                 self: *@This(),
                 wg: *std.Thread.WaitGroup,
                 pool: *std.Thread.Pool,
-                arc: anytype,
+                deps: anytype,
+                allocator: std.mem.Allocator,
             ) anyerror!void {
                 _ = self;
                 _ = wg;
                 _ = pool;
-                arc.deinit();
+                _ = deps;
+                _ = allocator;
                 return;
             }
 

@@ -14,6 +14,10 @@ pub const DepMap = map.DepMap;
 
 pub const DepHub = @import("dep/hub.zig").DepHub;
 
+const scope_mod = @import("dep/scope.zig");
+pub const Scope = scope_mod.Scope;
+pub const scope = scope_mod.scope;
+
 const container = @import("dep/container.zig");
 pub const DependencyLifetimes = container.DependencyLifetimes;
 pub const DependencyContainer = container.DependencyContainer;

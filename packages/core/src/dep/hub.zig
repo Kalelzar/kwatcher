@@ -455,6 +455,26 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
             allocator: std.mem.Allocator,
         ) !void {
             var handles: std.ArrayList(*anyopaque) = .{};
+            // A mid-stack create failure must destroy the contexts already
+            // created here: the caller's ctx.value is still empty at that
+            // point, so reset() cannot reach them.
+            errdefer {
+                var created: usize = 0;
+                inline for (DM.Categories) |C| {
+                    if (comptime std.mem.eql(u8, @tagName(C.Tag), "all")) continue;
+                    if (comptime std.mem.eql(u8, @tagName(C.Tag), @tagName(category)) and @intFromEnum(C.Lifetime) <= @intFromEnum(lifetime)) {
+                        if (comptime C.Lifetime != .static) {
+                            inline for (C.ContextStack) |Ctx| {
+                                if (created < handles.items.len) {
+                                    allocator.destroy(@as(*Ctx, @ptrCast(@alignCast(handles.items[created]))));
+                                    created += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                handles.deinit(allocator);
+            }
             try handles.ensureUnusedCapacity(allocator, 1);
             inline for (DM.Categories) |C| {
                 if (comptime std.mem.eql(u8, @tagName(C.Tag), "all")) continue;
@@ -480,6 +500,39 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
             ctx: *DepCtx,
         ) !void {
             var nextCtx: u8 = 0;
+            // A mid-stack construct failure must deconstruct the contexts
+            // already constructed here — in reverse — so resources (e.g. a
+            // leased client) don't leak into the caller's retry loop.
+            errdefer {
+                const Stack = comptime blk: {
+                    var s: []const type = &.{};
+                    for (DM.Categories) |C| {
+                        if (std.mem.eql(u8, @tagName(C.Tag), "all")) continue;
+                        if (std.mem.eql(u8, @tagName(C.Tag), @tagName(category)) and @intFromEnum(C.Lifetime) <= @intFromEnum(lifetime) and C.Lifetime != .static) {
+                            s = s ++ C.ContextStack;
+                        }
+                    }
+                    break :blk s;
+                };
+                inline for (0..Stack.len) |ri| {
+                    const i = Stack.len - ri - 1;
+                    const Ctx = Stack[i];
+                    if (i < nextCtx) {
+                        const c: *Ctx = @ptrCast(@alignCast(ctx.value[i]));
+                        if (comptime @hasDecl(Ctx, "deconstruct")) blk: {
+                            const fun = @field(Ctx, "deconstruct");
+                            if (@typeInfo(@TypeOf(fun)) != .@"fn") break :blk;
+                            var args: std.meta.ArgsTuple(@TypeOf(fun)) = undefined;
+                            const n_deps = comptime std.meta.fields(std.meta.ArgsTuple(@TypeOf(fun))).len;
+                            args[0] = c;
+                            inline for (1..n_deps) |j| {
+                                args[j] = ctx.require(@TypeOf(args[j])) catch unreachable;
+                            }
+                            @call(.auto, fun, args);
+                        }
+                    }
+                }
+            }
             inline for (DM.Categories) |C| {
                 if (comptime std.mem.eql(u8, @tagName(C.Tag), "all")) continue;
                 if (comptime std.mem.eql(u8, @tagName(C.Tag), @tagName(category)) and @intFromEnum(C.Lifetime) <= @intFromEnum(lifetime)) {
