@@ -12,7 +12,6 @@ const ExProps = core.event.ExtendedProperties;
 const dep = core.deps;
 
 const shared = core.shared;
-const arc = core.arc;
 const MCMPQueue = core.queue.StaticStrict;
 
 const kwev = @import("kw-kwev");
@@ -169,38 +168,11 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
             var wg = std.Thread.WaitGroup{};
 
             inline for (Handlers, 0..) |_, i| {
-                var dep_ctx = try self.deps.compile(
-                    D.drivers[i].key,
-                    .scoped,
-                    self.allocator,
+                log.info(
+                    "[{d}] Starting {s}.{s}...",
+                    .{ i, @tagName(D.drivers[i].kind), @tagName(D.drivers[i].key) },
                 );
-                const H = struct {
-                    allocator: std.mem.Allocator,
-                    pub fn deinit(this: *@This(), target: *dep.DepCtx) void {
-                        Deps.deactualize(target, D.drivers[i].key, .scoped);
-                        Deps.reset(target, D.drivers[i].key, .scoped, this.allocator);
-                    }
-                };
-
-                try self.deps.prepare(
-                    &dep_ctx,
-                    D.drivers[i].key,
-                    .scoped,
-                    self.allocator,
-                );
-                try self.deps.actualize(D.drivers[i].key, .scoped, &dep_ctx);
-
-                const scoped = try dep_ctx.require(ScopedAllocator);
-                const arcctx = try arc.ArcCtx(dep.DepCtx, H).init(
-                    scoped.value,
-                    .{
-                        .data = dep_ctx,
-                        .ctx = .{
-                            .allocator = self.allocator,
-                        },
-                    },
-                );
-                try self.handlers[i].watch(&wg, pool, arcctx);
+                try self.handlers[i].watch(&wg, pool, &self.deps, self.allocator);
             }
 
             pool.waitAndWork(&wg);
