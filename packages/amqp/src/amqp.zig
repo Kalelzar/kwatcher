@@ -519,25 +519,46 @@ pub fn DriverBuilder(
                             self: *@This(),
                             wg: *std.Thread.WaitGroup,
                             pool: *std.Thread.Pool,
-                            arc: anytype,
+                            deps: anytype,
+                            allocator: std.mem.Allocator,
                         ) anyerror!void {
-                            if (!listen or jobs == 0) {
-                                arc.deinit();
-                                return;
-                            }
+                            if (!listen or jobs == 0) return;
 
+                            // Each worker builds its own dependency scope, so each
+                            // holds its own client lease for its whole lifetime:
+                            // jobs must not exceed the client pool size.
                             for (0..jobs) |_| {
-                                pool.spawnWg(wg, watch_inner, .{ self, arc });
+                                pool.spawnWg(wg, watch_inner, .{ self, deps, allocator });
                             }
                         }
 
-                        pub fn watch_inner(self: *@This(), arc: anytype) void {
-                            //FIXME: This is shared by all threads and subsequently the client is shared which causes binding errors. This should not happen.
-                            const inj: *dep.DepCtx = &arc.ref().data;
-                            defer arc.unref();
-
+                        pub fn watch_inner(self: *@This(), deps: anytype, allocator: std.mem.Allocator) void {
                             outer: while (@atomicLoad(bool, &self.should_run, .acquire)) {
-                                const client = inj.require(Client) catch unreachable;
+                                var sc = dep.scope(deps, key, allocator) catch |e| {
+                                    std.log.warn(
+                                        "[{s},{d}] Failed to actualize scoped context: {t}; retrying.",
+                                        .{ @tagName(key), std.Thread.getCurrentId(), e },
+                                    );
+                                    // stop() broadcasts `cond`, so shutdown interrupts
+                                    // this wait instead of blocking the join.
+                                    self.mutex.lock();
+                                    defer self.mutex.unlock();
+                                    self.cond.timedWait(&self.mutex, 500 * std.time.ns_per_ms) catch {};
+                                    continue :outer;
+                                };
+                                // Must stay inside the loop: every `continue :outer`
+                                // has to release the client lease so the next
+                                // iteration's actualize can reconnect it.
+                                defer sc.deinit();
+                                const inj: *dep.DepCtx = &sc.ctx;
+
+                                const client = inj.require(Client) catch |e| {
+                                    std.log.err(
+                                        "[{s},{d}] Client unavailable after actualization: {t}",
+                                        .{ @tagName(key), std.Thread.getCurrentId(), e },
+                                    );
+                                    continue :outer;
+                                };
                                 const alloc = inj.require(std.mem.Allocator) catch unreachable;
                                 var dependant_bindings = std.ArrayList(*shared.DTValue){};
                                 defer {
