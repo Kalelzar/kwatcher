@@ -188,13 +188,15 @@ pub fn DriverBuilder(
                             self: *@This(),
                             wg: *std.Thread.WaitGroup,
                             pool: *std.Thread.Pool,
-                            arc: anytype,
+                            deps: anytype,
+                            allocator: std.mem.Allocator,
                         ) anyerror!void {
                             _ = self;
                             _ = wg;
                             _ = pool;
+                            _ = deps;
+                            _ = allocator;
                             // This template never listens: it has no background loop.
-                            arc.deinit();
                         }
 
                         pub fn stop(self: *@This()) void {

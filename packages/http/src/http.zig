@@ -157,19 +157,24 @@ pub fn DriverBuilder(
                             self: *@This(),
                             wg: *std.Thread.WaitGroup,
                             pool: *std.Thread.Pool,
-                            arc: anytype,
+                            deps: anytype,
+                            allocator: std.mem.Allocator,
                         ) anyerror!void {
-                            if (!listen or jobs == 0) {
-                                arc.deinit();
-                                return;
-                            }
+                            if (!listen or jobs == 0) return;
 
-                            pool.spawnWg(wg, watch_inner, .{ self, arc });
+                            pool.spawnWg(wg, watch_inner, .{ self, deps, allocator });
                         }
 
-                        pub fn watch_inner(self: *@This(), arc: anytype) void {
-                            const inj: *dep.DepCtx = &arc.ref().data;
-                            defer arc.unref();
+                        pub fn watch_inner(self: *@This(), deps: anytype, allocator: std.mem.Allocator) void {
+                            var sc = dep.scope(deps, key, allocator) catch |e| {
+                                std.log.err(
+                                    "[{s}] Failed to build dependency scope: {t}; http driver not started.",
+                                    .{ @tagName(key), e },
+                                );
+                                return;
+                            };
+                            defer sc.deinit();
+                            const inj: *dep.DepCtx = &sc.ctx;
                             const alloc = inj.require(std.mem.Allocator) catch unreachable;
                             const conf = inj.require(*Config) catch unreachable;
 

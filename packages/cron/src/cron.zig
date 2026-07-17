@@ -560,9 +560,11 @@ pub fn DriverBuilder(
                             self: *@This(),
                             wg: *std.Thread.WaitGroup,
                             pool: *std.Thread.Pool,
-                            arc: anytype,
+                            deps: anytype,
+                            allocator: std.mem.Allocator,
                         ) anyerror!void {
-                            defer arc.deinit();
+                            _ = deps;
+                            _ = allocator;
                             if (!listen) return;
                             if (comptime jobs > 1) @compileError("Cron is only allowed 1 watch job.");
 

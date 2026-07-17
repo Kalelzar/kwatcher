@@ -197,9 +197,12 @@ pub fn DriverBuilder(
                             self: *@This(),
                             wg: *std.Thread.WaitGroup,
                             pool: *std.Thread.Pool,
-                            arc: anytype,
+                            deps: anytype,
+                            allocator: std.mem.Allocator,
                         ) anyerror!void {
-                            pool.spawnWg(wg, watch_inner, .{ self, arc });
+                            _ = deps;
+                            _ = allocator;
+                            pool.spawnWg(wg, watch_inner, .{self});
                         }
 
                         fn rt_sigtimedwait(
@@ -225,13 +228,12 @@ pub fn DriverBuilder(
                             };
                         }
 
-                        pub fn watch_inner(self: *@This(), arc: anytype) void {
-                            _ = &arc.ref();
-                            defer arc.unref();
-
+                        pub fn watch_inner(self: *@This()) void {
                             const sigmask = std.os.linux.sigfillset();
                             var siginfo: std.os.linux.siginfo_t = undefined;
                             const timeout: std.os.linux.timespec = .{ .sec = 2, .nsec = 0 };
+
+                            log.info("Starting signal listener...", .{});
 
                             while (@atomicLoad(bool, &self.should_run, .acquire)) {
                                 const res = rt_sigtimedwait(
