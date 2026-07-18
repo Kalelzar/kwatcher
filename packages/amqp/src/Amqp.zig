@@ -57,9 +57,12 @@ const TokenType = enum {
     norecord,
     /// Any non-special identifier
     identifier,
-    /// A separator: One of ':', ' ', '/'.
-    /// FIXME: These should probably be separate tokens.
-    separator,
+    /// The ':' separator.
+    colon,
+    /// The ' ' separator.
+    space,
+    /// The '/' separator.
+    slash,
     /// A runtime interpolated parameter.
     /// It is any valid identifier surrounded by '{' '}'
     parameter,
@@ -105,8 +108,14 @@ pub fn scan(comptime source: []const u8) []const Token {
                     continue;
                 },
                 ' ', '/', ':' => |sep| {
+                    const sep_type: TokenType = switch (sep) {
+                        ':' => .colon,
+                        ' ' => .space,
+                        '/' => .slash,
+                        else => unreachable,
+                    };
                     if (point - mark == 0) {
-                        tokens = tokens ++ .{Token{ .type = .separator, .lexeme = source[mark .. point + 1] }};
+                        tokens = tokens ++ .{Token{ .type = sep_type, .lexeme = source[mark .. point + 1] }};
                         while (point < source.len and source[point] == sep) {
                             point += 1;
                         }
@@ -114,7 +123,7 @@ pub fn scan(comptime source: []const u8) []const Token {
                         continue;
                     }
                     tokens = tokens ++ .{Token{ .type = .identifier, .lexeme = source[mark..point] }};
-                    tokens = tokens ++ .{Token{ .type = .separator, .lexeme = source[point .. point + 1] }};
+                    tokens = tokens ++ .{Token{ .type = sep_type, .lexeme = source[point .. point + 1] }};
                     point += 1;
                     mark = point;
                     continue;
@@ -246,9 +255,9 @@ test "scan should tokenize separators" {
     try std.testing.expectEqual(colon.len, 1);
     try std.testing.expectEqual(slash.len, 1);
     try std.testing.expectEqual(space.len, 1);
-    try std.testing.expectEqual(colon[0].type, TokenType.separator);
-    try std.testing.expectEqual(slash[0].type, TokenType.separator);
-    try std.testing.expectEqual(space[0].type, TokenType.separator);
+    try std.testing.expectEqual(colon[0].type, TokenType.colon);
+    try std.testing.expectEqual(slash[0].type, TokenType.slash);
+    try std.testing.expectEqual(space[0].type, TokenType.space);
     try std.testing.expectEqualStrings(colon[0].lexeme, ":");
     try std.testing.expectEqualStrings(slash[0].lexeme, "/");
     try std.testing.expectEqualStrings(space[0].lexeme, " ");
@@ -258,19 +267,19 @@ test "scan should batch successive separators of the same type as a single token
     const tokens = comptime scan(":::::::::::::::///////////////////////          ::");
     const expectedTokens: []const Token = &.{
         .{
-            .type = .separator,
+            .type = .colon,
             .lexeme = ":",
         },
         .{
-            .type = .separator,
+            .type = .slash,
             .lexeme = "/",
         },
         .{
-            .type = .separator,
+            .type = .space,
             .lexeme = " ",
         },
         .{
-            .type = .separator,
+            .type = .colon,
             .lexeme = ":",
         },
     };
@@ -296,7 +305,7 @@ test "scan should terminate identifier scanning on separator" {
             .lexeme = "identifier",
         },
         .{
-            .type = .separator,
+            .type = .colon,
             .lexeme = ":",
         },
     };
@@ -603,12 +612,8 @@ pub fn Template(comptime Context: type) type {
                 const s = self.peek();
                 switch (s.type) {
                     .consume, .publish, .reply, .provide, .rejected, .unrouted => @compileError("Method found while parsing a value"),
-                    .separator => {
-                        if (c(s.lexeme, "/")) {
-                            break;
-                        }
-                        @compileError("Found an unexpected separator while parsing value");
-                    },
+                    .slash => break,
+                    .colon, .space => @compileError("Found an unexpected separator while parsing value"),
                     .norecord => {
                         const id = self.consume(.norecord, "sanity check: No Record(!) was expected.");
                         fmt = fmt ++ id.lexeme;
@@ -641,7 +646,7 @@ pub fn Template(comptime Context: type) type {
                 const s = self.peek();
                 switch (s.type) {
                     .consume, .publish, .reply, .provide, .rejected, .unrouted => @compileError("Method found while parsing a value"),
-                    .separator => {
+                    .colon, .space, .slash => {
                         break;
                     },
                     .identifier, .norecord => {
@@ -659,33 +664,21 @@ pub fn Template(comptime Context: type) type {
 
         /// Parses a consume expression.
         fn parseConsume(comptime self: *Parser) ConsumeExpr {
-            const sep = self.consume(.separator, "Expected a separator after a method");
-            if (comptime !c(":", sep.lexeme)) {
-                @compileError("Expected the separator after the method to be a colon.");
-            }
+            _ = self.consume(.colon, "Expected a colon after the method");
 
             const event = self.parseConstant();
 
-            const sepMain = self.consume(.separator, "Expected a separator after an event");
-            if (comptime !c(" ", sepMain.lexeme)) {
-                @compileError("Expected the separator after the event to be a whitespace.");
-            }
+            _ = self.consume(.space, "Expected a whitespace after the event");
 
             const exchange = self.parseValue();
 
-            const afterExchange = self.consume(.separator, "Expected a separator after an exchange");
-            if (comptime !c("/", afterExchange.lexeme)) {
-                @compileError("Expected the separator after the exchange to be a slash.");
-            }
+            _ = self.consume(.slash, "Expected a slash after the exchange");
 
             const route = self.parseValue();
 
             const queue = blk: {
                 if (!self.isAtEnd()) {
-                    const afterRoute = self.consume(.separator, "Expected a separator or EOF after an route");
-                    if (comptime !c("/", afterRoute.lexeme)) {
-                        @compileError("Expected the separator after the route to be a slash.");
-                    }
+                    _ = self.consume(.slash, "Expected a slash or EOF after the route");
                     break :blk self.parseValue();
                 } else break :blk null;
             };
@@ -710,23 +703,14 @@ pub fn Template(comptime Context: type) type {
                     else => null,
                 };
 
-            const sep = self.consume(.separator, "Expected a separator after a method");
-            if (comptime !c(":", sep.lexeme)) {
-                @compileError("Expected the separator after the method to be a colon.");
-            }
+            _ = self.consume(.colon, "Expected a colon after the method");
 
             const event = self.parseConstant();
 
-            const sepMain = self.consume(.separator, "Expected a separator after an event");
-            if (comptime !c(" ", sepMain.lexeme)) {
-                @compileError("Expected the separator after the event to be a whitespace.");
-            }
+            _ = self.consume(.space, "Expected a whitespace after the event");
 
             const exchange = self.parseValue();
-            const afterExchange = self.consume(.separator, "Expected a separator after the exchange");
-            if (comptime !c("/", afterExchange.lexeme)) {
-                @compileError("Expected the separator after the exchange to be a slash.");
-            }
+            _ = self.consume(.slash, "Expected a slash after the exchange");
             const route = self.parseValue();
 
             if (!self.isAtEnd()) {
@@ -750,10 +734,7 @@ pub fn Template(comptime Context: type) type {
 
         /// Parses a rejected expression.
         fn parseRejected(comptime self: *Parser) RejectedExpr {
-            const sep = self.consume(.separator, "Expected a separator after a method");
-            if (comptime !c(":", sep.lexeme)) {
-                @compileError("Expected the separator after the method to be a colon.");
-            }
+            _ = self.consume(.colon, "Expected a colon after the method");
 
             const event = self.parseConstant();
 
