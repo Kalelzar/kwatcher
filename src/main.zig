@@ -75,17 +75,14 @@ const CounterDependency = struct {
 // ============================================================================
 
 /// A simple heartbeat message schema
-pub const HeartbeatMessage = struct {
-    pub const schema_name = "heartbeat";
-    pub const schema_version = 1;
-
+pub const HeartbeatMessage = core.schema.Schema(1, "heartbeat", struct {
     /// Unix timestamp (seconds) when the heartbeat was produced.
     timestamp: i64,
     /// The name of the event that triggered this heartbeat.
     event: []const u8,
     count: u64,
     greeting: []const u8,
-};
+});
 
 // ============================================================================
 // Routes
@@ -112,6 +109,17 @@ const AmqpRoutes = struct {
             .count = count,
             .greeting = greeting,
         };
+    }
+
+    /// Drains heartbeats back off the broker — proves that published (and
+    /// replayed) messages actually landed instead of bouncing as unrouted.
+    pub fn @"consume:heartbeat-drain amq.direct/heartbeat"(
+        heartbeat: HeartbeatMessage,
+    ) !void {
+        log.info(
+            "Drained heartbeat #{d} ({s}) published at {d}.",
+            .{ heartbeat.count, heartbeat.greeting, heartbeat.timestamp },
+        );
     }
 };
 
@@ -358,8 +366,8 @@ const RouteContext = struct {
 const amqp_driver = amqp.Driver
     .new(.amqp)
     .config("driver.amqp")
-    .listen(false) // Don't consume, only publish
-    .jobs(0) // No consumer jobs when not listening
+    .listen(true) // Consume the heartbeat drain route
+    .jobs(1)
     .routes(core.meta.flatten(&.{
         amqp.From(AmqpRoutes, RouteContext),
     }))
@@ -370,7 +378,7 @@ const cron_driver = cron.Driver
     .new(.cron)
     .listen(true)
     .jobs(1)
-    .routes(cron.From(CronRoutes))
+    .routes(cron.From(CronRoutes) ++ cron.From(amqp.Replay))
     .build();
 
 /// The private introspection-UI mount (a second `.private` HTTP driver) and its registry/dep
