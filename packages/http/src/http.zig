@@ -669,6 +669,17 @@ pub fn From(comptime Container: type, comptime Context: type) []type {
     return routes;
 }
 
+fn hasRouteParameters(comptime path: []const HttpTemplate.RouteGen.Segment) bool {
+    for (path) |segment| {
+        switch (segment) {
+            .parameter => return true,
+            .compound => |inner| if (hasRouteParameters(inner)) return true,
+            else => {},
+        }
+    }
+    return false;
+}
+
 pub fn RouteParser(comptime Context: type) type {
     return struct {
         routes: []type,
@@ -728,12 +739,10 @@ pub fn RouteParser(comptime Context: type) type {
                     return struct {
                         pub const CallContext = __CallContext;
 
-                        // FIXME: Context should only be required if we have route parameters
                         pub const Dependencies = __Dependencies ++ .{
                             core.mem.ScopedAllocator,
                             std.mem.Allocator,
-                                //FIXME: This is papering over the fact that the route parameter check above is not implemented
-                        } ++ if (Context != void) .{
+                        } ++ if (hasRouteParameters(route.path)) .{
                             //FIXME: This should not be a pointer
                             *Context,
                         } else .{};
@@ -895,6 +904,31 @@ comptime {
     };
 
     const Rts = From(Rs, Context);
+
+    // Routes without `[parameter]` segments must not require the context...
+    for (Rts) |R| {
+        for (R.Dependencies) |D| {
+            if (D == *Context) @compileError("BUG: Context required without route parameters");
+        }
+    }
+
+    // ...while routes with them must.
+    const Prs = From(struct {
+        pub fn @"GET /par/[request_id] @refPar"(ctx: struct {
+            request: *Request,
+            response: *Response,
+        }) []const u8 {
+            _ = ctx;
+            return "";
+        }
+    }, Context);
+    const requires_context = blk: {
+        for (Prs[0].Dependencies) |D| {
+            if (D == *Context) break :blk true;
+        }
+        break :blk false;
+    };
+    if (!requires_context) @compileError("BUG: Route with parameters must require the context");
 
     const R1 = Rts[0];
     R1.requires(.method);
