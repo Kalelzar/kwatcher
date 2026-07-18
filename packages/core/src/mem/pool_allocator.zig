@@ -58,6 +58,24 @@ pub const PoolAllocator = struct {
         return new_block.allocator();
     }
 
+    /// Rewinds a leased suballocator for reuse without returning it to the pool.
+    /// The caller keeps the lease; everything allocated from it so far is invalidated.
+    pub fn recycle(self: *PoolAllocator, alloc: std.mem.Allocator) !std.mem.Allocator {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const block: *Block = @ptrCast(@alignCast(alloc.ptr));
+
+        for (self.used.items) |item| {
+            if (item == block) {
+                block.len = 0;
+                return alloc;
+            }
+        }
+
+        return error.InvalidAllocator;
+    }
+
     pub fn reset(self: *PoolAllocator, alloc: std.mem.Allocator) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -160,3 +178,34 @@ pub const PoolAllocator = struct {
         }
     };
 };
+
+test "recycle rewinds the block but keeps the lease" {
+    var pool = PoolAllocator.init(std.testing.allocator);
+    defer pool.deinit();
+
+    const lease = try pool.suballocator();
+    _ = try lease.alloc(u8, 128);
+
+    const recycled = try pool.recycle(lease);
+    try std.testing.expectEqual(@intFromPtr(lease.ptr), @intFromPtr(recycled.ptr));
+    try std.testing.expectEqual(1, pool.used.items.len);
+    try std.testing.expectEqual(0, pool.free.items.len);
+
+    const block: *PoolAllocator.Block = @ptrCast(@alignCast(recycled.ptr));
+    try std.testing.expectEqual(0, block.len);
+
+    // The lease is still valid and still ours: returning it hands the block back.
+    try pool.reset(recycled);
+    try std.testing.expectEqual(0, pool.used.items.len);
+    try std.testing.expectEqual(1, pool.free.items.len);
+}
+
+test "recycle rejects an allocator that is not a live lease" {
+    var pool = PoolAllocator.init(std.testing.allocator);
+    defer pool.deinit();
+
+    const lease = try pool.suballocator();
+    try pool.reset(lease);
+
+    try std.testing.expectError(error.InvalidAllocator, pool.recycle(lease));
+}
