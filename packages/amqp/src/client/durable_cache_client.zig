@@ -333,7 +333,9 @@ fn reject(
 fn reset(ptr: *anyopaque) void {
     const self = getSelf(ptr);
     if (self.recording) |rec| {
-        rec.writer.interface.flush() catch {};
+        rec.writer.interface.flush() catch |e| {
+            std.log.err("Failed to flush recording '{s}' with '{}'", .{ rec.temppath, e });
+        };
     }
 }
 
