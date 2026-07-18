@@ -1733,10 +1733,14 @@ pub fn RouteParser(comptime Context: type) type {
                             var wr = std.Io.Writer.Allocating.init(fba.allocator());
                             try std.zon.stringify.serialize(context, .{}, &wr.writer);
 
-                            // FIXME: Since we are already going to deinit the old one anyway we might as well
-                            // reuse it's allocator instead of taking out a new lease.
+                            // The entry we are about to replace dies with the push below,
+                            // so its lease can hold the new copy; only first-time provides
+                            // pay for a fresh lease.
+                            const tiny_allocator = if (cch.get(inv)) |old|
+                                try palloc.recycle(old.allocator)
+                            else |_|
+                                try palloc.suballocator();
 
-                            const tiny_allocator = try palloc.suballocator();
                             const copy = try std.zon.parse.fromSlice(
                                 CallContext,
                                 tiny_allocator,
@@ -1745,10 +1749,9 @@ pub fn RouteParser(comptime Context: type) type {
                                 .{},
                             );
 
-                            const old = try cch.push(.init(copy, tiny_allocator), inv);
-                            if (old) |*o| {
-                                @constCast(o).deinit(palloc);
-                            }
+                            // push overwrites in place and never returns the replaced
+                            // entry; its lease was already recycled above.
+                            _ = try cch.push(.init(copy, tiny_allocator), inv);
                         }
                     };
                 }
@@ -2026,8 +2029,8 @@ comptime {
     const Context = struct { client_id: []const u8 = "" };
 
     const Schema = struct {
-        pub const schema_name = "ref";
-        pub const schema_version = 1;
+        schema_version: u32 = 1,
+        schema_name: []const u8 = "ref",
         value: u64,
     };
 
@@ -2050,6 +2053,11 @@ comptime {
     };
 
     const Rts = From(Rs, Context);
+
+    // Force analysis of the (otherwise lazy) route call bodies.
+    for (Rts) |R| {
+        _ = &R.call;
+    }
 
     // Driver + registry plumbing.
     const Drv = Driver
