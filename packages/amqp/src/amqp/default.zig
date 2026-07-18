@@ -3,6 +3,7 @@ const std = @import("std");
 const dep = @import("kw-core").deps;
 const DriverRegistry = @import("kw-core").driver.Drivers;
 const Client = @import("../client/client.zig");
+const AmqpClient = @import("../client/amqp_client.zig");
 const DurableCacheClient = @import("../client/durable_cache_client.zig");
 const BreakerRegistry = @import("../client/breaker_registry.zig");
 const BaseConfig = @import("kw-core").config.BaseConfig;
@@ -10,6 +11,7 @@ const Resolver = @import("kw-core").resolver.Resolver;
 const InternFmtCache = @import("kw-core").InternFmtCache;
 
 const Pool = @import("pool.zig").ClientPool;
+const ReplayShimCtx = @import("../replay/shim.zig").ReplayShimCtx;
 
 pub fn Static(comptime Context: type, comptime Config: type, comptime subpath: []const u8) type {
     const OurConfig = Resolver(Config).resolveType(subpath);
@@ -158,10 +160,15 @@ const Scoped = struct {
         self.lease = lease;
         const fallback = try caches.get(lease.id(), conf.*);
         self.client = try breakers.wrap(lease, fallback);
-        // Fault through the breaker: if the broker is unreachable this
-        // engages the fallback now, so the injected Client is already
-        // routed correctly by the time it reaches a user.
-        try self.client.connect();
+        // Fault through the breaker only when the pooled client isn't
+        // already connected: an unreachable broker engages the fallback
+        // now, so the injected Client is already routed correctly by the
+        // time it reaches a user — while a healthy connection is reused
+        // as-is instead of being torn down and rebuilt every scope.
+        const main: *AmqpClient = @ptrCast(@alignCast(lease.ptr));
+        if (main.state != .connected) {
+            try self.client.connect();
+        }
     }
 
     pub fn deconstruct(self: *Scoped, pool: *Pool) void {
@@ -201,13 +208,21 @@ pub fn defaultFor(comptime drv: DriverRegistry, comptime Context: type) type {
         ) Return(category, Config, @TypeOf(dephub)) {
             const Us = drv.get(category);
             const path = Us.config_path;
-            return default(category, dephub, Context, Config, path, allocator);
+            const drk: drv.DriverKeys() = category;
+            const Shim = ReplayShimCtx(drv.Schedulers()[@intFromEnum(drk)]);
+            const H = struct {
+                var replay_shim = Shim{};
+            };
+            return default(category, dephub, Context, Config, path, allocator)
+                .static(.all, &H.replay_shim);
         }
 
         pub fn Return(comptime category: anytype, comptime Config: type, comptime DH: type) type {
             const Us = drv.get(category);
             const path = Us.config_path;
-            return DH.Static(category, *Static(Context, Config, path)).Scoped(category, Scoped);
+            const drk: drv.DriverKeys() = category;
+            const Shim = ReplayShimCtx(drv.Schedulers()[@intFromEnum(drk)]);
+            return DH.Static(category, *Static(Context, Config, path)).Scoped(category, Scoped).Static(.all, *Shim);
         }
     };
 }

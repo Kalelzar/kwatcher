@@ -12,7 +12,7 @@ const Response = Client.Response;
 
 const CircuitBreakingClient = @This();
 
-const State = enum {
+pub const State = enum {
     closed, // Using main client
     open, // Using fallback client
     half_open, // Testing if main is back
@@ -52,6 +52,12 @@ pub fn init(
 
 pub fn deinit(self: *CircuitBreakingClient) void {
     self.allocator.free(self.id);
+}
+
+pub fn currentState(self: *CircuitBreakingClient) State {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+    return self.state;
 }
 
 fn getCurrentClient(self: *CircuitBreakingClient) Client {

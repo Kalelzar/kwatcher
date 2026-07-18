@@ -57,3 +57,20 @@ pub fn wrap(self: *BreakerRegistry, primary: Client, fallback: Client) !Client {
 
     return gop.value_ptr.*.client();
 }
+
+/// Resolves a Client previously returned by `wrap` back to its breaker.
+/// Returns null when `wrapped` is not a breaker-wrapped client — callers
+/// use this to validate the wrapping invariant instead of downcasting
+/// blindly. A key lookup cannot work here: the map keys are primary ids
+/// while `wrapped.id()` is the breaker's own id, so this scans by pointer
+/// identity (bounded by the pool size).
+pub fn breakerOf(self: *BreakerRegistry, wrapped: Client) ?*CircuitBreakingClient {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
+    var it = self.breakers.valueIterator();
+    while (it.next()) |breaker| {
+        if (@as(*anyopaque, breaker.*) == wrapped.ptr) return breaker.*;
+    }
+    return null;
+}

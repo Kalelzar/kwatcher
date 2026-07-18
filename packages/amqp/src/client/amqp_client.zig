@@ -682,6 +682,7 @@ pub fn disconnect(ptr: *anyopaque) !void {
     var conn = try self.ensureConnected();
 
     conn.deinit(self.allocator);
+    self.allocator.destroy(conn);
     self.connection = null;
     self.state = .disconnected;
 }

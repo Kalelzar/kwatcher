@@ -26,6 +26,13 @@ pub const defaultFor = @import("amqp/default.zig").defaultFor;
 pub const Pool = @import("amqp/pool.zig").ClientPool;
 
 pub const clients = @import("client/client.zig");
+pub const replay = @import("recording/replay.zig");
+pub const ReplayShim = @import("replay/shim.zig").ReplayShim;
+pub const ReplayBridge = @import("replay/shim.zig").ReplayBridge;
+pub const ReplayShimCtx = @import("replay/shim.zig").ReplayShimCtx;
+pub const Replay = @import("replay/timers.zig").Replay;
+const BreakerRegistry = @import("client/breaker_registry.zig");
+const ReplayManager = @import("recording/replay.zig").ReplayManager;
 
 pub const Method = enum {
     publish,
@@ -225,7 +232,7 @@ pub fn DriverBuilder(
                 pub const ConsCallContext = shared.UniteCallContext(ConsRoutes);
                 pub const Dependencies = shared.MergeDeps(
                     Routes,
-                    &.{ Client, std.mem.Allocator },
+                    &.{ Client, std.mem.Allocator, *BreakerRegistry, *conftype },
                 );
 
                 pub const Provides = ConstructProviders(ProviderRoutes);
@@ -237,6 +244,7 @@ pub fn DriverBuilder(
                     send = block_start,
                     recv,
                     unrouted,
+                    replay,
                 };
 
                 pub const PublishData = PubCallContext;
@@ -263,10 +271,21 @@ pub fn DriverBuilder(
                     }
                 };
 
+                const ReplayData = struct {
+                    // Empty for now; room for e.g. `force: bool` (bypass the
+                    // breaker gate) without another event-id change later.
+
+                    pub fn write(self: ReplayData, w: *std.Io.Writer) !void {
+                        _ = self;
+                        try w.writeAll(".{ .type = AmqpReplay }");
+                    }
+                };
+
                 pub const EventValues = union(EventType) {
                     send: PublishData,
                     recv: ConsumeData,
                     unrouted: UnroutedData,
+                    replay: ReplayData,
                 };
 
                 pub inline fn __block_end() u12 {
@@ -325,6 +344,34 @@ pub fn DriverBuilder(
                                         // self.parent.handle(.trigger_job, ev, ???);
                                         @panic("Preemptive execution is not implemented!");
                                     },
+                                    else => return e,
+                                };
+                            }
+
+                            /// Queue a replay pass over the recording dir. The
+                            /// handler gates on circuit-breaker health, so firing
+                            /// this while the broker is down is a cheap no-op.
+                            pub fn replay(self: @This(), extra: struct { inj: ?*dep.DepCtx = null }) !void {
+                                var ev = E{
+                                    .event_data = @unionInit(EV, @tagName(key), .{ .replay = .{} }),
+                                    .event_type = @field(ET, @tagName(key) ++ "_replay"),
+                                };
+
+                                if (extra.inj) |inj| {
+                                    const p = try inj.require(EventProperties);
+                                    ev.properties.correlation_id = p.correlation_id;
+                                }
+
+                                _ = self.parent.queue.?.tryPush(
+                                    ev,
+                                    std.time.ns_per_ms * 1,
+                                ) catch |e| switch (e) {
+                                    // Unlike publishes, a dropped trigger is harmless:
+                                    // the next cron tick re-fires it.
+                                    error.WouldBlock => std.log.warn(
+                                        "Event queue full; replay trigger dropped.",
+                                        .{},
+                                    ),
                                     else => return e,
                                 };
                             }
@@ -403,7 +450,10 @@ pub fn DriverBuilder(
                             event: *const UnroutedData,
                             evprop: EventPropertiesEx,
                         ) anyerror!void {
-                            if (comptime ConsRoutes.len == 0) return;
+                            // Guard the route list this switch actually
+                            // dispatches over: an app can have consume routes
+                            // without any unrouted routes.
+                            if (comptime UnroutedRoutes.len == 0) return;
                             defer @constCast(event).internal.deinit();
                             switch (k) {
                                 inline else => |e| {
@@ -672,39 +722,48 @@ pub fn DriverBuilder(
 
                                     switch (msg.?) {
                                         .returned => |ret| {
-                                            const headers = ret.message.basic_properties.headers;
-                                            if (headers.get("x-publisher-key")) |pub_key| {
-                                                std.log.info("Unrouted to: {s}", .{pub_key});
-                                                const unroute_key = std.meta.stringToEnum(UnroutedRouteKeys, pub_key);
-                                                //FIXME: Validate that the the context is the same as the output of the publisher. This feels like the wrong place for that though.
-                                                if (unroute_key) |k| {
-                                                    const data = UnroutedData{
-                                                        .body = ret.message.body,
-                                                        .publisher_tag = k,
-                                                        .internal = ret,
-                                                    };
-                                                    const correlation_id = ret.message.basic_properties.correlation_id;
-                                                    const val = @unionInit(
-                                                        EV,
-                                                        @tagName(key),
-                                                        .{ .unrouted = data },
-                                                    );
+                                            // Owned until handed off to the queue: every
+                                            // path that doesn't push must deinit.
+                                            var returned = ret;
+                                            const headers = returned.message.basic_properties.headers;
+                                            const pub_key = headers.get("x-publisher-key") orelse {
+                                                std.log.warn("Dropping returned message without a publisher key.", .{});
+                                                returned.deinit();
+                                                continue :inner;
+                                            };
+                                            std.log.info("Unrouted to: {s}", .{pub_key});
+                                            //FIXME: Validate that the the context is the same as the output of the publisher. This feels like the wrong place for that though.
+                                            const unroute_key = std.meta.stringToEnum(UnroutedRouteKeys, pub_key) orelse {
+                                                std.log.warn("Dropping unhandled unrouted message: {s}", .{pub_key});
+                                                returned.deinit();
+                                                continue :inner;
+                                            };
+                                            const data = UnroutedData{
+                                                .body = returned.message.body,
+                                                .publisher_tag = unroute_key,
+                                                .internal = returned,
+                                            };
+                                            const correlation_id = returned.message.basic_properties.correlation_id;
+                                            const val = @unionInit(
+                                                EV,
+                                                @tagName(key),
+                                                .{ .unrouted = data },
+                                            );
 
-                                                    _ = self.queue.?.tryPush(.{
-                                                        .event_type = @field(ET, @tagName(key) ++ "_unrouted"),
-                                                        .event_data = val,
-                                                        .properties = .{
-                                                            .correlation_id = if (correlation_id) |c|
-                                                                core.event.CorrelationID.parse(c) orelse .unset
-                                                            else
-                                                                .unset,
-                                                        },
-                                                    }, std.time.ns_per_ms * 1) catch {};
-                                                } else {
-                                                    std.log.warn("Dropping unhandled unrouted message: {s}", .{pub_key});
-                                                    continue :inner;
-                                                }
-                                            }
+                                            _ = self.queue.?.tryPush(.{
+                                                .event_type = @field(ET, @tagName(key) ++ "_unrouted"),
+                                                .event_data = val,
+                                                .properties = .{
+                                                    .correlation_id = if (correlation_id) |c|
+                                                        core.event.CorrelationID.parse(c) orelse .unset
+                                                    else
+                                                        .unset,
+                                                },
+                                            }, std.time.ns_per_ms * 1) catch {
+                                                // The handler will never see it; free it here.
+                                                returned.deinit();
+                                                continue :inner;
+                                            };
                                         },
                                         .incoming => |*in| {
                                             const consumer_tag = std.meta.stringToEnum(ConsRouteKeys, in.consumer_tag);
@@ -792,7 +851,56 @@ pub fn DriverBuilder(
                                     ev.unrouted,
                                     ep,
                                 }),
+                                inline .replay => inj.call_first(replayEvent, .{
+                                    self,
+                                    ev.replay,
+                                    ep,
+                                }),
                             };
+                        }
+
+                        fn replayEvent(
+                            self: *@This(),
+                            event: ReplayData,
+                            evprop: EventPropertiesEx,
+                            inj: *dep.DepCtx,
+                            client: Client,
+                            breakers: *BreakerRegistry,
+                            conf: *conftype,
+                            allocator: std.mem.Allocator,
+                        ) anyerror!void {
+                            _ = self;
+                            _ = event;
+                            _ = evprop;
+                            _ = try core.event.stampRoute(inj, "amqp:replay");
+
+                            const breaker = breakers.breakerOf(client) orelse {
+                                std.log.warn("Replay skipped: injected client is not breaker-wrapped.", .{});
+                                return;
+                            };
+                            if (breaker.currentState() != .closed) {
+                                std.log.info("Replay skipped: circuit breaker is not closed.", .{});
+                                return;
+                            }
+                            // The raw pool client under the breaker: connected
+                            // (the breaker is closed) and — critically — it never
+                            // records, so replayed publishes cannot loop back
+                            // into new recordings.
+                            const replay_client = breaker.main_client;
+
+                            var manager = try ReplayManager.init(
+                                allocator,
+                                conf.config.recording_dir,
+                                replay_client,
+                            );
+                            defer manager.deinit();
+                            manager.replay() catch |e| {
+                                // On Disconnected a checkpoint was written; the
+                                // next trigger resumes from it.
+                                std.log.warn("Replay aborted: {t}", .{e});
+                                return;
+                            };
+                            std.log.info("Replay pass complete.", .{});
                         }
 
                         fn publish(
@@ -830,39 +938,45 @@ pub fn DriverBuilder(
                             const ret = try client.getReturns(0);
 
                             if (ret == null) return;
+                            // Owned until handed off to the queue: every path
+                            // that doesn't push must deinit.
+                            var returned = ret.?;
 
-                            const headers = ret.?.message.basic_properties.headers;
-                            if (headers.get("x-publisher-key")) |pub_key| {
-                                std.log.info("Unrouted to: {s}", .{pub_key});
-                                const unroute_key = std.meta.stringToEnum(UnroutedRouteKeys, pub_key);
-                                //FIXME: Validate that the the context is the same as the output of the publisher. This feels like the wrong place for that though.
-                                if (unroute_key) |k| {
-                                    const data = UnroutedData{
-                                        .body = ret.?.message.body,
-                                        .publisher_tag = k,
-                                        .internal = ret.?,
-                                    };
-                                    const correlation_id = ret.?.message.basic_properties.correlation_id;
-                                    const val = @unionInit(
-                                        EV,
-                                        @tagName(key),
-                                        .{ .unrouted = data },
-                                    );
+                            const headers = returned.message.basic_properties.headers;
+                            const pub_key = headers.get("x-publisher-key") orelse {
+                                std.log.warn("Dropping returned message without a publisher key.", .{});
+                                returned.deinit();
+                                return;
+                            };
+                            std.log.info("Unrouted to: {s}", .{pub_key});
+                            //FIXME: Validate that the the context is the same as the output of the publisher. This feels like the wrong place for that though.
+                            const unroute_key = std.meta.stringToEnum(UnroutedRouteKeys, pub_key) orelse {
+                                std.log.warn("Dropping unhandled unrouted message: {s}", .{pub_key});
+                                returned.deinit();
+                                return;
+                            };
+                            const data = UnroutedData{
+                                .body = returned.message.body,
+                                .publisher_tag = unroute_key,
+                                .internal = returned,
+                            };
+                            const correlation_id = returned.message.basic_properties.correlation_id;
+                            const val = @unionInit(
+                                EV,
+                                @tagName(key),
+                                .{ .unrouted = data },
+                            );
 
-                                    _ = self.queue.?.tryPush(.{
-                                        .event_type = @field(ET, @tagName(key) ++ "_unrouted"),
-                                        .event_data = val,
-                                        .properties = .{
-                                            .correlation_id = if (correlation_id) |c|
-                                                core.event.CorrelationID.parse(c) orelse .unset
-                                            else
-                                                .unset,
-                                        },
-                                    }, std.time.ns_per_ms * 1) catch unreachable;
-                                } else {
-                                    std.log.warn("Dropping unhandled unrouted message: {s}", .{pub_key});
-                                }
-                            }
+                            _ = self.queue.?.tryPush(.{
+                                .event_type = @field(ET, @tagName(key) ++ "_unrouted"),
+                                .event_data = val,
+                                .properties = .{
+                                    .correlation_id = if (correlation_id) |c|
+                                        core.event.CorrelationID.parse(c) orelse .unset
+                                    else
+                                        .unset,
+                                },
+                            }, std.time.ns_per_ms * 1) catch unreachable;
                         }
 
                         fn unrouted(
