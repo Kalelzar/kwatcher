@@ -34,5 +34,29 @@
   </head>
   <body class="flex h-screen overflow-hidden bg-zinc-950 text-zinc-100 antialiased" htmx-ext="morph">
     {{slots}}
+    <!-- Backend-disconnected overlay: shown when any htmx fragment request fails at the
+         network level (htmx:sendError — connection refused/reset, e.g. the backend shut
+         down after a signal Send). Probes the server every 3s and reloads the page only
+         once a probe succeeds, so we never navigate onto the browser's error page. -->
+    <div x-data="{ down: false, probe() { fetch(window.location.href, { cache: 'no-store' }).then(r => { if (r.ok) window.location.reload() }).catch(() => {}) }, engage() { if (this.down) return; this.down = true; setInterval(() => this.probe(), 3000) } }"
+      x-init="document.body.addEventListener('htmx:sendError', () => engage())"
+      x-show="down" style="display: none"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
+      <div class="w-full max-w-md rounded-xl border border-rose-500/40 bg-zinc-900 px-6 py-8 text-center">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="mx-auto h-10 w-10 text-rose-400">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 7V4m6 3V4M7 10.5a5 5 0 0 0 10 0V10H7v.5M12 15.5V18m0 0c0 1.5-1 2.5-2.5 2.5S7 21.5 7 22" />
+        </svg>
+        <p class="mt-4 text-lg font-semibold text-zinc-100">Backend has disconnected</p>
+        <p class="mt-1 text-sm text-zinc-400">The introspected application is no longer reachable.</p>
+        <p class="mt-1 animate-pulse text-xs text-zinc-500">Retrying automatically&hellip;</p>
+        <button @click="probe()"
+          class="mt-5 inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+          </svg>
+          Retry now
+        </button>
+      </div>
+    </div>
   </body>
 </html>
