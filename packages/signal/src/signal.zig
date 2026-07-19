@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const klib = @import("klib");
 
 const log = std.log.scoped(.signal);
@@ -87,11 +88,32 @@ pub fn ForSignal(comptime signum: Signal, comptime Rs: []const type) []const typ
     return &Nrs;
 }
 
+/// Comptime sigset covering every routed signal. KILL/STOP are excluded — they
+/// are unblockable and uncatchable, so they can never reach the driver's
+/// sigtimedwait thread anyway.
+pub fn routedSigset(comptime Rs: []const type) std.posix.sigset_t {
+    var mask = std.posix.sigemptyset();
+    inline for (Rs) |R| switch (R.signum) {
+        .KILL, .STOP => {},
+        else => |s| std.posix.sigaddset(&mask, @intCast(@intFromEnum(s))),
+    };
+    return mask;
+}
+
+/// Block every routed signal process-wide. Call before any thread spawns so all
+/// threads inherit the block and the driver's sigtimedwait thread is the sole
+/// consumer.
+pub fn blockRouted(comptime Rs: []const type) void {
+    if (comptime builtin.os.tag != .linux) return;
+    var mask = routedSigset(Rs);
+    std.posix.sigprocmask(std.posix.SIG.BLOCK, &mask, null);
+}
+
 pub fn DriverBuilder(
     comptime driver_key: anytype,
     comptime listen: bool,
     comptime _jobs: comptime_int,
-    comptime Routes: []const type,
+    comptime _Routes: []const type,
     comptime ErrorHandler: type,
 ) *const fn (comptime u12) type {
     _ = ErrorHandler;
@@ -108,6 +130,7 @@ pub fn DriverBuilder(
                 pub const jobs = _jobs;
                 pub const key = driver_key;
                 pub const kind = Root.kind;
+                pub const Routes = _Routes;
                 pub const RouteKeys = shared.EnumerateRoutes(Routes);
                 pub const CallContext = shared.UniteCallContext(Routes);
                 pub const Dependencies = shared.MergeDeps(Routes, &.{std.mem.Allocator});
@@ -308,14 +331,18 @@ pub const CapabilityType = enum { name, signal };
 
 pub const Capability = union(CapabilityType) { name: []const u8, signal: Signal };
 
+pub const Meta = struct { raw: []const u8 };
+
 pub fn RouteBase(
     comptime HandlerFac: anytype,
     comptime parsed_id: []const u8,
     comptime _signum: Signal,
+    comptime route_meta: Meta,
 ) type {
     return struct {
         pub const Handler = HandlerFac(@This());
         pub const id = parsed_id;
+        pub const meta = route_meta;
 
         pub const CallContext = Handler.CallContext;
         pub const Dependencies = Handler.Dependencies;
@@ -324,15 +351,15 @@ pub fn RouteBase(
         pub const signum: Signal = _signum;
 
         pub fn swap(comptime NextHandler: anytype) type {
-            return RouteBase(NextHandler, parsed_id, signum);
+            return RouteBase(NextHandler, parsed_id, signum, route_meta);
         }
 
         pub fn wrap(comptime NextHandlerFac: anytype) type {
-            return RouteBase(NextHandlerFac(HandlerFac).make, parsed_id, signum);
+            return RouteBase(NextHandlerFac(HandlerFac).make, parsed_id, signum, route_meta);
         }
 
         pub fn requires(comptime ct: anytype) void {
-            if (comptime !meta.hasKey(CapabilityType, ct)) {
+            if (comptime !server.meta.hasKey(CapabilityType, ct)) {
                 @compileError(
                     "Required capability '" ++ @tagName(ct) ++ "' is not supported by SIGNAL routes.",
                 );
@@ -340,15 +367,15 @@ pub fn RouteBase(
         }
 
         pub fn satisfies(comptime ct: anytype) bool {
-            return meta.hasKey(CapabilityType, ct);
+            return server.meta.hasKey(CapabilityType, ct);
         }
 
         pub fn mod(
             comptime capability: Capability,
         ) type {
             return switch (capability) {
-                inline .name => |n| RouteBase(HandlerFac, n, signum),
-                inline .signal => |n| RouteBase(HandlerFac, parsed_id, n),
+                inline .name => |n| RouteBase(HandlerFac, n, signum, route_meta),
+                inline .signal => |n| RouteBase(HandlerFac, parsed_id, n, route_meta),
             };
         }
 
@@ -476,7 +503,7 @@ pub fn RouteParser() type {
                     }
                 };
 
-                const RB = RouteBase(H.make, identifier, signal);
+                const RB = RouteBase(H.make, identifier, signal, .{ .raw = fnname });
 
                 return self.extend(RB);
             }
@@ -493,6 +520,23 @@ comptime {
         .build();
 
     @import("kw-core").driver.AssertDriver(Drv, .signal);
+}
+
+test routedSigset {
+    const Rs = struct {
+        pub fn @"TERM @term"(info: SignalInfo) void {
+            _ = info;
+        }
+        pub fn @"KILL @kill"(info: SignalInfo) void {
+            _ = info;
+        }
+    };
+    const Rts = From(Rs);
+
+    const mask = routedSigset(Rts);
+    try std.testing.expect(std.posix.sigismember(&mask, @intCast(@intFromEnum(Signal.TERM))));
+    try std.testing.expect(!std.posix.sigismember(&mask, @intCast(@intFromEnum(Signal.KILL))));
+    try std.testing.expect(!std.posix.sigismember(&mask, @intCast(@intFromEnum(Signal.INT))));
 }
 
 // Ref all decls
@@ -515,10 +559,15 @@ comptime {
     R1.requires(.name);
     R1.requires(.signal);
     if (R1.satisfies(.nothing)) @compileError("BUG: Incorrect constraint return");
+    if (!std.mem.eql(u8, R1.meta.raw, "TERM @term")) @compileError("BUG: Wrong meta.raw - " ++ R1.meta.raw);
     const R2 = R1.mod(.{ .name = "new" });
     if (!std.mem.eql(u8, R2.query(.name), "new")) @compileError("BUG: Wrong name - " ++ R2.query(.name));
     const R3 = R2.mod(.{ .signal = .HUP });
     if (R3.query(.signal) != .HUP) @compileError("BUG: Wrong signal");
+    if (!std.mem.eql(u8, R3.meta.raw, "TERM @term")) @compileError("BUG: meta.raw lost through mod - " ++ R3.meta.raw);
+
+    _ = &routedSigset;
+    _ = &blockRouted;
 
     const Drv = Driver
         .new(.signal)
@@ -526,6 +575,8 @@ comptime {
         .jobs(1)
         .routes(Rts)
         .build();
+
+    if (Drv(0).Routes.len != Rts.len) @compileError("BUG: Routes re-export lost routes");
 
     const Ds = core.driver.Drivers.new().registerHandler(Drv);
 
