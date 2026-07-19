@@ -146,19 +146,38 @@ const ActionRoutes = struct {
         log.info("[action:greet] {s}", .{ctx.@"0"});
     }
 
-    // TODO: This would ideally take in a union for both anon and named timers.
+    /// Cancels a cron timer: either a named route job or an anonymous timer.
+    /// The payload is the type-erased `cron.ShimId` (the driver-specific id union
+    /// would cycle back into this route's own signature). An anonymous id is
+    /// owned by this action — callers dupe it, we free it.
     pub fn cancel(
-        ctx: struct { []const u8 },
+        ctx: struct { cron.ShimId },
         inj: *core.deps.DepCtx,
         persistent: std.mem.Allocator,
     ) !void {
-        defer persistent.free(ctx.@"0");
-        log.info("Cancelling job: {s}", .{ctx.@"0"});
+        const target = ctx.@"0";
+        defer if (target == .anonymous) persistent.free(target.anonymous);
+        const name = switch (target) {
+            .route, .anonymous => |s| s,
+        };
+        log.info("Cancelling job: {s}", .{name});
+
         const scheduler = try inj.require(Scheduler(.cron));
-        if (scheduler.cancel(.{ .anonymous = ctx.@"0" })) |_| {
-            log.info("Job cancelled successfully: {s}", .{ctx.@"0"});
+        const Id = @typeInfo(@TypeOf(Scheduler(.cron).cancel)).@"fn".params[1].type.?;
+        const id: Id = switch (target) {
+            .route => |route| .{
+                .route = std.meta.stringToEnum(@FieldType(Id, "route"), route) orelse {
+                    log.info("No such cron route: {s}", .{route});
+                    return;
+                },
+            },
+            .anonymous => |anon| .{ .anonymous = anon },
+        };
+
+        if (scheduler.cancel(id)) |_| {
+            log.info("Job cancelled successfully: {s}", .{name});
         } else {
-            log.info("Job was already done: {s}", .{ctx.@"0"});
+            log.info("Job was already done: {s}", .{name});
         }
     }
 };
@@ -207,7 +226,7 @@ const HTTPRoutes = struct {
 
         // The idea is that we schedule the job to be canceled if it has taken too long to run.
         // A better example would be debouncing, we can cache the id of the last job we emitted here and cancel the last one.
-        const cev = try act.callLater(.{ .cancel = .{try persistent.dupe(u8, id.anonymous)} }, .{ .inj = inj });
+        const cev = try act.callLater(.{ .cancel = .{.{ .anonymous = try persistent.dupe(u8, id.anonymous) }} }, .{ .inj = inj });
         const cid = try scron.after(8, cev);
         log.info("Scheduled: {s}", .{cid.anonymous});
         return .{
