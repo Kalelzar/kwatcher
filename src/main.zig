@@ -13,6 +13,7 @@ const httpz = @import("httpz");
 const introspect = @import("kw-introspect");
 const introspect_http = @import("kw-introspect--http");
 const introspect_cron = @import("kw-introspect--cron");
+const introspect_signal = @import("kw-introspect--signal");
 
 const docs = @import("kw-gen--docs");
 
@@ -403,7 +404,7 @@ const cron_driver = cron.Driver
 /// The private introspection-UI mount (a second `.private` HTTP driver) and its registry/dep
 /// wiring, all hardcoded in the library — see `kw-introspect`'s `Mount`. The docs manifest and
 /// the http backend are threaded in.
-const introspection = introspect.Mount(docs, .{ introspect_http, introspect_cron });
+const introspection = introspect.Mount(docs, .{ introspect_http, introspect_cron, introspect_signal });
 
 const http_driver = http.Driver
     .new(.public)
@@ -422,12 +423,16 @@ const action_driver = action.Driver
     .routes(action.From(ActionRoutes))
     .build();
 
+/// The signal driver's routes, hoisted so the driver and the process-wide block
+/// mask (`signal.blockRouted` in `juicyMain`) share one source of truth.
+const signal_routes = signal.From(SignalRoutes) ++ signal.From(signal.default.Shutdown);
+
 /// Signal driver configuration (always listens on a dedicated sigtimedwait thread)
 const signal_driver = signal.Driver
     .new(.signal)
     .listen(true)
     .jobs(1)
-    .routes(signal.From(SignalRoutes) ++ signal.From(signal.default.Shutdown))
+    .routes(signal_routes)
     .build();
 
 /// Combined driver registry
@@ -459,13 +464,10 @@ var config_slot: Config = undefined;
 pub fn juicyMain(allocator: std.mem.Allocator) !void {
     // Block the signals owned by the signal driver process-wide BEFORE any thread
     // spawns, so every runtime thread inherits the block and the driver's dedicated
-    // sigtimedwait thread is their sole consumer. Keep this set in sync with SignalRoutes.
-    if (comptime builtin.os.tag == .linux) {
-        var mask = std.posix.sigemptyset();
-        std.posix.sigaddset(&mask, std.posix.SIG.INT);
-        std.posix.sigaddset(&mask, std.posix.SIG.TERM);
-        std.posix.sigprocmask(std.posix.SIG.BLOCK, &mask, null);
-    }
+    // sigtimedwait thread is their sole consumer. The mask is derived from the
+    // driver's routes, so it can never drift out of sync — this is also what makes
+    // the introspection UI's Send button (kill(getpid())) reliable.
+    signal.blockRouted(signal_routes);
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
