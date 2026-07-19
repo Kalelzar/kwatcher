@@ -47,9 +47,14 @@ fn wireApp(
         .target = target,
         .optimize = optimize,
     });
+    const kw_docgen_signal_dep = b.dependency("kw_docgen_signal", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const kw_introspect = kw_docgen_dep.module("kw-introspect");
     const kw_introspect_http = kw_docgen_http_dep.module("kw-introspect--http");
     const kw_introspect_cron = kw_docgen_cron_dep.module("kw-introspect--cron");
+    const kw_introspect_signal = kw_docgen_signal_dep.module("kw-introspect--signal");
 
     // The template machinery owns its own zmpl dependency; we hand it every contributing
     // template source (each with a prefix namespace) and it returns a module wired to a zmpl
@@ -63,6 +68,7 @@ fn wireApp(
             http_template.packageSource(kw_docgen_dep, "core", &.{"templates"}),
             http_template.packageSource(kw_docgen_http_dep, "http", &.{"templates"}),
             http_template.packageSource(kw_docgen_cron_dep, "cron", &.{"templates"}),
+            http_template.packageSource(kw_docgen_signal_dep, "signal", &.{"templates"}),
         },
     });
 
@@ -72,6 +78,7 @@ fn wireApp(
     kw_introspect.addImport("kw-http-template", kw_http_template);
     kw_introspect_http.addImport("kw-http-template", kw_http_template);
     kw_introspect_cron.addImport("kw-http-template", kw_http_template);
+    kw_introspect_signal.addImport("kw-http-template", kw_http_template);
 
     // Imports:
     app.addImport("kw-core", kw_core);
@@ -85,6 +92,7 @@ fn wireApp(
     app.addImport("kw-introspect", kw_introspect);
     app.addImport("kw-introspect--http", kw_introspect_http);
     app.addImport("kw-introspect--cron", kw_introspect_cron);
+    app.addImport("kw-introspect--signal", kw_introspect_signal);
 
     return app;
 }
@@ -189,6 +197,11 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     }).module("kw-docgen--cron");
 
+    const kw_docgen_signal = b.dependency("kw_docgen_signal", .{
+        .target = gen_target,
+        .optimize = optimize,
+    }).module("kw-docgen--signal");
+
     // Host-built copy of the app for the generators to introspect; only needed when the
     // installed app isn't itself host-native. `null` lets the helper derive it from the
     // consumer (reusing the installed app's modules).
@@ -210,7 +223,7 @@ pub fn build(b: *std.Build) !void {
             .{ .kind = "cron", .module = kw_docgen_cron },
             .{ .kind = "amqp", .module = kw_docgen_amqp },
             .{ .kind = "action", .module = kw_docgen_none },
-            .{ .kind = "signal", .module = kw_docgen_none },
+            .{ .kind = "signal", .module = kw_docgen_signal },
             .{ .kind = "internal", .module = kw_docgen_none },
         },
     });

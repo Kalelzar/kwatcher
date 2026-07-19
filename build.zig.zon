@@ -43,6 +43,9 @@
         .kw_docgen_cron = .{
             .path = "packages/docgen-cron",
         },
+        .kw_docgen_signal = .{
+            .path = "packages/docgen-signal",
+        },
         .kw_asyncapi = .{
             .path = "packages/asyncapi",
         },
