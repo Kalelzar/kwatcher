@@ -95,7 +95,10 @@ pub fn DriverBuilder(
 
                                 var ev = E{
                                     .event_data = value,
-                                    .event_type = .call,
+                                    // The GLOBAL event enum: driver-local
+                                    // event names are prefixed with the
+                                    // driver key at registration.
+                                    .event_type = @field(ET, @tagName(key) ++ "_call"),
                                 };
 
                                 if (extra.inj) |inj| {
@@ -129,7 +132,10 @@ pub fn DriverBuilder(
 
                                 var ev = E{
                                     .event_data = value,
-                                    .event_type = .call,
+                                    // The GLOBAL event enum: driver-local
+                                    // event names are prefixed with the
+                                    // driver key at registration.
+                                    .event_type = @field(ET, @tagName(key) ++ "_call"),
                                 };
 
                                 if (extra.inj) |inj| {
@@ -436,4 +442,52 @@ comptime {
     _ = Sch(.placeholder);
 
     _ = E;
+}
+
+// The queued-path scheduler bodies are only compiled when instantiated; these
+// tests exist so the `event_type` lookup against the GLOBAL event enum (the
+// `<key>_call` prefixed form) can never silently rot again.
+const TestRoutes = struct {
+    pub fn ping(ctx: struct { i64 }) void {
+        _ = ctx;
+    }
+};
+
+const TestDriver = Driver
+    .new(.placeholder)
+    .listen(false)
+    .jobs(0)
+    .routes(From(TestRoutes))
+    .build();
+
+const TestRegistry = @import("kw-core").driver.Drivers.new().registerHandler(TestDriver);
+const TestET = TestRegistry.EventList();
+const TestEV = TestRegistry.EventValues();
+const TestHandler = TestRegistry.Handlers(TestET, TestEV)[1];
+const TestEvent = Event(TestET, TestEV);
+
+test "call pushes onto the bound queue with the driver-prefixed event type" {
+    var h = TestHandler.init();
+    defer h.deinit(std.testing.allocator);
+
+    var buf: [4]TestEvent = undefined;
+    var occ = [_]u1{0} ** 4;
+    var q = MPMCQueue(TestEvent).init(&buf, &occ);
+    h.bind(&q);
+
+    try h.scheduler().call(.{ .ping = .{7} }, .{});
+    const popped = q.tryPop(std.time.ns_per_ms).?;
+    try std.testing.expectEqual(@field(TestET, "placeholder_call"), popped.event_type);
+    const data = @field(popped.event_data, "placeholder");
+    try std.testing.expectEqual(@as(i64, 7), data.call.ping[0]);
+}
+
+test "callLater builds the event without queueing" {
+    var h = TestHandler.init();
+    defer h.deinit(std.testing.allocator);
+
+    const ev = try h.scheduler().callLater(.{ .ping = .{1} }, .{});
+    try std.testing.expectEqual(@field(TestET, "placeholder_call"), ev.event_type);
+    const data = @field(ev.event_data, "placeholder");
+    try std.testing.expectEqual(@as(i64, 1), data.call.ping[0]);
 }
