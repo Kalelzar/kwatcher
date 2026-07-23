@@ -1,0 +1,86 @@
+const std = @import("std");
+
+pub fn build(b: *std.Build) !void {
+    // Options
+    const build_all = b.option(bool, "all", "Build all components. You can still disable individual components") orelse false;
+    const build_static_library = b.option(bool, "lib", "Build a static library object") orelse build_all;
+
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const kw_docgen_sqlite = b.addModule("kw-docgen--sqlite", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const kw_docindex = b.dependency("kw_docindex", .{ .target = target, .optimize = optimize }).module("kw-docindex");
+    kw_docgen_sqlite.addImport("kw-docindex", kw_docindex);
+
+    const tests = b.addTest(.{
+        .root_module = kw_docgen_sqlite,
+        .use_llvm = true,
+    });
+
+    // Artifacts:
+    const lib = b.addLibrary(.{
+        .name = "kw-docgen--sqlite",
+        .root_module = kw_docgen_sqlite,
+        .linkage = .static,
+        .use_llvm = true,
+    });
+    if (build_static_library) {
+        b.installArtifact(lib);
+    }
+
+    // The commit tool: promotes a generated candidate migration into the
+    // consumer's migrations directory (run via `zig build commit-migration`).
+    const commit_tool = b.addExecutable(.{
+        .name = "kw-sqlite-commit",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/commit.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+        .use_llvm = true,
+    });
+    b.installArtifact(commit_tool);
+
+    const run_tests = b.addRunArtifact(tests);
+
+    const install_docs = b.addInstallDirectory(
+        .{
+            .source_dir = lib.getEmittedDocs(),
+            .install_dir = .prefix,
+            .install_subdir = "docs",
+        },
+    );
+
+    const fmt = b.addFmt(.{
+        .paths = &.{
+            "src/",
+            "build.zig",
+            "build.zig.zon",
+        },
+        .check = true,
+    });
+
+    // Steps:
+    const check = b.step("check", "Build without generating artifacts.");
+    check.dependOn(&lib.step);
+
+    const test_step = b.step("test", "Run the unit tests.");
+    test_step.dependOn(&run_tests.step);
+    lib.step.dependOn(&run_tests.step);
+
+    // - fmt
+    const fmt_step = b.step("fmt", "Check formatting");
+    fmt_step.dependOn(&fmt.step);
+    check.dependOn(fmt_step);
+    b.getInstallStep().dependOn(fmt_step);
+
+    // - docs
+    const docs_step = b.step("docs", "Generate docs");
+    docs_step.dependOn(&install_docs.step);
+    docs_step.dependOn(&lib.step);
+}

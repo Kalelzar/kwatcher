@@ -1,0 +1,16 @@
+.{
+    .name = .kw_docgen_sqlite,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0x213232ee6159332,
+    .dependencies = .{
+        .kw_docindex = .{
+            .path = "../docindex",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
