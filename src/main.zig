@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 const core = @import("kw-core");
 const kwatcher = @import("kwatcher");
 const amqp = @import("kw-amqp");
+const protocol = @import("kw-protocol");
 const http = @import("kw-http");
 const cron = @import("kw-cron");
 const action = @import("kw-action");
@@ -48,6 +49,12 @@ pub const Config = struct {
     middleware: struct {
         cors: http.middleware.Cors.Config,
     },
+    /// Per-protocol tunables, resolved by each protocol's deps extension
+    /// (`protocols.<name>`). All defaults, so the JSON may omit the block.
+    protocols: struct {
+        client_registration: protocol.client_registration.Config = .{},
+        secret: protocol.secret.Config = .{},
+    } = .{},
     app: AppConfig,
 };
 
@@ -121,6 +128,35 @@ const AmqpRoutes = struct {
             "Drained heartbeat #{d} ({s}) published at {d}.",
             .{ heartbeat.count, heartbeat.greeting, heartbeat.timestamp },
         );
+    }
+
+    /// Demonstrates the secret protocol's callback flow, following the
+    /// "cancel the publish and call yourself back" pattern: if the secret
+    /// isn't cached yet we hand the registry a self-callback event, cancel
+    /// this publish, and get re-run once the store's response is decrypted.
+    /// It never actually publishes — returning null cancels — so the
+    /// secret itself stays local and off the broker.
+    pub fn @"publish!:secret-demo amq.direct/secret.demo"(
+        reg: *protocol.secret.registry,
+        persistent: std.mem.Allocator,
+        inj: *core.deps.DepCtx,
+    ) !?core.schema.Message(HeartbeatMessage) {
+        const secret_sched = try inj.require(protocol.secret.Scheduler);
+        const amqp_sched = try inj.require(Scheduler(.amqp));
+
+        const callback = try amqp_sched.publishLater(.{ .@"secret-demo" = .{} }, .{ .inj = inj });
+        const ev = try persistent.create(@TypeOf(callback));
+        errdefer persistent.destroy(ev);
+        ev.* = callback;
+
+        if (try reg.getOrRequest(persistent, "secret", @ptrCast(ev), secret_sched, .{ .inj = inj })) |secret| {
+            persistent.destroy(ev); // cache hit: the callback event is still ours
+            log.info("[secret-demo] secret 'secret' = '{s}' ({d} bytes)", .{ secret, secret.len });
+            return null;
+        }
+
+        log.info("[secret-demo] not cached yet; requested it and registered a self-callback", .{});
+        return null;
     }
 };
 
@@ -355,6 +391,18 @@ const HTTPRoutes = struct {
         };
     }
 
+    /// Kicks off the secret-protocol demo: schedules the `secret-demo`
+    /// publish, whose handler fetches the secret 'secret' via getOrRequest
+    /// and re-fires itself when the store's answer arrives (check the logs).
+    pub fn @"GET /api/v1/secret @requestSecret"(
+        _: http.data.Request(null),
+        inj: *core.deps.DepCtx,
+    ) !http.data.Json(struct { status: []const u8 }, .{.ok}) {
+        const sched = try inj.require(Scheduler(.amqp));
+        try sched.publish(.{ .@"secret-demo" = .{} }, .{ .inj = inj });
+        return .{ .value = .{ .ok = .{ .status = "requested" } } };
+    }
+
     // --- /health (no shared prefix with /api) ---
 
     pub fn @"GET /health @healthCheck"(_: http.data.Request(null)) struct { status: []const u8 } {
@@ -377,10 +425,20 @@ const HTTPRoutes = struct {
 // Driver Setup
 // ============================================================================
 
-/// Context type for dynamic routing (can hold request-scoped data)
+/// Context type for dynamic routing (can hold request-scoped data).
+/// The `client` and `secrets` fields are the protocol registries: the
+/// client-registration and secret protocols resolve them off this context
+/// (and their `{client.id}`-bound consume routes resolve through `client`).
 const RouteContext = struct {
     request_id: u64 = 0,
+    client: protocol.client_registration.registry = .{ .assigned_id = null, .state = .unregistered },
+    secrets: protocol.secret.registry = .{},
 };
+
+/// The protocols the example app speaks. `.secret` requires
+/// `.client_registration` (its response route binds on the effective
+/// registration id).
+const protocols: []const protocol.Kind = &.{ .client_registration, .secret };
 
 /// AMQP driver configuration
 const amqp_driver = amqp.Driver
@@ -390,6 +448,9 @@ const amqp_driver = amqp.Driver
     .jobs(1)
     .routes(core.meta.flatten(&.{
         amqp.From(AmqpRoutes, RouteContext),
+        protocol.use(struct {
+            pub const kind = .amqp;
+        }, protocols, RouteContext),
     }))
     .build();
 
@@ -398,7 +459,9 @@ const cron_driver = cron.Driver
     .new(.cron)
     .listen(true)
     .jobs(1)
-    .routes(cron.From(CronRoutes) ++ cron.From(amqp.Replay))
+    .routes(cron.From(CronRoutes) ++ cron.From(amqp.Replay) ++ protocol.use(struct {
+        pub const kind = .cron;
+    }, protocols, RouteContext))
     .build();
 
 /// The private introspection-UI mount (a second `.private` HTTP driver) and its registry/dep
@@ -526,6 +589,9 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         .with(.public, kwatcher.default.config(http.middleware.Cors.Config, "middleware.cors"), allocator)
         // Register AMQP client pool and connection handling
         .with(.amqp, amqp.defaultFor(drivers.drivers, RouteContext), allocator)
+        // Register the client-registration + secret protocol deps (config
+        // resolvers, registries off RouteContext, scheduler shim bridges)
+        .with(.amqp, protocol.deps(drivers.drivers, RouteContext, protocols), allocator)
         // Register the type-erased cron scheduler shim (drives the introspection Timers tab)
         .with(.cron, cron.defaultFor(drivers.drivers), allocator)
         // TODO: create a http.defaultFor

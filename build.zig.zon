@@ -13,6 +13,9 @@
         .kw_amqp = .{
             .path = "packages/amqp",
         },
+        .kw_protocol = .{
+            .path = "packages/protocol",
+        },
         .kw_http = .{
             .path = "packages/http",
         },
@@ -65,5 +68,6 @@
         "build.zig",
         "build.zig.zon",
         "src",
+        "packages",
     },
 }

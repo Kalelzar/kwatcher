@@ -26,6 +26,7 @@ fn wireApp(
     const kw_core = b.dependency("kw_core", .{ .target = target, .optimize = optimize }).module("kw-core");
     const kwatcher = b.dependency("kwatcher", .{ .target = target, .optimize = optimize }).module("kwatcher");
     const kw_amqp = b.dependency("kw_amqp", .{ .target = target, .optimize = optimize }).module("kw-amqp");
+    const kw_protocol = b.dependency("kw_protocol", .{ .target = target, .optimize = optimize }).module("kw-protocol");
     const kw_http = b.dependency("kw_http", .{ .target = target, .optimize = optimize }).module("kw-http");
     const kw_cron = b.dependency("kw_cron", .{ .target = target, .optimize = optimize }).module("kw-cron");
     const kw_action = b.dependency("kw_action", .{ .target = target, .optimize = optimize }).module("kw-action");
@@ -84,6 +85,7 @@ fn wireApp(
     app.addImport("kw-core", kw_core);
     app.addImport("kwatcher", kwatcher);
     app.addImport("kw-amqp", kw_amqp);
+    app.addImport("kw-protocol", kw_protocol);
     app.addImport("kw-http", kw_http);
     app.addImport("kw-cron", kw_cron);
     app.addImport("kw-action", kw_action);
