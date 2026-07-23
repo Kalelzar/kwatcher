@@ -55,6 +55,35 @@ pub const Internal = struct {
 
                     _ = self.parent.queue.?.push(ev);
                 }
+
+                /// Pushes a prebuilt composed event onto the server queue.
+                /// The event was fully built earlier (correlation stamped at
+                /// build time by callLater/publishLater); nothing is
+                /// re-stamped here. Returns error.WouldBlock if the queue
+                /// stays full for ~1ms — the event is by value, so the
+                /// caller loses nothing on failure.
+                pub fn enqueue(self: @This(), ev: E) !void {
+                    _ = try self.parent.queue.?.tryPush(ev, std.time.ns_per_ms);
+                }
+
+                /// Type-erased variant for callers holding a heap-allocated
+                /// `*E` as `*anyopaque`. ALWAYS consumes the pointer: on
+                /// success the event is copied onto the queue; on a full
+                /// queue it is warned and dropped. Either way
+                /// `extra.allocator` — the allocator that created the
+                /// pointer, in practice the persistent app allocator —
+                /// frees it.
+                pub fn enqueueIndirect(
+                    self: @This(),
+                    ptr: *anyopaque,
+                    extra: struct { allocator: std.mem.Allocator },
+                ) void {
+                    const ev: *E = @ptrCast(@alignCast(ptr));
+                    defer extra.allocator.destroy(ev);
+                    _ = self.parent.queue.?.tryPush(ev.*, std.time.ns_per_ms) catch {
+                        std.log.warn("Event queue full; pending event dropped.", .{});
+                    };
+                }
             };
 
             pub fn scheduler(self: *@This()) Scheduler {
@@ -129,12 +158,21 @@ pub const Internal = struct {
 /// function pointer suffices — no per-route union mapping.
 pub const InternalSchedulerShim = struct {
     pub const ShutdownExtra = struct { inj: ?*dep.DepCtx = null };
+    pub const EnqueueExtra = struct { allocator: std.mem.Allocator };
 
     _shutdownFn: *const fn (*anyopaque, ShutdownExtra) anyerror!void,
+    _enqueueIndirectFn: *const fn (*anyopaque, *anyopaque, EnqueueExtra) void,
     _ctx: *anyopaque,
 
     pub fn shutdown(self: @This(), extra: ShutdownExtra) !void {
         return self._shutdownFn(self._ctx, extra);
+    }
+
+    /// Copies the pointed-to composed event onto the server queue and
+    /// frees the pointer with `extra.allocator`; on a full queue the
+    /// event is warned and dropped, but the pointer is still freed.
+    pub fn enqueueIndirect(self: @This(), ptr: *anyopaque, extra: EnqueueExtra) void {
+        return self._enqueueIndirectFn(self._ctx, ptr, extra);
     }
 };
 
@@ -149,8 +187,21 @@ pub fn SchedulerBridge(comptime RealScheduler: type) type {
             try self.real.shutdown(.{ .inj = extra.inj });
         }
 
+        fn enqueueIndirectImpl(
+            ctx: *anyopaque,
+            ptr: *anyopaque,
+            extra: InternalSchedulerShim.EnqueueExtra,
+        ) void {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            self.real.enqueueIndirect(ptr, .{ .allocator = extra.allocator });
+        }
+
         pub fn toShim(self: *@This()) InternalSchedulerShim {
-            return .{ ._shutdownFn = &shutdownImpl, ._ctx = @ptrCast(self) };
+            return .{
+                ._shutdownFn = &shutdownImpl,
+                ._enqueueIndirectFn = &enqueueIndirectImpl,
+                ._ctx = @ptrCast(self),
+            };
         }
     };
 }
@@ -170,4 +221,101 @@ pub fn BridgeShimCtx(comptime RealScheduler: type) type {
             return self.bridge.?.toShim();
         }
     };
+}
+
+// Mirrors the app-side composition (driver.zig EventValues()): the internal
+// driver's events sit under an `internal` union arm keyed by driver key,
+// which `shutdown`'s @unionInit relies on.
+const TestEV = union(enum) { internal: event.BaseValues };
+const TestYield = Internal.Yield(event.Base, TestEV);
+const TestE = event.Event(event.Base, TestEV);
+
+fn testQueue(buffer: []TestE, occupancy: []u1) MPMCQueue(TestE) {
+    return MPMCQueue(TestE).init(buffer, occupancy);
+}
+
+test "enqueue pushes a prebuilt event as-is" {
+    var buf: [2]TestE = undefined;
+    var occ: [2]u1 = undefined;
+    var q = testQueue(&buf, &occ);
+    var yield = TestYield.init();
+    yield.bind(&q);
+
+    var ev = TestE{ .event_type = .noop, .event_data = .{ .internal = .{ .noop = .{} } } };
+    ev.properties.attempts = 3;
+    try yield.scheduler().enqueue(ev);
+
+    try std.testing.expectEqual(ev, q.pop());
+    try std.testing.expect(q.empty());
+}
+
+test "enqueue on a full queue returns WouldBlock" {
+    var buf: [2]TestE = undefined;
+    var occ: [2]u1 = undefined;
+    var q = testQueue(&buf, &occ);
+    var yield = TestYield.init();
+    yield.bind(&q);
+
+    const ev = TestE{ .event_type = .noop, .event_data = .{ .internal = .{ .noop = .{} } } };
+    try yield.scheduler().enqueue(ev);
+    try yield.scheduler().enqueue(ev);
+    try std.testing.expectError(error.WouldBlock, yield.scheduler().enqueue(ev));
+}
+
+test "enqueueIndirect consumes the pointer and pushes a copy" {
+    var buf: [2]TestE = undefined;
+    var occ: [2]u1 = undefined;
+    var q = testQueue(&buf, &occ);
+    var yield = TestYield.init();
+    yield.bind(&q);
+
+    const ptr = try std.testing.allocator.create(TestE);
+    ptr.* = .{ .event_type = .shutdownImminent, .event_data = .{ .internal = .{ .shutdownImminent = .{} } } };
+    const expected = ptr.*;
+
+    yield.scheduler().enqueueIndirect(@ptrCast(ptr), .{ .allocator = std.testing.allocator });
+
+    // std.testing.allocator's leak check proves the pointer was freed.
+    try std.testing.expectEqual(expected, q.pop());
+    try std.testing.expect(q.empty());
+}
+
+test "enqueueIndirect on a full queue drops the event but still frees" {
+    var buf: [2]TestE = undefined;
+    var occ: [2]u1 = undefined;
+    var q = testQueue(&buf, &occ);
+    var yield = TestYield.init();
+    yield.bind(&q);
+
+    const filler = TestE{ .event_type = .noop, .event_data = .{ .internal = .{ .noop = .{} } } };
+    try yield.scheduler().enqueue(filler);
+    try yield.scheduler().enqueue(filler);
+
+    const ptr = try std.testing.allocator.create(TestE);
+    ptr.* = .{ .event_type = .shutdown, .event_data = .{ .internal = .{ .shutdown = .{} } } };
+    yield.scheduler().enqueueIndirect(@ptrCast(ptr), .{ .allocator = std.testing.allocator });
+
+    try std.testing.expectEqual(filler, q.pop());
+    try std.testing.expectEqual(filler, q.pop());
+    try std.testing.expect(q.empty());
+}
+
+test "shim enqueueIndirect routes through the bridge" {
+    var buf: [2]TestE = undefined;
+    var occ: [2]u1 = undefined;
+    var q = testQueue(&buf, &occ);
+    var yield = TestYield.init();
+    yield.bind(&q);
+
+    var bridge = SchedulerBridge(TestYield.Scheduler){ .real = yield.scheduler() };
+    const shim = bridge.toShim();
+
+    const ptr = try std.testing.allocator.create(TestE);
+    ptr.* = .{ .event_type = .noop, .event_data = .{ .internal = .{ .noop = .{} } } };
+    const expected = ptr.*;
+
+    shim.enqueueIndirect(@ptrCast(ptr), .{ .allocator = std.testing.allocator });
+
+    try std.testing.expectEqual(expected, q.pop());
+    try std.testing.expect(q.empty());
 }
