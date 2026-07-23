@@ -2,9 +2,11 @@ const std = @import("std");
 const Drivers = @import("kw-core").driver.Drivers;
 
 pub const client_registration = @import("client-registration/client_registration.zig");
+pub const secret = @import("secret/v0/secret.zig");
 
 pub const Kind = enum {
     client_registration,
+    secret,
 };
 
 const Self = @This();
@@ -48,8 +50,8 @@ pub fn deps(
             if (comptime protocols.len == 1) {
                 return protocol.deps.default(drv, Context).value(category, dephub, Config, allocator);
             } else {
-                const next = protocol.deps.default(drv, Context).value(category, dephub, Context, Config, allocator);
-                return deps(drv, protocols[1..]).apply(next, category, allocator, Config);
+                const next = protocol.deps.default(drv, Context).value(category, dephub, Config, allocator);
+                return deps(drv, Context, protocols[1..]).apply(next, category, allocator, Config);
             }
         }
 
@@ -63,7 +65,7 @@ pub fn deps(
                 return protocol.deps.default(drv, Context).Return(category, Config, DH);
             } else {
                 const next = protocol.deps.default(drv, Context).Return(category, Config, DH);
-                return deps(drv, protocols[1..])
+                return deps(drv, Context, protocols[1..])
                     .Return(
                     category,
                     Config,
@@ -88,4 +90,14 @@ comptime {
     _ = use(struct {
         pub const kind = .cron;
     }, &.{.client_registration}, Ctx);
+
+    // secret.ProtocolContext carries both the `client` and `secrets`
+    // fields, so it doubles as the combined-protocol context here.
+    const SecretCtx = secret.ProtocolContext;
+    _ = use(struct {
+        pub const kind = .amqp;
+    }, &.{ .client_registration, .secret }, SecretCtx);
+    _ = use(struct {
+        pub const kind = .cron;
+    }, &.{ .client_registration, .secret }, SecretCtx);
 }
