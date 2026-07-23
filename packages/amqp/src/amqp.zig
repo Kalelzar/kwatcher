@@ -524,7 +524,15 @@ pub fn DriverBuilder(
                                     defer rctx.deinit();
 
                                     if (comptime R.method == .reply) {
-                                        var h = try @call(.auto, R.call, .{ inj, rctx.value, evprop });
+                                        // A null reply (optional return) is a deliberate
+                                        // decline: stay silent instead of erroring out.
+                                        var h = @call(.auto, R.call, .{ inj, rctx.value, evprop }) catch |err| switch (err) {
+                                            error.Cancelled => {
+                                                std.log.debug("Reply route '{s}' declined; staying silent.", .{@tagName(e)});
+                                                return;
+                                            },
+                                            else => return err,
+                                        };
 
                                         const route = event.internal.incoming.message.basic_properties.reply_to;
 
