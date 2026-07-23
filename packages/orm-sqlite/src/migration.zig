@@ -39,7 +39,10 @@ fn findColumn(comptime t: ir.TableIr, comptime name: []const u8) ?ir.ColumnIr {
 fn fkEql(comptime a: ?ir.FkIr, comptime b: ?ir.FkIr) bool {
     const av = a orelse return b == null;
     const bv = b orelse return false;
-    return std.mem.eql(u8, av.table, bv.table) and std.mem.eql(u8, av.column, bv.column);
+    return std.mem.eql(u8, av.table, bv.table) and
+        std.mem.eql(u8, av.column, bv.column) and
+        av.on_delete == bv.on_delete and
+        av.on_update == bv.on_update;
 }
 
 fn columnEql(comptime a: ir.ColumnIr, comptime b: ir.ColumnIr) bool {

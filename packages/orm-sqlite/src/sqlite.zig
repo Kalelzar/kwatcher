@@ -22,6 +22,10 @@ pub const Table = model.Table;
 pub const PK = model.PK;
 pub const FK = model.FK;
 pub const Unique = model.Unique;
+pub const OnDelete = model.OnDelete;
+pub const OnUpdate = model.OnUpdate;
+pub const Cascade = model.Cascade;
+pub const FkAction = model.FkAction;
 pub const PrimaryOf = model.PrimaryOf;
 
 // Schema IR + reflection.
@@ -379,6 +383,87 @@ const Account = Table(
         referrer: Unique(FK(User, u64)),
     },
 );
+
+const Parent = Table(
+    .parent,
+    struct {
+        id: PK(u64),
+        name: []const u8,
+    },
+);
+
+const Chained = Table(
+    .chained,
+    struct {
+        id: PK(u64),
+        parent: Cascade(FK(Parent, u64)),
+        other: ?OnDelete(.set_null, FK(Parent, u64)),
+    },
+);
+
+test "referential actions: wrappers compose and carry the action" {
+    const A = OnDelete(.cascade, FK(User, u64));
+    try std.testing.expectEqual(model.Kind.foreign_key, A.kind);
+    try std.testing.expect(A.Target == User);
+    try std.testing.expect(@FieldType(A, "value") == u64);
+    try std.testing.expectEqual(@as(?FkAction, .cascade), model.fkActionOf(A, .on_delete));
+    try std.testing.expectEqual(@as(?FkAction, null), model.fkActionOf(A, .on_update));
+
+    // Stacks with other property wrappers; Cascade == OnDelete(.cascade).
+    const B = Cascade(Unique(FK(User, u64)));
+    try std.testing.expect(model.hasProperty(B, .unique));
+    try std.testing.expectEqual(@as(?FkAction, .cascade), model.fkActionOf(B, .on_delete));
+    try std.testing.expect(B.Target == User);
+
+    // Both slots at once.
+    const C = OnUpdate(.restrict, OnDelete(.set_null, FK(User, u64)));
+    try std.testing.expectEqual(@as(?FkAction, .set_null), model.fkActionOf(C, .on_delete));
+    try std.testing.expectEqual(@as(?FkAction, .restrict), model.fkActionOf(C, .on_update));
+}
+
+test "referential actions: DDL, IR, and live CASCADE / SET NULL" {
+    try std.testing.expectEqualStrings(
+        "CREATE TABLE IF NOT EXISTS chained(" ++
+            "id INTEGER PRIMARY KEY NOT NULL," ++
+            "parent INTEGER REFERENCES parent(id) ON DELETE CASCADE NOT NULL," ++
+            "other INTEGER REFERENCES parent(id) ON DELETE SET NULL)",
+        TableGen(Chained),
+    );
+    const chained_ir = comptime TableIrOf(Chained);
+    try std.testing.expectEqual(ir.FkAction.cascade, chained_ir.columns[1].fk.?.on_delete);
+    try std.testing.expectEqual(ir.FkAction.set_null, chained_ir.columns[2].fk.?.on_delete);
+    try std.testing.expectEqual(ir.FkAction.no_action, chained_ir.columns[1].fk.?.on_update);
+
+    var conn = try Db.open(":memory:");
+    defer conn.close();
+    try conn.exec(TableGen(Parent));
+    try conn.exec(TableGen(Chained));
+    try conn.exec("INSERT INTO parent (id, name) VALUES (1, 'a')");
+    try conn.exec("INSERT INTO parent (id, name) VALUES (2, 'b')");
+    try conn.exec("INSERT INTO chained (id, parent, other) VALUES (1, 1, 2)");
+
+    // Deleting parent 2 fires SET NULL on `other`.
+    try Query.delete(Parent).where(.id, .equals, @as(u64, 2)).exec(&conn);
+    try std.testing.expectEqual(@as(i64, 1), try conn.scalarInt("SELECT COUNT(*) FROM chained WHERE other IS NULL"));
+
+    // Deleting parent 1 cascades: the child row goes with it.
+    try Query.delete(Parent).where(.id, .equals, @as(u64, 1)).exec(&conn);
+    try std.testing.expectEqual(@as(i64, 0), try conn.scalarInt("SELECT COUNT(*) FROM chained"));
+}
+
+test "referential actions: an action change forces a rebuild" {
+    const before = Schema{ .tables = &.{.{ .name = "c", .columns = &.{
+        .{ .name = "id", .affinity = .integer, .pk = true },
+        .{ .name = "p", .affinity = .integer, .fk = .{ .table = "parent", .column = "id" } },
+    } }} };
+    const after = Schema{ .tables = &.{.{ .name = "c", .columns = &.{
+        .{ .name = "id", .affinity = .integer, .pk = true },
+        .{ .name = "p", .affinity = .integer, .fk = .{ .table = "parent", .column = "id", .on_delete = .cascade } },
+    } }} };
+    const ops = comptime diff(before, after);
+    try std.testing.expectEqual(@as(usize, 1), ops.len);
+    try std.testing.expect(ops[0] == .rebuild);
+}
 
 test "Unique: markers flatten and compose in either order" {
     // Same shape regardless of wrapping order.

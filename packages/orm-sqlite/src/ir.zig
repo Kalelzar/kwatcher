@@ -7,9 +7,14 @@ const model = @import("model.zig");
 
 pub const Affinity = enum { integer, real, text };
 
+/// sqlite's referential actions (clauses of the REFERENCES constraint).
+pub const FkAction = enum { no_action, restrict, set_null, set_default, cascade };
+
 pub const FkIr = struct {
     table: []const u8,
     column: []const u8,
+    on_delete: FkAction = .no_action,
+    on_update: FkAction = .no_action,
 };
 
 pub const ColumnIr = struct {
@@ -56,7 +61,12 @@ fn fkIr(comptime F: type) FkIr {
             .{ @typeName(@FieldType(F, "value")), @tagName(Target.name), @typeName(PkValue) },
         ));
     }
-    return .{ .table = @tagName(Target.name), .column = pk_name };
+    return .{
+        .table = @tagName(Target.name),
+        .column = pk_name,
+        .on_delete = model.fkActionOf(F, .on_delete) orelse .no_action,
+        .on_update = model.fkActionOf(F, .on_update) orelse .no_action,
+    };
 }
 
 /// Column IR before nullability is applied, or null when the field is a pure

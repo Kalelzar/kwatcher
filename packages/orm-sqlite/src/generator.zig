@@ -12,11 +12,25 @@ fn affinitySql(comptime a: ir.Affinity) []const u8 {
     };
 }
 
+fn actionSql(a: ir.FkAction) []const u8 {
+    return switch (a) {
+        .no_action => "NO ACTION",
+        .restrict => "RESTRICT",
+        .set_null => "SET NULL",
+        .set_default => "SET DEFAULT",
+        .cascade => "CASCADE",
+    };
+}
+
 pub fn renderColumn(comptime col: ir.ColumnIr) []const u8 {
     comptime var res: []const u8 = col.name ++ " " ++ affinitySql(col.affinity);
     if (col.pk) res = res ++ " PRIMARY KEY";
     if (col.unique) res = res ++ " UNIQUE";
-    if (col.fk) |fk| res = res ++ " REFERENCES " ++ fk.table ++ "(" ++ fk.column ++ ")";
+    if (col.fk) |fk| {
+        res = res ++ " REFERENCES " ++ fk.table ++ "(" ++ fk.column ++ ")";
+        if (fk.on_delete != .no_action) res = res ++ " ON DELETE " ++ actionSql(fk.on_delete);
+        if (fk.on_update != .no_action) res = res ++ " ON UPDATE " ++ actionSql(fk.on_update);
+    }
     if (!col.nullable) res = res ++ " NOT NULL";
     return res;
 }

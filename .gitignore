@@ -7,4 +7,5 @@ zig-pkg/
 callgrind.out.*
 cachegrind.out.*
 /.recording/
+/.kwev/
 *.kwev

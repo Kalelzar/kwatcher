@@ -36,7 +36,12 @@ pub fn assertTable(comptime T: type) void {
 /// wrapping another marker grabs its underlying `value` type (no nesting)
 /// and copies its properties forward, so `PK(Unique(u64))` and
 /// `Unique(PK(u64))` are the same shape.
-pub const Prop = enum { unique };
+pub const FkAction = ir.FkAction;
+pub const Prop = union(enum) {
+    unique,
+    on_delete: FkAction,
+    on_update: FkAction,
+};
 
 /// The property list `T` forwards; empty for unmarked types.
 pub fn forwardedProps(comptime T: type) []const Prop {
@@ -47,9 +52,31 @@ pub fn forwardedProps(comptime T: type) []const Prop {
 
 pub fn hasProperty(comptime T: type, comptime p: Prop) bool {
     inline for (comptime forwardedProps(T)) |q| {
-        if (q == p) return true;
+        if (std.meta.activeTag(q) == std.meta.activeTag(p)) return true;
     }
     return false;
+}
+
+pub const FkActionSlot = enum { on_delete, on_update };
+
+/// The referential action `T`'s marker chain carries for `slot`, if any.
+/// Conflicting duplicates are a bug in the schema, not a preference.
+pub fn fkActionOf(comptime T: type, comptime slot: FkActionSlot) ?FkAction {
+    comptime var found: ?FkAction = null;
+    inline for (comptime forwardedProps(T)) |p| {
+        const action: ?FkAction = switch (p) {
+            .unique => null,
+            .on_delete => |a| if (slot == .on_delete) a else null,
+            .on_update => |a| if (slot == .on_update) a else null,
+        };
+        if (action) |a| {
+            if (found != null) {
+                @compileError("Conflicting " ++ @tagName(slot) ++ " actions in one marker chain.");
+            }
+            found = a;
+        }
+    }
+    return found;
 }
 
 /// Rejects wrapping a marker whose kind already decides the column role:
@@ -88,13 +115,17 @@ pub fn FK(comptime Ref: type, comptime T: type) type {
     };
 }
 
-pub fn Unique(comptime T: type) type {
+/// Shared flattening body for property wrappers: strip the operand to its
+/// underlying value type, keep its kind (or become a plain `.wrapper`),
+/// forward the FK target when present, and prepend `extra` to the
+/// forwarded properties.
+fn Wrapped(comptime T: type, comptime extra: []const Prop) type {
     const V = stripMarker(T);
     _ = ir.affinityOf(V);
-    const props = [_]Prop{.unique} ++ forwardedProps(T);
+    const props = extra ++ forwardedProps(T);
 
     if (comptime isMarker(T, .table)) {
-        @compileError("Unique wraps columns, not tables.");
+        @compileError("Property wrappers wrap columns, not tables.");
     }
     if (comptime isMarker(T, .foreign_key)) {
         // Forward the FK's target so fkIr keeps working on the flattened
@@ -111,6 +142,36 @@ pub fn Unique(comptime T: type) type {
         pub const properties: []const Prop = props;
         value: V,
     };
+}
+
+pub fn Unique(comptime T: type) type {
+    return Wrapped(T, &.{.unique});
+}
+
+/// Referential actions only exist on REFERENCES constraints, so these
+/// require the wrapped chain to already be a foreign key — which also
+/// makes a misplaced action unrepresentable (PK/FK only admit `.wrapper`
+/// operands, so an action can never sneak in from the inside).
+fn assertFkChain(comptime what: []const u8, comptime T: type) void {
+    if (comptime !isMarker(T, .foreign_key)) {
+        @compileError(what ++ " requires a foreign-key column (referential actions only exist on REFERENCES constraints); got " ++ @typeName(T));
+    }
+}
+
+pub fn OnDelete(comptime action: FkAction, comptime T: type) type {
+    assertFkChain("OnDelete", T);
+    return Wrapped(T, &.{.{ .on_delete = action }});
+}
+
+pub fn OnUpdate(comptime action: FkAction, comptime T: type) type {
+    assertFkChain("OnUpdate", T);
+    return Wrapped(T, &.{.{ .on_update = action }});
+}
+
+/// ON DELETE CASCADE — the colloquial "cascade". ON UPDATE stays at
+/// sqlite's default; use OnUpdate explicitly for update propagation.
+pub fn Cascade(comptime T: type) type {
+    return OnDelete(.cascade, T);
 }
 
 pub fn Table(comptime table_name: @Type(.enum_literal), comptime T: type) type {
