@@ -1,0 +1,24 @@
+.{
+    .name = .kw_sqlite,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0x424e2d21f09bd51f,
+    .dependencies = .{
+        .kw_core = .{
+            .path = "../core",
+        },
+        .klib = .{
+            .url = "git+https://github.com/Kalelzar/klib.git#a81bd4406c9517ad18bfea391733df29fc85a8ca",
+            .hash = "klib-0.0.0-vum4ZE-TAAAQBM7CM-zftirjIOFLrms-j6bzgaWdMPF-",
+        },
+        .kw_orm_sqlite = .{
+            .path = "../orm-sqlite",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "build_migrations.zig",
+        "src",
+    },
+}
