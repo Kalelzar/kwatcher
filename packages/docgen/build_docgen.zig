@@ -41,6 +41,9 @@ pub const Result = struct {
     modgen_step: *std.Build.Step.Run,
     docgen_step: *std.Build.Step.Run,
     install_docs: *std.Build.Step.InstallDir,
+    /// The docgen output directory (openapi/asyncapi JSON, sqlite schema +
+    /// candidate migration files) — for steps that consume the artifacts.
+    docgen_path: std.Build.LazyPath,
 };
 
 /// Wire the docgen pipeline. Builds the docgen package twice (module_only on/off) to get
@@ -90,12 +93,14 @@ pub fn wire(b: *std.Build, opts: Options) Result {
         if (@hasDecl(pkg, "build_root")) docgen.addArg(pkg.build_root);
     }
 
-    // Copy the generated OpenAPI documents into zig-out/docs on install.
+    // Copy the generated documents into zig-out/docs on install: OpenAPI/AsyncAPI
+    // JSON plus the sqlite schema artifacts (DDL + IR snapshot). The generated
+    // .zig modules (manifest/modules) stay out — they are wired as modules below.
     const install_docs = b.addInstallDirectory(.{
         .source_dir = docgen_path,
         .install_dir = .prefix,
         .install_subdir = "docs",
-        .include_extensions = &.{"json"},
+        .include_extensions = &.{ "json", "sql", "zon" },
     });
     b.getInstallStep().dependOn(&install_docs.step);
 
@@ -121,6 +126,7 @@ pub fn wire(b: *std.Build, opts: Options) Result {
         .modgen_step = modgen,
         .build_step = kw_modgen,
         .install_docs = install_docs,
+        .docgen_path = docgen_path,
     };
 }
 
