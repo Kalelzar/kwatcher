@@ -1,6 +1,7 @@
 const std = @import("std");
 const docgen = @import("kw_docgen").build_docgen;
 const http_template = @import("kw_http_template").build_templates;
+const sqlite_migrations = @import("kw_sqlite").build_migrations;
 
 /// Build the example application's module graph for a given target/optimize. Called twice:
 /// once at the user's requested target to produce the installed `kwatcher-example`, and —
@@ -18,9 +19,16 @@ fn wireApp(
         .target = target,
         .optimize = optimize,
         .dwarf_format = .@"64",
-        .link_libc = false,
+        // Derived from the graph rather than pinned off: kw-sqlite links the
+        // vendored sqlite3 static lib, which needs libc.
+        .link_libc = null,
         .omit_frame_pointer = false,
     });
+
+    // Committed sqlite schema snapshot + embedded migrations ("kw-sqlite--snapshot" /
+    // "kw-sqlite--migrations"). Wired here so the host docgen entrypoint copy gets the
+    // identical imports.
+    sqlite_migrations.wire(b, app, "migrations");
 
     // 1st Party:
     const kw_core = b.dependency("kw_core", .{ .target = target, .optimize = optimize }).module("kw-core");
@@ -31,6 +39,7 @@ fn wireApp(
     const kw_cron = b.dependency("kw_cron", .{ .target = target, .optimize = optimize }).module("kw-cron");
     const kw_action = b.dependency("kw_action", .{ .target = target, .optimize = optimize }).module("kw-action");
     const kw_signal = b.dependency("kw_signal", .{ .target = target, .optimize = optimize }).module("kw-signal");
+    const kw_sqlite = b.dependency("kw_sqlite", .{ .target = target, .optimize = optimize }).module("kw-sqlite");
 
     // 3rd Party:
     const httpz = b.dependency("httpz", .{ .target = target, .optimize = optimize }).module("httpz");
@@ -90,6 +99,7 @@ fn wireApp(
     app.addImport("kw-cron", kw_cron);
     app.addImport("kw-action", kw_action);
     app.addImport("kw-signal", kw_signal);
+    app.addImport("kw-sqlite", kw_sqlite);
     app.addImport("httpz", httpz);
     app.addImport("kw-introspect", kw_introspect);
     app.addImport("kw-introspect--http", kw_introspect_http);
@@ -204,6 +214,11 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     }).module("kw-docgen--signal");
 
+    const kw_docgen_sqlite = b.dependency("kw_docgen_sqlite", .{
+        .target = gen_target,
+        .optimize = optimize,
+    }).module("kw-docgen--sqlite");
+
     // Host-built copy of the app for the generators to introspect; only needed when the
     // installed app isn't itself host-native. `null` lets the helper derive it from the
     // consumer (reusing the installed app's modules).
@@ -225,12 +240,28 @@ pub fn build(b: *std.Build) !void {
             .{ .kind = "cron", .module = kw_docgen_cron },
             .{ .kind = "amqp", .module = kw_docgen_amqp },
             .{ .kind = "action", .module = kw_docgen_none },
+            .{ .kind = "sqlite", .module = kw_docgen_sqlite },
             .{ .kind = "signal", .module = kw_docgen_signal },
             .{ .kind = "internal", .module = kw_docgen_none },
         },
     });
 
     example.step.dependOn(&docs.docgen_step.step);
+
+    // Promote the generated candidate sqlite migration to a committed one:
+    // `zig build commit-migration -Dmigration-name=<name>`.
+    const migration_name = b.option([]const u8, "migration-name", "Name for the migration committed by `zig build commit-migration`") orelse "migration";
+    const commit_tool = b.dependency("kw_docgen_sqlite", .{
+        .target = gen_target,
+        .optimize = optimize,
+    }).artifact("kw-sqlite-commit");
+    const run_commit = b.addRunArtifact(commit_tool);
+    run_commit.has_side_effects = true;
+    run_commit.addDirectoryArg(docs.docgen_path);
+    run_commit.addArg(b.pathFromRoot("migrations"));
+    run_commit.addArg(migration_name);
+    const commit_step = b.step("commit-migration", "Promote the candidate sqlite migration to a committed migration");
+    commit_step.dependOn(&run_commit.step);
 
     // kwev tooling:
     const kw_kwev = b.dependency("kw_kwev", .{ .target = target, .optimize = optimize }).module("kw-kwev");

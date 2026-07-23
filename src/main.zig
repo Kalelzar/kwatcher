@@ -9,6 +9,7 @@ const http = @import("kw-http");
 const cron = @import("kw-cron");
 const action = @import("kw-action");
 const signal = @import("kw-signal");
+const sqlite = @import("kw-sqlite");
 const httpz = @import("httpz");
 
 const introspect = @import("kw-introspect");
@@ -45,6 +46,7 @@ pub const Config = struct {
         amqp: core.config.BaseConfig,
         public: http.Config,
         private: http.Config,
+        sqlite: sqlite.Config = .{},
     },
     middleware: struct {
         cors: http.middleware.Cors.Config,
@@ -173,6 +175,13 @@ const CronRoutes = struct {
             .{ .heartbeat = .{ timestamp, null } },
             .{ .inj = inj },
         );
+
+        // Record the tick in the sqlite driver's database, then queue a count
+        // readback. Both go through the shared event queue, so with several
+        // consumer threads the logged count may lag by a tick — it's a demo.
+        const sq = try inj.require(Scheduler(.sqlite));
+        try sq.call(.{ .recordVisit = .{ timestamp, "heartbeat" } }, .{ .inj = inj });
+        try sq.call(.{ .logVisitCount = .{} }, .{ .inj = inj });
     }
 };
 
@@ -216,6 +225,34 @@ const ActionRoutes = struct {
         } else {
             log.info("Job was already done: {s}", .{name});
         }
+    }
+};
+
+/// Sqlite route handlers and table definitions.
+/// Function names are the route id verbatim; the first tuple param is the call
+/// context, followed by the driver's shared connection, then any injected deps.
+/// Pub table decls are collected by `sqlite.From` and auto-migrated (CREATE
+/// TABLE IF NOT EXISTS) when the driver opens its connection.
+const SqliteRoutes = struct {
+    pub const Visit = sqlite.orm.Table(.visit, struct {
+        id: sqlite.orm.PK(u64),
+        event: []const u8,
+        at: i64,
+    });
+
+    pub fn recordVisit(ctx: struct { i64, []const u8 }, db: *sqlite.Db) !void {
+        // id is an INTEGER PRIMARY KEY (rowid alias): omitted -> auto-assigned.
+        try db.conn.exec("INSERT INTO visit (event, at) VALUES (?1, ?2)", .{ ctx.@"1", ctx.@"0" });
+    }
+
+    pub fn logVisitCount(db: *sqlite.Db, allocator: std.mem.Allocator) !void {
+        var q = sqlite.orm.Query
+            .from(.v, Visit)
+            .select(.{ .v = .{ .id = .id } });
+        defer q.deinit(allocator);
+        var n: u64 = 0;
+        while (try q.next(db, allocator)) |_| n += 1;
+        log.info("[sqlite] {d} visits recorded", .{n});
     }
 };
 
@@ -486,6 +523,21 @@ const action_driver = action.Driver
     .routes(action.From(ActionRoutes))
     .build();
 
+/// The sqlite driver: non-listening like action, but config-taking — the
+/// config path names the database file. Tables declared in the route
+/// container ride the same routes slice; the Migrations fragment wires the
+/// committed history (migrations/ + schema.zon, embedded by the build), so
+/// init runs the migration runner: committed migrations first, then the
+/// build-time candidate (current schema vs committed snapshot).
+const sqlite_snapshot: sqlite.orm.ir.Schema = @import("kw-sqlite--snapshot");
+const sqlite_driver = sqlite.Driver
+    .new(.sqlite)
+    .config("driver.sqlite")
+    .listen(false)
+    .jobs(0)
+    .routes(sqlite.From(SqliteRoutes) ++ sqlite.Migrations(sqlite_snapshot, @import("kw-sqlite--migrations")))
+    .build();
+
 /// The signal driver's routes, hoisted so the driver and the process-wide block
 /// mask (`signal.blockRouted` in `juicyMain`) share one source of truth.
 const signal_routes = signal.From(SignalRoutes) ++ signal.From(signal.default.Shutdown);
@@ -507,7 +559,8 @@ pub const drivers = struct {
             .registerHandler(amqp_driver)
             .registerHandler(http_driver)
             .registerHandler(action_driver)
-            .registerHandler(signal_driver);
+            .registerHandler(signal_driver)
+            .registerHandler(sqlite_driver);
         // The private introspection mount is appended only in normal runtime builds, not during
         // docgen (the UI is generated *from* the docs); `register` handles that gating.
         break :reg introspection.register(base);
@@ -596,6 +649,9 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         .with(.cron, cron.defaultFor(drivers.drivers), allocator)
         // TODO: create a http.defaultFor
         .with(.public, kwatcher.default.config(http.Config, "driver.public"), allocator)
+        // Register the sqlite driver's config (database file path); the driver
+        // resolves it at init to open its connection.
+        .with(.sqlite, kwatcher.default.config(sqlite.Config, "driver.sqlite"), allocator)
         // Register our custom counter as a static dependency
         .static(.public, &ctx)
         .static(.amqp, &counter);
