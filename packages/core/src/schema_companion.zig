@@ -1,8 +1,34 @@
 //! The standard schemas defined for kwatcher clients.
+//!
+//! Handwritten companion to the zettel-generated schemas (see `schema/`):
+//! the transport framework and the allocator-owning models stay native,
+//! while the wire schemas and pure models are re-exported from the
+//! generated `kw-core-schema` module so `@import("kw-core").schema.X`
+//! keeps working unchanged.
 const std = @import("std");
 
 const klib = @import("klib");
 const meta = klib.meta;
+
+const gen = @import("kw-core-schema");
+const core = gen.kwatcher.core;
+
+// --- zettel-generated surface ---------------------------------------------
+
+pub const Context = gen.Context;
+pub const ZettelError = gen.ZettelError;
+
+/// The User schema namespace.
+pub const User = core.User;
+
+/// The Client schema namespace.
+pub const Client = core.Client;
+
+/// A client-side model for the Client-schema namespace, with generated
+/// `v1`/`v2`/`fromV1`/`fromV2` conversion helpers.
+pub const ClientInfo = core.ClientInfo;
+
+// --- transport framework ---------------------------------------------------
 
 /// Message options that can be configured from a publishing route (publish/reply)
 pub const ConfigurableMessageOptions = struct {
@@ -85,101 +111,7 @@ pub fn Schema(comptime version: u32, comptime name: []const u8, comptime T: type
     return meta.MergeStructs(SchemaUtils(version, name), T);
 }
 
-/// The User schema namespace.
-pub const User = struct {
-    /// Version 1 of the User schema.
-    pub const V1 = Schema(
-        1,
-        "user",
-        struct {
-            /// The hostname of the machine.
-            hostname: []const u8,
-            /// The username of the user running the client.
-            username: []const u8,
-            /// An id that can be used to identify the user. User configurable.
-            id: []const u8,
-        },
-    );
-};
-
-/// The Client schema namespace
-pub const Client = struct {
-    /// Version 1 of the Client schema.
-    pub const V1 = Schema(
-        1,
-        "client",
-        struct {
-            /// The version of the client.
-            version: []const u8,
-
-            /// The name of the client.
-            name: []const u8,
-        },
-    );
-
-    pub const V2 = Schema(
-        2,
-        "client",
-        struct {
-            /// The id of the client.
-            id: []const u8,
-
-            /// The version of the client.
-            version: []const u8,
-
-            /// The name of the client.
-            name: []const u8,
-        },
-    );
-};
-
-/// A client-side model for the Client-schema namespace.
-/// It follows the latest schema version and has helpers
-/// to convert to any other known schema version.
-pub const ClientInfo = struct {
-    /// The id of the client.
-    id: []const u8,
-
-    /// The name of the client.
-    name: []const u8,
-    /// The version of the client.
-    version: []const u8,
-
-    /// Convert to a Client.V1 compatible schema object.
-    pub fn v1(self: *const ClientInfo) Client.V1 {
-        return .{
-            .version = self.version,
-            .name = self.name,
-        };
-    }
-
-    /// Convert to a Client.V2 compatible schema object.
-    pub fn v2(self: *const ClientInfo) Client.V2 {
-        return .{
-            .id = self.id,
-            .version = self.version,
-            .name = self.name,
-        };
-    }
-
-    /// Construct from a Client.V1 compatible schema object.
-    pub fn fromV1(sch: *const Client.V1, id: []const u8) ClientInfo {
-        return .{
-            .version = sch.version,
-            .name = sch.name,
-            .id = id,
-        };
-    }
-
-    /// Construct from a Client.V2 compatible schema object.
-    pub fn fromV2(sch: *const Client.V2) ClientInfo {
-        return .{
-            .id = sch.id,
-            .version = sch.version,
-            .name = sch.name,
-        };
-    }
-};
+// --- allocator-owning models -----------------------------------------------
 
 /// A client-side model for the User-schema namespace.
 /// It follows the latest schema version and has helpers
@@ -239,6 +171,8 @@ pub const UserInfo = struct {
         };
     }
 };
+
+// --- native-only generic schemas (until parametric schemas land) -----------
 
 /// The Heartbeat schema namespace.
 pub const Heartbeat = struct {

@@ -1,0 +1,44 @@
+(module kwatcher:core)
+
+
+(defstruct user-info
+  "A client-side model for the User-schema namespace. Pure data; the
+allocator-owning UserInfo lives in the handwritten companion."
+  (hostname string "The name of the current host.")
+  (username string "The name of the current user.")
+  (id string "An id that can be used to identify the user. User configurable."))
+
+(defschema user user-info "user"
+  "The User schema namespace."
+  (1 "Version 1 of the User schema." hostname username id))
+
+(defstruct client-info
+  "A client-side model for the Client-schema namespace. It follows the
+latest schema version and has helpers to convert to any other known
+schema version."
+  (id string "The id of the client.")
+  (name string "The name of the client.")
+  (version string "The version of the client."))
+
+(defschema client client-info "client"
+  "The Client schema namespace."
+  (1 "Version 1 of the Client schema." version name)
+  (2 "Version 2 of the Client schema." id version name))
+
+(deftrait client-id-p (it string)
+  "A non-empty client id."
+  (--> it (length) (> 0)))
+
+(defmigration client:v1 client:v2 (&keyword (id client-id-p))
+  "Upgrading requires the registry-issued client id and falls back to
+\"unknown\" when none is supplied; downgrading drops the id."
+  :up ((id :any client-id-p))
+  ((client:v2:make
+     :name (.name up)
+     :version (.version up)
+     :id (or id "unknown")))
+  ((client:v1:make
+     :name (.name down)
+     :version (.version down))))
+
+(export user client client-info user-info)

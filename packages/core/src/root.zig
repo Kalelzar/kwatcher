@@ -2,7 +2,7 @@
 // Nothing here depends on the runtime or any driver.
 
 // types & DI
-pub const schema = @import("schema.zig");
+pub const schema = @import("schema_companion.zig");
 pub const event = @import("event.zig");
 pub const correlation = @import("correlation.zig");
 pub const deps = @import("dep.zig");

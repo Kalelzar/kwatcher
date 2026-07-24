@@ -1,6 +1,6 @@
 const std = @import("std");
 const klib = @import("klib");
-const schema = @import("schema.zig");
+const schema = @import("schema_companion.zig");
 const DepCtx = @import("dep/ctx.zig").DepCtx;
 
 pub const CorrelationID = @import("correlation.zig").CorrelationID;

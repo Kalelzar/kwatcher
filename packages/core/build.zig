@@ -1,4 +1,5 @@
 const std = @import("std");
+const zettel = @import("zettel");
 
 pub fn build(b: *std.Build) !void {
     // Options
@@ -85,4 +86,19 @@ pub fn build(b: *std.Build) !void {
     // 3rd Party:
     kw_core.addImport("klib", klib);
     kw_core.addImport("metrics", metrics);
+
+    // zettel schema codegen: schema/*.ztl -> the kw-core-schema module.
+    // Nothing generated is checked in; dependents re-run zettel over the
+    // same sources through the exported "schema-dir" named path.
+    const zettel_dep = b.dependency("zettel", .{ .optimize = .ReleaseSafe });
+    const kw_core_schema = zettel.schemaModule(b, zettel_dep, .{
+        .source_dir = b.path("schema"),
+        .root_module = "kwatcher:core",
+        .check_step = check,
+        .expose_as = "kw-core-schema",
+        .target = target,
+        .optimize = optimize,
+    });
+    kw_core.addImport("kw-core-schema", kw_core_schema);
+    b.addNamedLazyPath("schema-dir", b.path("schema"));
 }
