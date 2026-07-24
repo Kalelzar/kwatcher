@@ -13,16 +13,50 @@ const std = @import("std");
 const core = @import("kw-core");
 const http = @import("kw-http");
 const kwatcher = @import("kwatcher");
+const auth_oidc = @import("kw-auth-oidc");
 const assemble = @import("assemble.zig");
+const introspect_routes = @import("routes.zig");
 
 const kwd = kwatcher.default;
 
+/// Unprotected mount — kept as the compatibility surface. Prefer
+/// `MountWith(docs, backends, .{ .auth = "<scheme>" })` for anything
+/// reachable beyond localhost.
+pub fn Mount(comptime docs: type, comptime backends: anytype) type {
+    return MountWith(docs, backends, .{ .auth = null });
+}
+
 /// Build the hardcoded private introspection mount over `docs`/`backends` and expose its
 /// registry/dep wiring. `docs` is named once here; `driver`/`register`/`deps` all close over it.
-pub fn Mount(comptime docs: type, comptime backends: anytype) type {
-    const assembly = assemble.Assemble(docs, backends);
-    const http_routes = assembly(.http);
+///
+/// `opts.auth: ?[]const u8` — when set, every inner route (core fragments,
+/// actions, renderers + all backend-generated routes) is wrapped in
+/// kw-auth-oidc's bearer middleware under that scheme name, and the UI's own
+/// `/_introspect/login` page is served. The open group (shell pages, both
+/// login flows, static assets — all browser navigations that cannot carry a
+/// bearer header) stays outside. Grouping is purely structural:
+/// `open ++ WithAuth(protected)` — there is no route filtering or exemption
+/// mechanism anywhere. The consumer still registers the DI side: the auth
+/// extension for its settings config path, plus the `security.*Ctx`
+/// registries (see the example app).
+pub fn MountWith(comptime docs: type, comptime backends: anytype, comptime opts: anytype) type {
     return struct {
+        /// Route composition, lazily analysed (only referenced from `driver`,
+        /// itself only referenced from `register`'s non-docgen branch) — so
+        /// neither template lookups nor route generation run during docgen.
+        const http_routes = blk: {
+            const auth_scheme: ?[]const u8 = opts.auth;
+            const backend_assembly = assemble.AssembleBackends(docs, backends);
+            const open = introspect_routes.openRoutes(docs, backends, auth_scheme != null);
+            const inner = introspect_routes.innerRoutes(docs, backends);
+            const protected = inner.http ++ backend_assembly(.http);
+            const wrapped = if (auth_scheme) |scheme|
+                auth_oidc.WithAuth(protected, .{ .scheme = scheme })
+            else
+                protected;
+            break :blk open.http ++ wrapped;
+        };
+
         /// The cors-wrapped, assembled introspection mount (a built `http.Driver` factory).
         /// Only referenced from `register`'s non-docgen branch, so it is never analysed (or
         /// cors-wrapped over the empty docgen route set) during docgen.

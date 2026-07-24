@@ -1,6 +1,5 @@
 //! The Auth tab: lists the app's configured auth schemes (the runtime
-//! `http.security.AuthSchemes` registry, populated by auth packages like
-//! kw-auth-oidc) and drives a real OIDC authorization-code + PKCE login so
+//! `security.AuthSchemes` registry, registered by the app) and drives a real OIDC authorization-code + PKCE login so
 //! tokens land in the browser's sessionStorage without hand-pasting.
 //!
 //! Layering: this module never imports an auth package — everything it needs
@@ -18,6 +17,7 @@
 const std = @import("std");
 const core = @import("kw-core");
 const http = @import("kw-http");
+const security = @import("security.zig");
 
 const pkce_cookie = "kw_introspect_pkce";
 
@@ -37,18 +37,20 @@ const CallbackResult = struct {
     err: []const u8,
 };
 
-fn schemesOf(depctx: *core.deps.DepCtx) ?http.security.AuthSchemes {
-    return depctx.require(http.security.AuthSchemes) catch null;
+pub fn schemesOf(depctx: *core.deps.DepCtx) ?security.AuthSchemes {
+    return depctx.require(security.AuthSchemes) catch null;
 }
 
 /// The UI login-client registry is registered by the app only when it wants
 /// login buttons; absent just means paste-only.
-fn loginClientsOf(depctx: *core.deps.DepCtx) http.security.LoginClients {
-    return depctx.require(http.security.LoginClients) catch .{};
+pub fn loginClientsOf(depctx: *core.deps.DepCtx) security.LoginClients {
+    return depctx.require(security.LoginClients) catch .{};
 }
 
-/// Templated routes (core prefix): the tab itself and the login callback.
-pub fn Auth(comptime Docs: type) type {
+/// Templated routes that must stay outside auth protection (core prefix):
+/// the tab's shell page and the provider callback — both are browser
+/// navigations, which can never carry an Authorization header.
+pub fn Shell(comptime Docs: type) type {
     _ = Docs;
     return struct {
         /// The static page shell. The scheme list arrives as an htmx
@@ -59,30 +61,6 @@ pub fn Auth(comptime Docs: type) type {
             _: http.data.Request(null),
         ) http.data.Html(struct { title: []const u8 }, &.{200}) {
             return .{ .value = .{ .ok = .{ .title = "Auth" } } };
-        }
-
-        pub fn @"GET _introspect/auth/schemes @introspectAuthSchemes"(
-            body: struct {
-                request: *http.Request,
-                response: *http.Response,
-            },
-            depctx: *core.deps.DepCtx,
-            allocator: core.mem.ScopedAllocator,
-        ) !http.data.Html(AuthView, &.{200}) {
-            _ = body;
-            const schemes = schemesOf(depctx) orelse
-                return .{ .value = .{ .ok = .{ .schemes = &.{} } } };
-            const clients = loginClientsOf(depctx);
-
-            const entries = try allocator.value.alloc(SchemeEntry, schemes.schemes.len);
-            for (schemes.schemes, 0..) |s, i| {
-                entries[i] = .{
-                    .name = s.name,
-                    .well_known = s.well_known,
-                    .has_login = clients.find(s.name) != null,
-                };
-            }
-            return .{ .value = .{ .ok = .{ .schemes = entries } } };
         }
 
         pub fn @"GET _introspect/auth/{scheme}/callback @introspectAuthCallback"(
@@ -177,6 +155,37 @@ pub fn Auth(comptime Docs: type) type {
     };
 }
 
+/// Templated inner routes (core prefix) — data fragments, safe to put behind
+/// UI auth: the shell's htmx calls carry the UI bearer token.
+pub fn Inner(comptime Docs: type) type {
+    _ = Docs;
+    return struct {
+        pub fn @"GET _introspect/auth/schemes @introspectAuthSchemes"(
+            body: struct {
+                request: *http.Request,
+                response: *http.Response,
+            },
+            depctx: *core.deps.DepCtx,
+            allocator: core.mem.ScopedAllocator,
+        ) !http.data.Html(AuthView, &.{200}) {
+            _ = body;
+            const schemes = schemesOf(depctx) orelse
+                return .{ .value = .{ .ok = .{ .schemes = &.{} } } };
+            const clients = loginClientsOf(depctx);
+
+            const entries = try allocator.value.alloc(SchemeEntry, schemes.schemes.len);
+            for (schemes.schemes, 0..) |s, i| {
+                entries[i] = .{
+                    .name = s.name,
+                    .well_known = s.well_known,
+                    .has_login = clients.find(s.name) != null,
+                };
+            }
+            return .{ .value = .{ .ok = .{ .schemes = entries } } };
+        }
+    };
+}
+
 /// Raw (untemplated) routes: the login redirect. Kept out of the template
 /// pipeline because its useful output is a 302, not a page.
 pub fn Login(comptime Docs: type) type {
@@ -260,7 +269,7 @@ fn selfCallbackUri(a: std.mem.Allocator, request: *http.Request, scheme: []const
     return std.fmt.allocPrint(a, "http://{s}/_introspect/auth/{s}/callback", .{ host, scheme });
 }
 
-const Endpoints = struct {
+pub const Endpoints = struct {
     authorization_endpoint: ?[]const u8 = null,
     token_endpoint: ?[]const u8 = null,
 };
@@ -269,7 +278,7 @@ const Endpoints = struct {
 /// caching: logins are rare, and statelessness keeps this module trivial.
 /// Network work runs on `gpa` and is fully released; the returned strings
 /// are duped into `out`.
-fn fetchEndpoints(gpa: std.mem.Allocator, out: std.mem.Allocator, well_known: []const u8) !Endpoints {
+pub fn fetchEndpoints(gpa: std.mem.Allocator, out: std.mem.Allocator, well_known: []const u8) !Endpoints {
     var client = std.http.Client{ .allocator = gpa };
     defer client.deinit();
     var w: std.Io.Writer.Allocating = .init(gpa);
@@ -293,7 +302,7 @@ fn fetchEndpoints(gpa: std.mem.Allocator, out: std.mem.Allocator, well_known: []
     };
 }
 
-const TokenResponse = struct {
+pub const TokenResponse = struct {
     access_token: ?[]const u8 = null,
     @"error": ?[]const u8 = null,
     error_description: ?[]const u8 = null,
@@ -302,7 +311,7 @@ const TokenResponse = struct {
 /// Exchange an authorization code at the provider's token endpoint
 /// (public client + PKCE — no client secret involved). Same allocator
 /// discipline as `fetchEndpoints`.
-fn exchangeCode(gpa: std.mem.Allocator, out: std.mem.Allocator, token_endpoint: []const u8, form: []const u8) !TokenResponse {
+pub fn exchangeCode(gpa: std.mem.Allocator, out: std.mem.Allocator, token_endpoint: []const u8, form: []const u8) !TokenResponse {
     var client = std.http.Client{ .allocator = gpa };
     defer client.deinit();
     var w: std.Io.Writer.Allocating = .init(gpa);
@@ -332,7 +341,7 @@ fn exchangeCode(gpa: std.mem.Allocator, out: std.mem.Allocator, token_endpoint: 
 }
 
 /// RFC 3986 percent-encoding, everything but the unreserved set.
-fn percentEncode(w: *std.Io.Writer, s: []const u8) !void {
+pub fn percentEncode(w: *std.Io.Writer, s: []const u8) !void {
     for (s) |c| {
         switch (c) {
             'A'...'Z', 'a'...'z', '0'...'9', '-', '.', '_', '~' => try w.writeByte(c),
@@ -341,7 +350,7 @@ fn percentEncode(w: *std.Io.Writer, s: []const u8) !void {
     }
 }
 
-fn cookieValue(cookies: []const u8, name: []const u8) ?[]const u8 {
+pub fn cookieValue(cookies: []const u8, name: []const u8) ?[]const u8 {
     var it = std.mem.splitScalar(u8, cookies, ';');
     while (it.next()) |part| {
         const trimmed = std.mem.trim(u8, part, " ");

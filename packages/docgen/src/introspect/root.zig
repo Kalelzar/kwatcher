@@ -10,6 +10,8 @@ const assemble = @import("assemble.zig");
 
 /// The opinionated, hardcoded introspection mount (a `.private` HTTP driver serving the UI).
 pub const Mount = @import("private_mount.zig").Mount;
+pub const MountWith = @import("private_mount.zig").MountWith;
+pub const security = @import("security.zig");
 
 pub const Assemble = assemble.Assemble;
 pub const Entry = assemble.Entry;

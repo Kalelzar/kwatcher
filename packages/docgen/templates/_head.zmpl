@@ -30,6 +30,23 @@
         document.addEventListener("DOMContentLoaded", sync);
         document.addEventListener("htmx:afterSettle", sync);
       })();
+
+      // UI auth plumbing. When the mount is auth-wrapped, every inner call
+      // (htmx fragment/action) must carry the UI bearer token stored by
+      // /_introspect/login under kw:introspect:token. A 401 from any inner
+      // call bounces to the login page (guarded against looping there).
+      // On an unprotected mount no token exists and this is inert.
+      (function () {
+        document.addEventListener("htmx:configRequest", function (evt) {
+          var t = sessionStorage.getItem("kw:introspect:token");
+          if (t) evt.detail.headers["Authorization"] = "Bearer " + t;
+        });
+        document.addEventListener("htmx:responseError", function (evt) {
+          var status = evt.detail.xhr ? evt.detail.xhr.status : 0;
+          var on_login = window.location.pathname.indexOf("/_introspect/login") === 0;
+          if (status === 401 && !on_login) window.location.href = "/_introspect/login";
+        });
+      })();
     </script>
   </head>
   <body class="flex h-screen overflow-hidden bg-zinc-950 text-zinc-100 antialiased" htmx-ext="morph">

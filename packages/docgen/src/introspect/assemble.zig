@@ -84,8 +84,10 @@ fn uniqueKinds(comptime Docs: type) []const []const u8 {
     }
 }
 
-fn entriesOf(comptime Docs: type, comptime backends: anytype) []const Entry {
-    var entries: []const Entry = collect(&.{}, routes.coreRoutes(Docs, backends));
+/// Backend-contributed entries only (no core routes) — the slice the
+/// opinionated mount wraps in auth wholesale.
+fn backendEntriesOf(comptime Docs: type, comptime backends: anytype) []const Entry {
+    var entries: []const Entry = &.{};
 
     // Kind-level: once per UNIQUE introspected kind present in the manifest.
     inline for (uniqueKinds(Docs)) |kind| {
@@ -104,6 +106,10 @@ fn entriesOf(comptime Docs: type, comptime backends: anytype) []const Entry {
     }
 
     return entries;
+}
+
+fn entriesOf(comptime Docs: type, comptime backends: anytype) []const Entry {
+    return collect(&.{}, routes.coreRoutes(Docs, backends)) ++ backendEntriesOf(Docs, backends);
 }
 
 const AccessFn = *const fn (@Type(.enum_literal)) []const type;
@@ -129,6 +135,16 @@ pub fn Assemble(
 ) AccessFn {
     if (comptime Docs.isDocgen) return noopAccess;
     return Assembly(build(entriesOf(Docs, backends)));
+}
+
+/// Assemble ONLY the backend-contributed routes (no core chrome). Used by the
+/// opinionated mount to compose `open_core ++ wrap(inner_core ++ backends)`.
+pub fn AssembleBackends(
+    comptime Docs: type,
+    comptime backends: anytype,
+) AccessFn {
+    if (comptime Docs.isDocgen) return noopAccess;
+    return Assembly(build(backendEntriesOf(Docs, backends)));
 }
 
 fn noopAccess(comptime _: @Type(.enum_literal)) []const type {

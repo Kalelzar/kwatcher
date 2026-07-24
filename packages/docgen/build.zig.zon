@@ -13,6 +13,9 @@
         .kw_docindex = .{
             .path = "../docindex",
         },
+        .kw_auth_oidc = .{
+            .path = "../auth-oidc",
+        },
         .kw_http = .{
             .path = "../http",
         },

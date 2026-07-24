@@ -4,6 +4,13 @@
 //! rendered through the `core` zmpl prefix; the favicon is a raw asset (excluded from
 //! templating). Driver-specific operation browsers live in the per-kind backends.
 //!
+//! Routes are grouped structurally for auth composition (see `private_mount.MountWith`):
+//! `openRoutes` = browser navigations (shells, both login flows, provider callbacks) plus
+//! static assets — none of these can carry an Authorization header; `innerRoutes` = the
+//! htmx data/action fragments, which the mount may wrap in an auth middleware wholesale.
+//! There is deliberately NO per-route exemption mechanism — protection is decided by which
+//! container a route lives in.
+//!
 //! The generated manifest is threaded in as the comptime `Docs` parameter (not `@import`ed)
 //! to keep this module free of a static edge to docgen's output — see `assemble.zig`.
 
@@ -12,6 +19,7 @@ const core = @import("kw-core");
 const http = @import("kw-http");
 const http_template = @import("kw-http-template");
 const auth = @import("auth.zig");
+const login = @import("login.zig");
 
 fn prettyJson(a: std.mem.Allocator, raw: []const u8) ![]const u8 {
     const parsed = try std.json.parseFromSlice(std.json.Value, a, raw, .{});
@@ -21,9 +29,60 @@ fn prettyJson(a: std.mem.Allocator, raw: []const u8) ![]const u8 {
     return buf.written();
 }
 
-/// The fixed generic routes, generated over the manifest `Docs`. Template ids match the
-/// `core`-prefix `.zmpl` files.
-fn Core(comptime Docs: type, comptime icons: []const KindIcon) type {
+fn findDriver(comptime Docs: type, kind: []const u8, key: []const u8) bool {
+    inline for (Docs.drivers) |D| {
+        if (std.mem.eql(u8, D.key, key) and std.mem.eql(u8, D.kind, kind)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Shell pages — full browser navigations. Structurally open: a navigation
+/// can never carry a bearer header. Template ids match the `core`-prefix
+/// `.zmpl` files.
+fn Shell(comptime Docs: type) type {
+    return struct {
+        pub fn @"GET _introspect @introspectIndex"(_: http.data.Request(null)) http.data.Html(
+            struct { title: []const u8 },
+            &.{200},
+        ) {
+            return .{ .value = .{ .ok = .{ .title = "KW-IntrospectUI" } } };
+        }
+
+        pub fn @"GET _introspect/{kind}/{key} @introspectDriver"(
+            body: struct {
+                request: *http.Request,
+                response: *http.Response,
+                captures: struct { kind: []const u8, key: []const u8 },
+            },
+            depctx: *core.deps.DepCtx,
+            allocator: core.mem.ScopedAllocator,
+        ) !http.data.Html(Docs.DriverInfo, &.{ 200, 404 }) {
+            if (findDriver(Docs, body.captures.kind, body.captures.key)) {
+                return .{ .value = .{ .ok = .{ .kind = body.captures.kind, .key = body.captures.key } } };
+            }
+
+            const properties = try depctx.require(core.event.Properties);
+            const instance = try std.fmt.allocPrint(allocator.value, "{f}", .{properties.correlation_id});
+
+            return .{
+                .value = .{
+                    .not_found = .{
+                        .instance = instance,
+                        .type = error.NotFound,
+                        .title = "Driver not found",
+                        .details = "No driver matches the given kind and key.",
+                    },
+                },
+            };
+        }
+    };
+}
+
+/// Inner data/action routes — htmx fragments and renderers; the protected
+/// group when the mount is auth-wrapped.
+fn InnerCore(comptime Docs: type, comptime icons: []const KindIcon) type {
     return struct {
         const DriverResponse = struct {
             drivers: []const Docs.DriverInfo,
@@ -50,50 +109,6 @@ fn Core(comptime Docs: type, comptime icons: []const KindIcon) type {
             return default_fp;
         }
 
-        pub fn @"GET _introspect @introspectIndex"(_: http.data.Request(null)) http.data.Html(
-            struct { title: []const u8 },
-            &.{200},
-        ) {
-            return .{ .value = .{ .ok = .{ .title = "KW-IntrospectUI" } } };
-        }
-
-        fn findDriver(kind: []const u8, key: []const u8) bool {
-            inline for (Docs.drivers) |D| {
-                if (std.mem.eql(u8, D.key, key) and std.mem.eql(u8, D.kind, kind)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        pub fn @"GET _introspect/{kind}/{key} @introspectDriver"(
-            body: struct {
-                request: *http.Request,
-                response: *http.Response,
-                captures: struct { kind: []const u8, key: []const u8 },
-            },
-            depctx: *core.deps.DepCtx,
-            allocator: core.mem.ScopedAllocator,
-        ) !http.data.Html(Docs.DriverInfo, &.{ 200, 404 }) {
-            if (findDriver(body.captures.kind, body.captures.key)) {
-                return .{ .value = .{ .ok = .{ .kind = body.captures.kind, .key = body.captures.key } } };
-            }
-
-            const properties = try depctx.require(core.event.Properties);
-            const instance = try std.fmt.allocPrint(allocator.value, "{f}", .{properties.correlation_id});
-
-            return .{
-                .value = .{
-                    .not_found = .{
-                        .instance = instance,
-                        .type = error.NotFound,
-                        .title = "Driver not found",
-                        .details = "No driver matches the given kind and key.",
-                    },
-                },
-            };
-        }
-
         pub fn @"GET _introspect/{kind}/{key}/icon @driverIcon"(
             body: struct {
                 request: *http.Request,
@@ -103,7 +118,7 @@ fn Core(comptime Docs: type, comptime icons: []const KindIcon) type {
             depctx: *core.deps.DepCtx,
             allocator: core.mem.ScopedAllocator,
         ) !http.data.Html(IconCard, &.{ 200, 404 }) {
-            if (findDriver(body.captures.kind, body.captures.key)) {
+            if (findDriver(Docs, body.captures.kind, body.captures.key)) {
                 return .{ .value = .{ .ok = .{
                     .kind = body.captures.kind,
                     .key = body.captures.key,
@@ -133,7 +148,7 @@ fn Core(comptime Docs: type, comptime icons: []const KindIcon) type {
             }),
         ) http.data.Json(DriverResponse, &.{200}) {
             var active: Docs.DriverInfo = .{ .kind = "internal", .key = "internal" };
-            if (findDriver(rq.query.kind, rq.query.key)) {
+            if (findDriver(Docs, rq.query.kind, rq.query.key)) {
                 active = .{ .kind = rq.query.kind, .key = rq.query.key };
             }
 
@@ -261,24 +276,54 @@ fn Favicon(comptime icons: []const KindIcon) type {
     };
 }
 
-/// Build the generic core routes (always contributed once). Returns a kind-keyed struct; the
-/// UI is served over HTTP, so everything lands under `.http`. The favicon (`image/svg+xml`)
-/// and the vendored frontend bundles (`text/javascript`) are excluded from templating — they
-/// are raw assets served straight from embedded bytes.
+/// The structurally-open routes: shell pages, both login flows (Auth tab's
+/// per-scheme flow + the UI's own `/_introspect/login` when `ui_login` is
+/// set), and the raw static assets.
 ///
 /// Routes pass `void` as their context: their captures are all string-typed and they never
 /// read a routing context, so `void` keeps them context-agnostic and out of the `*Context`
 /// dependency graph — they fold into any driver's routes regardless of its context type.
-pub fn coreRoutes(comptime Docs: type, comptime backends: anytype) struct { http: []const type } {
-    const icons = iconList(backends);
-    const all = http.From(Core(Docs, icons), void) ++
-        http.From(Favicon(icons), void) ++
-        http.From(Assets, void) ++
-        http.From(auth.Auth(Docs), void);
-    // The auth login route stays outside the template pipeline: its useful
-    // output is a 302 redirect, not a rendered page.
-    return .{
-        .http = http_template.WithTemplates("core", all, &.{ "image/svg+xml", "text/javascript" }) ++
-            http.From(auth.Login(Docs), void),
+pub fn openRoutes(
+    comptime Docs: type,
+    comptime backends: anytype,
+    comptime ui_login: bool,
+) struct { http: []const type } {
+    const rts = comptime blk: {
+        const icons = iconList(backends);
+
+        var templated: []const type = http.From(Shell(Docs), void) ++ http.From(auth.Shell(Docs), void);
+        if (ui_login) {
+            templated = templated ++ http.From(login.Pages(Docs), void);
+        }
+        templated = templated ++ http.From(Favicon(icons), void) ++ http.From(Assets, void);
+
+        // The 302 login starters stay outside the template pipeline: their
+        // useful output is a redirect, not a rendered page.
+        var raw: []const type = http.From(auth.Login(Docs), void);
+        if (ui_login) {
+            raw = raw ++ http.From(login.Start(Docs), void);
+        }
+
+        break :blk http_template.WithTemplates("core", templated, &.{ "image/svg+xml", "text/javascript" }) ++ raw;
     };
+    return .{ .http = rts };
+}
+
+/// The inner core routes (sidebar data, icon cards, renderers, the Auth
+/// tab's scheme fragment) — the mount composes these, together with every
+/// backend-generated route, into the auth-wrapped group.
+pub fn innerRoutes(comptime Docs: type, comptime backends: anytype) struct { http: []const type } {
+    const rts = comptime blk: {
+        const icons = iconList(backends);
+        const all = http.From(InnerCore(Docs, icons), void) ++ http.From(auth.Inner(Docs), void);
+        break :blk http_template.WithTemplates("core", all, &.{ "image/svg+xml", "text/javascript" });
+    };
+    return .{ .http = rts };
+}
+
+/// Build the generic core routes as one flat bundle (open ++ inner, no UI
+/// login) — the compatibility surface for the non-opinionated `Assemble`
+/// path, which predates the auth grouping.
+pub fn coreRoutes(comptime Docs: type, comptime backends: anytype) struct { http: []const type } {
+    return .{ .http = openRoutes(Docs, backends, false).http ++ innerRoutes(Docs, backends).http };
 }
