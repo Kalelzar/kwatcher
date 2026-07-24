@@ -235,6 +235,9 @@ pub fn DepHub(comptime DM: type, comptime Statics: anytype, comptime Config: typ
         }
 
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            // Work here is Categories × ContextStack × Statics; the default
+            // quota starts failing around a dozen registered statics.
+            @setEvalBranchQuota(DM.Categories.len * (Statics.len + 1) * 500 + 10_000);
             inline for (DM.Categories) |C| {
                 if (comptime Statics.len == 0) break;
                 if (comptime C.Lifetime == .static) out: {

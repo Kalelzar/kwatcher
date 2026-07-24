@@ -74,7 +74,10 @@ pub fn DepMap(comptime _Categories: []const type, _Lifetime: type) type {
         }
 
         pub fn find(comptime tag: anytype, comptime lifetime: Lifetime) ?struct { type, usize } {
-            @setEvalBranchQuota(Categories.len * 500);
+            // The quota set here also covers the caller's evaluation
+            // (requires/augment run Mod over all categories after find), so
+            // budget for the whole chain, not just this scan.
+            @setEvalBranchQuota(Categories.len * 2000);
             inline for (Categories, 0..) |Cs, i| {
                 if (Cs.Tag == tag and Cs.Lifetime == lifetime) return .{ Cs, i };
             }

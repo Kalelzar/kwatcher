@@ -184,6 +184,7 @@ pub fn UniteCallContext(comptime Routes: []const type) type {
 
 pub fn Mod(comptime T: type, comptime i: usize, comptime As: []const T, comptime B: T) []const T {
     const buf = comptime blk: {
+        @setEvalBranchQuota(As.len * 200 + 2000);
         var buf: [As.len]T = undefined;
         for (As, 0..) |A, j| {
             buf[j] = if (i == j) B else A;
