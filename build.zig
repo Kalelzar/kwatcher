@@ -40,6 +40,7 @@ fn wireApp(
     const kw_action = b.dependency("kw_action", .{ .target = target, .optimize = optimize }).module("kw-action");
     const kw_signal = b.dependency("kw_signal", .{ .target = target, .optimize = optimize }).module("kw-signal");
     const kw_sqlite = b.dependency("kw_sqlite", .{ .target = target, .optimize = optimize }).module("kw-sqlite");
+    const kw_auth_oidc = b.dependency("kw_auth_oidc", .{ .target = target, .optimize = optimize }).module("kw-auth-oidc");
 
     // 3rd Party:
     const httpz = b.dependency("httpz", .{ .target = target, .optimize = optimize }).module("httpz");
@@ -100,6 +101,7 @@ fn wireApp(
     app.addImport("kw-action", kw_action);
     app.addImport("kw-signal", kw_signal);
     app.addImport("kw-sqlite", kw_sqlite);
+    app.addImport("kw-auth-oidc", kw_auth_oidc);
     app.addImport("httpz", httpz);
     app.addImport("kw-introspect", kw_introspect);
     app.addImport("kw-introspect--http", kw_introspect_http);

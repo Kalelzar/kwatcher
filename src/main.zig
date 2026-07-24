@@ -10,6 +10,7 @@ const cron = @import("kw-cron");
 const action = @import("kw-action");
 const signal = @import("kw-signal");
 const sqlite = @import("kw-sqlite");
+const auth_oidc = @import("kw-auth-oidc");
 const httpz = @import("httpz");
 
 const introspect = @import("kw-introspect");
@@ -51,6 +52,21 @@ pub const Config = struct {
     middleware: struct {
         cors: http.middleware.Cors.Config,
     },
+    /// OIDC bearer-token verification settings for the routes wrapped in
+    /// `WithAuth` below. Defaults point at a local dev Keycloak realm;
+    /// override in the JSON for a real provider.
+    auth: auth_oidc.Settings = .{
+        .well_known = "http://localhost:8080/realms/kwatcher/.well-known/openid-configuration",
+        .audience = "kwatcher",
+    },
+    /// IntrospectUI-only knobs — deliberately separate from `auth`: the UI
+    /// login client is a UI concern, not part of token verification.
+    introspect: struct {
+        /// Public OIDC client id for the Auth tab's login button (must allow
+        /// the UI's `/_introspect/auth/bearer/callback` redirect). Null
+        /// leaves token-paste as the only way in.
+        auth_client_id: ?[]const u8 = "kw-introspect",
+    } = .{},
     /// Per-protocol tunables, resolved by each protocol's deps extension
     /// (`protocols.<name>`). All defaults, so the JSON may omit the block.
     protocols: struct {
@@ -458,6 +474,24 @@ const HTTPRoutes = struct {
     }
 };
 
+/// HTTP routes behind OIDC bearer auth. Wrapped in `auth_oidc.WithAuth`
+/// below, which both enforces the check and marks the routes' security
+/// metadata for OpenAPI/IntrospectUI. The verified identity arrives as an
+/// ordinary dependency argument.
+const SecuredHTTPRoutes = struct {
+    /// Echo the verified identity of the caller.
+    pub fn @"GET /api/v1/me @whoami"(
+        _: http.data.Request(null),
+        identity: auth_oidc.Identity,
+    ) struct { sub: []const u8, username: ?[]const u8, email: ?[]const u8 } {
+        return .{
+            .sub = identity.claims.sub,
+            .username = identity.claims.preferred_username,
+            .email = identity.claims.email,
+        };
+    }
+};
+
 // ============================================================================
 // Driver Setup
 // ============================================================================
@@ -511,7 +545,10 @@ const http_driver = http.Driver
     .config("driver.public")
     .listen(true)
     .jobs(1)
-    .routes(http.middleware.cors(http.From(HTTPRoutes, RouteContext)))
+    .routes(http.middleware.cors(
+        http.From(HTTPRoutes, RouteContext) ++
+            auth_oidc.WithAuth(http.From(SecuredHTTPRoutes, RouteContext), .{}),
+    ))
     .error_handler(http.DefaultErrorHandler)
     .build();
 
@@ -624,6 +661,15 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     var counter = CounterDependency{};
     var ctx: RouteContext = .{};
 
+    // The IntrospectUI's login client for the "bearer" scheme (a UI concern,
+    // kept apart from the auth settings). Empty registry = paste-only.
+    var login_client_storage: [1]http.security.LoginClient = undefined;
+    var login_clients: http.security.LoginClientsCtx = .{};
+    if (config_slot.introspect.auth_client_id) |client_id| {
+        login_client_storage[0] = .{ .scheme = "bearer", .client_id = client_id };
+        login_clients = .{ .clients = .{ .clients = &login_client_storage } };
+    }
+
     // Build the dependency container
     // The chain of .with() and .static() calls registers dependencies at different lifetimes:
     // - .static(): Lives for the entire application lifetime
@@ -649,6 +695,9 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         .with(.cron, cron.defaultFor(drivers.drivers), allocator)
         // TODO: create a http.defaultFor
         .with(.public, kwatcher.default.config(http.Config, "driver.public"), allocator)
+        // OIDC bearer auth on the public mount: settings resolver, JWKS
+        // state, and the per-request verified identity.
+        .with(.public, auth_oidc.extension("auth", "bearer"), allocator)
         // Register the sqlite driver's config (database file path); the driver
         // resolves it at init to open its connection.
         .with(.sqlite, kwatcher.default.config(sqlite.Config, "driver.sqlite"), allocator)
@@ -659,7 +708,14 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     // The private introspection mount's deps (cors config + a keyed http.Config per served http
     // mount + its own config). `introspection.deps` no-ops during docgen, so this stays one
     // unconditional `.with`.
-    const deps = base_deps.with(.private, introspection.deps, allocator);
+    const with_mount = base_deps.with(.private, introspection.deps, allocator);
+
+    // The Auth tab needs the scheme facts (well-known URL) on the private
+    // mount, and the login button its UI client registry. Gated like the
+    // mount itself: during docgen the `.private` category does not exist.
+    const deps = if (comptime docs.isDocgen) with_mount else with_mount
+        .with(.private, auth_oidc.schemes("auth", "bearer"), allocator)
+        .static(.private, &login_clients);
 
     // Create and start the server
     var server = try kwatcher.server.Server(@TypeOf(deps), drivers.drivers)
