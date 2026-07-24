@@ -180,6 +180,7 @@ pub fn WithCors(comptime routes: []const type) []const type {
     comptime var count = 0;
 
     const map = comptime blk: {
+        @setEvalBranchQuota(routes.len * 600 + 1000);
         const P = struct { []const u8, u32 };
         const E = struct { []const u8, Statuses };
         var pre_entries: []const P = &.{};
@@ -230,10 +231,14 @@ pub fn WithCors(comptime routes: []const type) []const type {
                 new_route.identifier = "[CORS] " ++ route.identifier;
                 new_route.raw = "";
 
+                // Preflight is a synthetic anonymous-access route: shed any
+                // metadata (e.g. auth requirements) inherited from the
+                // original via swap.
                 nroutes[count] = R.swap(PreflightRouteHandlers.create(cache).make)
                     .mod(.{ .method = .options })
                     .mod(.{ .route = new_route })
-                    .mod(.{ .response = RType });
+                    .mod(.{ .response = RType })
+                    .withMeta(.{});
                 count += 1;
             }
             mroutes[i] = R.wrap(WrapRouteHandlers.create);
