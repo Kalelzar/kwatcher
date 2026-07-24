@@ -467,7 +467,7 @@ pub fn DriverBuilder(
                                         event.body,
                                         .{},
                                     ) catch |er| blk: {
-                                        std.log.warn("Error encountered while parsing schema: {}", .{er});
+                                        std.log.warn("Error encountered while parsing schema {s}: {} (body: {s})", .{ @typeName(RCtx), er, event.body });
                                         break :blk try std.json.parseFromSlice(
                                             RCtx,
                                             allocator,
@@ -510,7 +510,7 @@ pub fn DriverBuilder(
                                         ctx,
                                         .{},
                                     ) catch |er| blk: {
-                                        std.log.warn("Error encountered while parsing schema: {}", .{er});
+                                        std.log.warn("Error encountered while parsing schema {s}: {} (body: {s})", .{ @typeName(RCtx), er, ctx });
                                         break :blk try std.json.parseFromSlice(
                                             RCtx,
                                             allocator,
