@@ -1,0 +1,23 @@
+.{
+    .name = .kw_auth_oidc,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0xa51136616e9ff891,
+    .dependencies = .{
+        .kw_core = .{
+            .path = "../core",
+        },
+        .kw_http = .{
+            .path = "../http",
+        },
+        .klib = .{
+            .url = "git+https://github.com/Kalelzar/klib.git#a81bd4406c9517ad18bfea391733df29fc85a8ca",
+            .hash = "klib-0.0.0-vum4ZE-TAAAQBM7CM-zftirjIOFLrms-j6bzgaWdMPF-",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
