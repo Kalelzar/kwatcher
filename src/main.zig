@@ -60,12 +60,23 @@ pub const Config = struct {
         .audience = "kwatcher",
     },
     /// IntrospectUI-only knobs — deliberately separate from `auth`: the UI
-    /// login client is a UI concern, not part of token verification.
+    /// is its own application with its own OIDC client/audience.
     introspect: struct {
-        /// Public OIDC client id for the Auth tab's login button (must allow
-        /// the UI's `/_introspect/auth/bearer/callback` redirect). Null
-        /// leaves token-paste as the only way in.
+        /// Verification settings for the UI's own bearer protection (the
+        /// "introspect" scheme): same provider realm, distinct audience.
+        auth: auth_oidc.Settings = .{
+            .well_known = "http://localhost:8080/realms/kwatcher/.well-known/openid-configuration",
+            .audience = "kw-introspect",
+        },
+        /// Public OIDC client for the UI's `/_introspect/login` button (must
+        /// allow the `/_introspect/login/callback` redirect). Null leaves
+        /// token-paste as the only way in.
         auth_client_id: ?[]const u8 = "kw-introspect",
+        /// Public OIDC clients for the Auth tab's Try-it logins, one entry
+        /// per scheme (drivers may each have their own scheme, and one
+        /// driver may speak several). Each client must allow the
+        /// `/_introspect/auth/{scheme}/callback` redirect.
+        tryit_clients: []const introspect.security.LoginClient = &.{},
     } = .{},
     /// Per-protocol tunables, resolved by each protocol's deps extension
     /// (`protocols.<name>`). All defaults, so the JSON may omit the block.
@@ -536,9 +547,16 @@ const cron_driver = cron.Driver
     .build();
 
 /// The private introspection-UI mount (a second `.private` HTTP driver) and its registry/dep
-/// wiring, all hardcoded in the library — see `kw-introspect`'s `Mount`. The docs manifest and
-/// the http backend are threaded in.
-const introspection = introspect.Mount(docs, .{ introspect_http, introspect_cron, introspect_signal });
+/// wiring, all hardcoded in the library — see `kw-introspect`'s `MountWith`. The docs manifest
+/// and the backends are threaded in, plus the auth wrap: every inner route (fragments, actions,
+/// renderers) goes behind the OIDC bearer middleware; shells and the login flows stay open
+/// (browser navigations can't carry headers). The UI's own login page authenticates against
+/// the "bearer" scheme and stores its token under kw:introspect:token.
+const introspection = introspect.MountWith(
+    docs,
+    .{ introspect_http, introspect_cron, introspect_signal },
+    .{ .auth = "introspect" },
+);
 
 const http_driver = http.Driver
     .new(.public)
@@ -661,14 +679,21 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     var counter = CounterDependency{};
     var ctx: RouteContext = .{};
 
-    // The IntrospectUI's login client for the "bearer" scheme (a UI concern,
-    // kept apart from the auth settings). Empty registry = paste-only.
-    var login_client_storage: [1]http.security.LoginClient = undefined;
-    var login_clients: http.security.LoginClientsCtx = .{};
-    if (config_slot.introspect.auth_client_id) |client_id| {
-        login_client_storage[0] = .{ .scheme = "bearer", .client_id = client_id };
-        login_clients = .{ .clients = .{ .clients = &login_client_storage } };
-    }
+    // The private mount's registries — the app owns all three, and the split
+    // is deliberate: AuthSchemes/LoginClients describe the *application's*
+    // schemes (what the Auth tab lists for Try-it logins), while UiAuth is
+    // the UI's own scheme/login client, which must never show up in the tab.
+    var scheme_storage = [_]introspect.security.RuntimeScheme{
+        .{ .name = "bearer", .well_known = config_slot.auth.well_known },
+    };
+    var auth_schemes: introspect.security.AuthSchemesCtx = .{ .schemes = .{ .schemes = &scheme_storage } };
+    var login_clients: introspect.security.LoginClientsCtx = .{
+        .clients = .{ .clients = config_slot.introspect.tryit_clients },
+    };
+    var ui_auth: introspect.security.UiAuthCtx = .{ .ui = .{
+        .scheme = .{ .name = "introspect", .well_known = config_slot.introspect.auth.well_known },
+        .client_id = config_slot.introspect.auth_client_id,
+    } };
 
     // Build the dependency container
     // The chain of .with() and .static() calls registers dependencies at different lifetimes:
@@ -697,7 +722,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         .with(.public, kwatcher.default.config(http.Config, "driver.public"), allocator)
         // OIDC bearer auth on the public mount: settings resolver, JWKS
         // state, and the per-request verified identity.
-        .with(.public, auth_oidc.extension("auth", "bearer"), allocator)
+        .with(.public, auth_oidc.extension("auth"), allocator)
         // Register the sqlite driver's config (database file path); the driver
         // resolves it at init to open its connection.
         .with(.sqlite, kwatcher.default.config(sqlite.Config, "driver.sqlite"), allocator)
@@ -710,12 +735,15 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     // unconditional `.with`.
     const with_mount = base_deps.with(.private, introspection.deps, allocator);
 
-    // The Auth tab needs the scheme facts (well-known URL) on the private
-    // mount, and the login button its UI client registry. Gated like the
-    // mount itself: during docgen the `.private` category does not exist.
+    // The private mount enforces the UI's own "introspect" scheme (its own
+    // audience/client), and carries the scheme + login-client registries the
+    // Auth tab and both login flows read. Gated like the mount itself:
+    // during docgen the `.private` category does not exist.
     const deps = if (comptime docs.isDocgen) with_mount else with_mount
-        .with(.private, auth_oidc.schemes("auth", "bearer"), allocator)
-        .static(.private, &login_clients);
+        .with(.private, auth_oidc.extension("introspect.auth"), allocator)
+        .static(.private, &auth_schemes)
+        .static(.private, &login_clients)
+        .static(.private, &ui_auth);
 
     // Create and start the server
     var server = try kwatcher.server.Server(@TypeOf(deps), drivers.drivers)
