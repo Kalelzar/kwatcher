@@ -12,6 +12,21 @@ const std = @import("std");
 pub const Components = struct {
     /// Component name -> schema, referenced as `#/components/schemas/<name>`.
     schemas: std.StringArrayHashMapUnmanaged(Schema) = .empty,
+    /// Scheme name -> security scheme, referenced from per-operation
+    /// `security` requirements. Populated by backends whose routes carry
+    /// security metadata.
+    security_schemes: std.StringArrayHashMapUnmanaged(SecurityScheme) = .empty,
+};
+
+/// Neutral security-scheme node. Deliberately minimal: only what routes can
+/// declare at build time — runtime facts (discovery URLs) never belong here.
+pub const SecurityScheme = struct {
+    kind: Kind,
+
+    pub const Kind = enum {
+        /// OpenAPI `type: http, scheme: bearer, bearerFormat: JWT`.
+        http_bearer,
+    };
 };
 
 pub const Property = struct {

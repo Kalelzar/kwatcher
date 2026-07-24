@@ -10,6 +10,7 @@ pub const Schema = schema.Schema;
 pub const SchemaKind = schema.SchemaKind;
 pub const Property = schema.Property;
 pub const Components = schema.Components;
+pub const SecurityScheme = schema.SecurityScheme;
 
 /// Zig-type → `Schema` reflection (`schemaFor`, `Ctx`, `contentTypeOf`, …).
 pub const reflect = @import("reflect.zig");

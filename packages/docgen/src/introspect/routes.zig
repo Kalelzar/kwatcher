@@ -11,6 +11,7 @@ const std = @import("std");
 const core = @import("kw-core");
 const http = @import("kw-http");
 const http_template = @import("kw-http-template");
+const auth = @import("auth.zig");
 
 fn prettyJson(a: std.mem.Allocator, raw: []const u8) ![]const u8 {
     const parsed = try std.json.parseFromSlice(std.json.Value, a, raw, .{});
@@ -270,6 +271,14 @@ fn Favicon(comptime icons: []const KindIcon) type {
 /// dependency graph — they fold into any driver's routes regardless of its context type.
 pub fn coreRoutes(comptime Docs: type, comptime backends: anytype) struct { http: []const type } {
     const icons = iconList(backends);
-    const all = http.From(Core(Docs, icons), void) ++ http.From(Favicon(icons), void) ++ http.From(Assets, void);
-    return .{ .http = http_template.WithTemplates("core", all, &.{ "image/svg+xml", "text/javascript" }) };
+    const all = http.From(Core(Docs, icons), void) ++
+        http.From(Favicon(icons), void) ++
+        http.From(Assets, void) ++
+        http.From(auth.Auth(Docs), void);
+    // The auth login route stays outside the template pipeline: its useful
+    // output is a 302 redirect, not a rendered page.
+    return .{
+        .http = http_template.WithTemplates("core", all, &.{ "image/svg+xml", "text/javascript" }) ++
+            http.From(auth.Login(Docs), void),
+    };
 }
