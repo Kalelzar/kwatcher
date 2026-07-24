@@ -34,7 +34,6 @@ pub const Opts = @import("middleware.zig").Opts;
 pub const stripBearer = @import("middleware.zig").stripBearer;
 
 pub const extension = @import("di.zig").extension;
-pub const schemes = @import("di.zig").schemes;
 pub const ResolvedSettings = @import("di.zig").ResolvedSettings;
 
 // Ref all decls — non-recursive at the root (pub re-exports); each sub-file
@@ -70,11 +69,9 @@ comptime {
         _ = &CR.call;
     }
 
-    // DI extensions: instantiate against a representative app config.
+    // DI extension: instantiate against a representative app config.
     const Config = struct { auth: Settings };
-    _ = extension("auth", "bearer");
-    _ = schemes("auth", "bearer");
-    const RS = ResolvedSettings(Config, "auth", "bearer");
+    _ = extension("auth");
+    const RS = ResolvedSettings(Config, "auth");
     _ = &RS.authSettings;
-    _ = &RS.authSchemes;
 }
