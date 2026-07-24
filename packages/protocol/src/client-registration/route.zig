@@ -10,7 +10,7 @@ const Client = @import("kw-amqp").Client;
 
 const base_schema = @import("kw-core").schema;
 
-const schema = @import("schema.zig");
+const schema = @import("kw-cr-schema").kwatcher.protocol.client_registration;
 const ClientRegistry = @import("registry.zig");
 
 /// Publish an announcement to a client registry.

@@ -1,6 +1,6 @@
 const ClientRegistry = @This();
 const schema = @import("kw-core").schema;
-const RegistrationState = @import("schema.zig").RegistrationState;
+const RegistrationState = @import("kw-cr-schema").kwatcher.protocol.client_registration.RegistrationState;
 
 state: RegistrationState = .unregistered,
 assigned_id: ?[]const u8,

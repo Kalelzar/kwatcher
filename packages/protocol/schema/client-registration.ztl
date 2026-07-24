@@ -1,0 +1,67 @@
+(module kwatcher:protocol:client-registration)
+(require kwatcher:core)
+
+(defenum status u8
+  "The status of a client."
+  active sleeping shutdown unknown)
+
+(defenum powerstate u8
+  "The power state of a client."
+  active sleeping shutdown)
+
+(defenum registration-state u8
+  "The registration state of this client."
+  unregistered announcing registered)
+
+(defstruct client-data
+  "Data a client submits when announcing itself."
+  (client kwatcher:core:client:v1 "Client information.")
+  (host string "The host of the current system."))
+
+(defstruct client-data-with-id
+  "Client data extended with the registry-issued client id."
+  (client kwatcher:core:client:v1 "Client information.")
+  (host string "The host of the current system.")
+  (id string "The client id."))
+
+(defstruct client-heartbeat
+  "A liveliness heartbeat payload."
+  (id string "The client id."))
+
+(defstruct client-status
+  "A client status report payload."
+  (id string "The client id.")
+  (status powerstate "The power state of the client."))
+
+(defstruct client-ack
+  "A registry acknowledgement payload."
+  (client kwatcher:core:client:v1 "Client info v1.")
+  (id string "The client id."))
+
+(defstruct empty
+  "An empty payload.")
+
+(defschema announce client-data-with-id "client.announce"
+  "A client announcement. It contains client identity needed for the
+registry to issue us a new id."
+  (1 "A client announcement v1." client host id))
+
+(defschema reannounce-request empty "client.reannounce.request"
+  "A client reannouncement request."
+  (1 "A client reannouncement request v1. Empty."))
+
+(defschema heartbeat client-heartbeat "client.heartbeat"
+  "A liveliness heartbeat."
+  (1 "A liveliness heartbeat v1. Just an id." id))
+
+(defschema status-report client-status "client.status"
+  "A client status report."
+  (1 "A client status v1." id status))
+
+(defschema ack client-ack "client.ack"
+  "A client registry acknowledgement."
+  (1 "A client registry acknowledgement v1. Contains our issued id." client id))
+
+(export announce reannounce-request heartbeat status-report ack
+        status powerstate registration-state
+        client-data client-data-with-id client-heartbeat client-status client-ack)

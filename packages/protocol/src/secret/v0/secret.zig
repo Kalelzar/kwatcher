@@ -1,4 +1,4 @@
-pub const schema = @import("schema.zig");
+pub const schema = @import("kw-secret-schema").kwatcher.protocol.secret;
 pub const route = @import("route.zig");
 pub const timers = @import("timers.zig");
 pub const registry = @import("registry.zig");
@@ -42,4 +42,27 @@ pub fn forKind(comptime Context: type, comptime kind: SupportedKinds) []const ty
         .amqp => return amqp.From(route, Context),
         .cron => return cron.From(timers),
     }
+}
+
+test "secret.get v0 wire shape" {
+    const std = @import("std");
+    const allocator = std.testing.allocator;
+    const msg = schema.Secret.Get.V0{
+        .scheme = "kw.sealed-box.v0",
+        .kid = "abc123",
+        .secret_identifier = "api/example",
+        .client = .{ .id = "client-1", .version = "1.0.0", .name = "example" },
+    };
+
+    var allocating = std.Io.Writer.Allocating.init(allocator);
+    defer allocating.deinit();
+    var json = std.json.fmt(msg, .{});
+    try json.format(&allocating.writer);
+    const body = allocating.written();
+
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"schema_name\":\"secret.get\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"schema_version\":0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"secret_identifier\":\"api/example\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"kid\":\"abc123\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"schema_name\":\"client\"") != null);
 }

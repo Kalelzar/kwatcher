@@ -1,4 +1,4 @@
-pub const schema = @import("schema.zig");
+pub const schema = @import("kw-cr-schema").kwatcher.protocol.client_registration;
 pub const route = @import("route.zig");
 pub const timers = @import("timers.zig");
 pub const registry = @import("registry.zig");

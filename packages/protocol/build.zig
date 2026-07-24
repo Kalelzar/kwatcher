@@ -1,4 +1,5 @@
 const std = @import("std");
+const zettel = @import("zettel");
 
 pub fn build(b: *std.Build) !void {
     // Options
@@ -76,7 +77,8 @@ pub fn build(b: *std.Build) !void {
 
     // Dependencies:
     // 1st Party:
-    const kw_core = b.dependency("kw_core", .{ .target = target, .optimize = optimize }).module("kw-core");
+    const kw_core_dep = b.dependency("kw_core", .{ .target = target, .optimize = optimize });
+    const kw_core = kw_core_dep.module("kw-core");
     const kw_amqp = b.dependency("kw_amqp", .{ .target = target, .optimize = optimize }).module("kw-amqp");
     const kw_cron = b.dependency("kw_cron", .{ .target = target, .optimize = optimize }).module("kw-cron");
     const klib = b.dependency("klib", .{ .target = target, .optimize = optimize }).module("klib");
@@ -87,4 +89,28 @@ pub fn build(b: *std.Build) !void {
     kw_protocol.addImport("kw-amqp", kw_amqp);
     kw_protocol.addImport("kw-cron", kw_cron);
     kw_protocol.addImport("klib", klib);
+
+    // zettel schema codegen: one generated module per protocol domain,
+    // compiled against kw-core's schema sources via --import so foreign
+    // names lower to @import("kw-core-schema") and the whole tree shares
+    // one Context/ZettelError.
+    const zettel_dep = b.dependency("zettel", .{ .optimize = .ReleaseSafe });
+    const core_schema = zettel.SchemaImport{
+        .name = "kw-core-schema",
+        .dir = kw_core_dep.namedLazyPath("schema-dir"),
+        .module = kw_core_dep.module("kw-core-schema"),
+    };
+    for ([_][2][]const u8{
+        .{ "kwatcher:protocol:client-registration", "kw-cr-schema" },
+        .{ "kwatcher:protocol:secret", "kw-secret-schema" },
+    }) |domain| {
+        kw_protocol.addImport(domain[1], zettel.schemaModule(b, zettel_dep, .{
+            .source_dir = b.path("schema"),
+            .root_module = domain[0],
+            .imports = &.{core_schema},
+            .check_step = check,
+            .target = target,
+            .optimize = optimize,
+        }));
+    }
 }

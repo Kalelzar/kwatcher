@@ -7,7 +7,7 @@ const base_schema = @import("kw-core").schema;
 const Config = @import("config.zig");
 const InternFmtCache = @import("kw-core").InternFmtCache;
 const crypto = @import("crypto.zig");
-const schema = @import("schema.zig");
+const schema = @import("kw-secret-schema").kwatcher.protocol.secret;
 const SecretRegistry = @import("registry.zig");
 const ClientRegistry = @import("../../client-registration/registry.zig");
 
