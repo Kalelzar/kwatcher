@@ -204,9 +204,15 @@
         try {
           var endpoint = this.rendererFor(this.ctype);
           if (endpoint) {
+            // The render endpoint is an inner UI route: on an auth-wrapped
+            // mount it needs the UI token (kw:introspect:token) — NOT the
+            // per-scheme Try-it token, which authenticates the target app.
+            var render_headers = { "Content-Type": "text/plain" };
+            var ui_token = sessionStorage.getItem("kw:introspect:token");
+            if (ui_token) render_headers["Authorization"] = "Bearer " + ui_token;
             var r = await fetch(endpoint, {
               method: "POST",
-              headers: { "Content-Type": "text/plain" },
+              headers: render_headers,
               body: text,
             });
             this.rendered = await r.text();
