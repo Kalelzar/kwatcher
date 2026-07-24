@@ -535,6 +535,7 @@ pub fn DriverBuilder(
 
 pub fn FilterRoutes(comptime Rs: []const type, comptime method: HttpTemplate.Parser.HttpVerb) []const type {
     const count = comptime blk: {
+        @setEvalBranchQuota(Rs.len * 100 + 1000);
         var count = 0;
         for (Rs) |R| {
             if (R.method == method) count += 1;
