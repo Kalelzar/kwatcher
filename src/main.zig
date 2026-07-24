@@ -130,7 +130,7 @@ pub const HeartbeatMessage = core.schema.Schema(1, "heartbeat", struct {
 const AmqpRoutes = struct {
     /// Publishes a heartbeat message to the "amq.direct" exchange with routing key "heartbeat"
     /// The context tuple contains: (timestamp, greeting_override)
-    pub fn @"publish:heartbeat amq.direct/heartbeat"(
+    pub fn @"publish:heartbeat amq.direct/heartbeat2"(
         ctx: struct { i64, ?[]const u8 },
         counter: *CounterDependency,
         app_config: *AppConfig,
@@ -150,7 +150,7 @@ const AmqpRoutes = struct {
 
     /// Drains heartbeats back off the broker — proves that published (and
     /// replayed) messages actually landed instead of bouncing as unrouted.
-    pub fn @"consume:heartbeat-drain amq.direct/heartbeat"(
+    pub fn @"consume:heartbeat-drain amq.direct/heartbeat2"(
         heartbeat: HeartbeatMessage,
     ) !void {
         log.info(
