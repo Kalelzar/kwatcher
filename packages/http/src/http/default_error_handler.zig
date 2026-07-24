@@ -61,6 +61,18 @@ pub const DefaultErrorHandler = struct {
                 404,
                 res,
             ),
+            error.Unauthorized => |fe| makeResult(
+                fe,
+                "Unauthorized",
+                401,
+                res,
+            ),
+            error.Forbidden => |fe| makeResult(
+                fe,
+                "Forbidden",
+                403,
+                res,
+            ),
             else => |fe| {
                 makeResult(
                     fe,

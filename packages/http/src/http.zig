@@ -28,6 +28,7 @@ pub const data = @import("http/response.zig");
 pub const Response = httpz.Response;
 pub const Request = httpz.Request;
 pub const DefaultErrorHandler = @import("http/default_error_handler.zig").DefaultErrorHandler;
+pub const security = @import("security.zig");
 
 // TODO: pub const default = @import("amqp/default.zig").default;
 // TODO: pub const defaultFor = @import("amqp/default.zig").defaultFor;
@@ -47,6 +48,9 @@ pub const State = enum {
 };
 
 pub const Config = struct {
+    /// Bind address, IPv4 or IPv6 literal (e.g. "0.0.0.0" to listen on all
+    /// interfaces).
+    host: []const u8 = "127.0.0.1",
     port: u16 = 2000,
 };
 
@@ -178,10 +182,18 @@ pub fn DriverBuilder(
                             const alloc = inj.require(std.mem.Allocator) catch unreachable;
                             const conf = inj.require(*Config) catch unreachable;
 
+                            const address = std.net.Address.parseIp(conf.host, conf.port) catch {
+                                std.log.err(
+                                    "[{s}] Invalid http bind address '{s}'; http driver not started.",
+                                    .{ @tagName(key), conf.host },
+                                );
+                                return;
+                            };
+
                             var handler = Handler{ .self = self };
                             const _server = httpz.Server(*Handler).init(
                                 alloc,
-                                .{ .address = .localhost(conf.port) },
+                                .{ .address = .{ .addr = address } },
                                 &handler,
                             ) catch null;
                             if (_server == null) @panic("Could not start server.");
@@ -565,6 +577,7 @@ pub fn RouteBase(
     comptime HandlerFac: anytype,
     comptime ReturnType: type,
     comptime ev_id: @Type(.enum_literal),
+    comptime md: anytype,
 ) type {
     return struct {
         pub const Handler = HandlerFac(@This());
@@ -572,12 +585,23 @@ pub fn RouteBase(
         pub const method = m;
         pub const inner = route;
         pub const id = route.identifier;
+        pub const metadata = md;
 
         pub const CallContext = Handler.CallContext;
         pub const Dependencies = Handler.Dependencies;
         pub const Return = ReturnType;
         pub const call = Handler.call;
         pub const name = Handler.name;
+
+        /// First metadata entry of type `T`, or null. Middleware attaches
+        /// typed entries via `wrapWith`; consumers (docgen, provenance)
+        /// match on the entry's type.
+        pub fn getMeta(comptime T: type) ?T {
+            inline for (md) |entry| {
+                if (@TypeOf(entry) == T) return entry;
+            }
+            return null;
+        }
 
         pub fn swap(comptime NextHandler: anytype) type {
             return RouteBase(
@@ -586,6 +610,7 @@ pub fn RouteBase(
                 NextHandler,
                 Return,
                 event_id,
+                md,
             );
         }
 
@@ -596,6 +621,35 @@ pub fn RouteBase(
                 NextHandlerFac(HandlerFac).make, // FIXME: This is very gross.
                 Return,
                 event_id,
+                md,
+            );
+        }
+
+        /// `wrap`, but the middleware also records a typed metadata entry on
+        /// the route, so wrapping and declaring (for docs/introspection) are
+        /// a single act.
+        pub fn wrapWith(comptime NextHandlerFac: anytype, comptime meta_entry: anytype) type {
+            return RouteBase(
+                m,
+                route,
+                NextHandlerFac(HandlerFac).make,
+                Return,
+                event_id,
+                md ++ .{meta_entry},
+            );
+        }
+
+        /// Copy of this route with the metadata tuple replaced. Synthetic
+        /// routes derived via `swap` (e.g. CORS preflight) use this to shed
+        /// metadata that only applies to the original route.
+        pub fn withMeta(comptime new_md: anytype) type {
+            return RouteBase(
+                m,
+                route,
+                HandlerFac,
+                Return,
+                event_id,
+                new_md,
             );
         }
 
@@ -621,6 +675,7 @@ pub fn RouteBase(
                     HandlerFac,
                     Return,
                     ev_id,
+                    md,
                 ),
                 inline .route => |rt| RouteBase(
                     m,
@@ -628,6 +683,7 @@ pub fn RouteBase(
                     HandlerFac,
                     Return,
                     ev_id,
+                    md,
                 ),
                 inline .response => |Resp| RouteBase(
                     m,
@@ -635,6 +691,7 @@ pub fn RouteBase(
                     HandlerFac,
                     Resp,
                     ev_id,
+                    md,
                 ),
             };
         }
@@ -814,6 +871,7 @@ pub fn RouteParser(comptime Context: type) type {
                 H.make,
                 ActualResultType,
                 .recv,
+                .{},
             );
 
             return self.extend(RB);
@@ -945,6 +1003,35 @@ comptime {
 
     const R4 = R1.mod(.{ .response = u8 });
     if (R4.query(.response) != u8) @compileError("BUG: Wrong response type");
+
+    // Metadata channel: empty by default, attached via wrapWith, threaded
+    // through swap/wrap/mod, replaced by withMeta, matched by type in getMeta.
+    if (R1.metadata.len != 0) @compileError("BUG: Fresh route has metadata");
+    if (R1.getMeta(security.SecurityRequirement) != null) @compileError("BUG: getMeta on empty metadata");
+
+    const Identity = struct {
+        pub fn create(comptime HandlerFac: anytype) type {
+            return struct {
+                pub fn make(comptime Base: type) type {
+                    return HandlerFac(Base);
+                }
+            };
+        }
+    };
+
+    const R5 = R1.wrapWith(Identity.create, security.SecurityRequirement{ .scheme = "bearer" });
+    const req = R5.getMeta(security.SecurityRequirement) orelse @compileError("BUG: wrapWith dropped metadata");
+    if (!std.mem.eql(u8, req.scheme, "bearer")) @compileError("BUG: Wrong metadata entry");
+    if (R5.wrap(Identity.create).getMeta(security.SecurityRequirement) == null) @compileError("BUG: wrap dropped metadata");
+    if (R5.mod(.{ .method = .post }).getMeta(security.SecurityRequirement) == null) @compileError("BUG: mod dropped metadata");
+    const DummyFac = struct {
+        pub fn make(comptime Base: type) type {
+            _ = Base;
+            return struct {};
+        }
+    };
+    if (R5.swap(DummyFac.make).getMeta(security.SecurityRequirement) == null) @compileError("BUG: swap dropped metadata");
+    if (R5.withMeta(.{}).getMeta(security.SecurityRequirement) != null) @compileError("BUG: withMeta kept metadata");
 
     _ = FilterRoutes(Rts, .get);
 
