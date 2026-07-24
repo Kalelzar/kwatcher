@@ -10,6 +10,7 @@ pub const Schema = docschema.Schema;
 pub const SchemaKind = docschema.SchemaKind;
 pub const Property = docschema.Property;
 pub const Components = docschema.Components;
+pub const SecurityScheme = docschema.SecurityScheme;
 
 /// A version-neutral, in-memory description of an HTTP API.
 ///
@@ -59,6 +60,15 @@ pub const Operation = struct {
     parameters: []const Parameter,
     request_body: ?RequestBody = null,
     responses: []const Response,
+    /// Security requirements attached by auth middleware (route metadata).
+    /// Empty means the operation is unauthenticated.
+    security: []const SecurityRef = &.{},
+};
+
+/// Reference to a scheme in `Components.security_schemes`.
+pub const SecurityRef = struct {
+    scheme: []const u8,
+    scopes: []const []const u8 = &.{},
 };
 
 pub const ParameterLocation = enum { path, query };

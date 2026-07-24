@@ -16,11 +16,14 @@
   // must send CORS headers — no server proxy. Empty `port` falls back to same-origin. The
   // response body is then POSTed to a content-type-specific server renderer
   // (/_introspect/render/<type>) whose HTML fragment we drop into the viewer.
-  function kwTryIt(method, path, port) {
+  function kwTryIt(method, path, port, scheme) {
     return {
       method: method,
       path: path,
       port: port,
+      // Security scheme name for secured operations ("" = open). The token is
+      // what the Auth tab stored under kw:auth:token:<scheme>.
+      scheme: scheme,
       loading: false,
       sent: false,
       status: null,
@@ -33,6 +36,41 @@
       attempted: false,
       init() {
         this.validate();
+      },
+      token() {
+        return this.scheme ? sessionStorage.getItem("kw:auth:token:" + this.scheme) : null;
+      },
+      hasToken() {
+        return !!this.token();
+      },
+      // Decoded claims of the stored token (null for non-JWTs), for the
+      // signed-in banner. NOTE: no backslashes here — zmpl mangles JS
+      // backslash escapes.
+      tokenClaims() {
+        var t = this.token();
+        if (!t) return null;
+        try {
+          var s = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+          while (s.length % 4) s += "=";
+          var bytes = Uint8Array.from(atob(s), function (c) { return c.charCodeAt(0); });
+          return JSON.parse(new TextDecoder().decode(bytes));
+        } catch (e) {
+          return null;
+        }
+      },
+      tokenWho() {
+        var c = this.tokenClaims();
+        if (!c) return "";
+        return c.preferred_username || c.email || c.sub || "";
+      },
+      tokenExpires() {
+        var c = this.tokenClaims();
+        if (!c || !c.exp) return "";
+        return new Date(c.exp * 1000).toLocaleString();
+      },
+      tokenExpired() {
+        var c = this.tokenClaims();
+        return !!(c && c.exp && c.exp * 1000 < Date.now());
       },
       // Block-until-valid validation. We only flag shape problems the backend would
       // reject generically: required params empty, primitive type mismatch, and — only
@@ -72,6 +110,9 @@
             }
           }
         }
+        // Secured operations block until a token exists — authenticate in the
+        // Auth tab (or paste one there) first.
+        if (this.scheme && !this.hasToken()) errs["auth"] = "authenticate in the Auth tab";
         this.errors = errs;
       },
       isValid() {
@@ -130,6 +171,8 @@
         });
         if (query.length) url += (url.indexOf("?") === -1 ? "?" : "&") + query.join("&");
 
+        if (this.scheme && this.hasToken()) headers["Authorization"] = "Bearer " + this.token();
+
         var opts = { method: this.method, headers: headers };
         var bodyEl = this.$root.querySelector("[data-body]");
         if (bodyEl && bodyEl.value.trim()) {
@@ -185,12 +228,36 @@
   }
 </script>
 
-<div class="min-h-0 flex-1 overflow-y-auto p-4" x-data="kwTryIt('{{$.operation.method}}', '{{$.operation.path}}', '{{$.port}}')">
+@if ($.operation.security)
+<div class="min-h-0 flex-1 overflow-y-auto p-4" x-data="kwTryIt('{{$.operation.method}}', '{{$.operation.path}}', '{{$.port}}', '{{$.operation.security.scheme}}')">
+@else
+
+<div class="min-h-0 flex-1 overflow-y-auto p-4" x-data="kwTryIt('{{$.operation.method}}', '{{$.operation.path}}', '{{$.port}}', '')">
+@end
   <form @submit.prevent="send()" @input="validate()" class="flex flex-col gap-4">
     <div class="flex items-center gap-2">
       @partial methodBadge(method: $.operation.method)
       <code class="font-mono text-sm text-zinc-200">{{$.operation.path}}</code>
     </div>
+
+    @if ($.operation.security)
+    <div style="display:none" x-show="!hasToken()" class="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4 shrink-0">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+      </svg>
+      <span>Requires <code class="font-mono">{{$.operation.security.scheme}}</code> authentication.</span>
+      <a href="/_introspect/auth" class="ml-auto font-medium text-sky-300 hover:underline">Authenticate</a>
+    </div>
+    <a href="/_introspect/auth" style="display:none" x-show="hasToken()" title="Open the Auth tab ({{$.operation.security.scheme}})"
+      class="flex items-center gap-2.5 rounded-lg border border-emerald-500/40 bg-emerald-950/40 px-3 py-2.5 text-sm text-emerald-200 transition-colors hover:border-emerald-400/60 hover:bg-emerald-950/70">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5 shrink-0 text-emerald-400">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+      </svg>
+      <span class="font-medium">Signed in<template x-if="tokenWho()"><span> as <strong class="font-semibold" x-text="tokenWho()"></strong></span></template></span>
+      <span class="ml-auto text-xs" style="display:none" x-show="tokenExpires()" :class="tokenExpired() ? 'font-semibold text-rose-300' : 'text-emerald-300/80'"
+        x-text="(tokenExpired() ? 'expired ' : 'expires ') + tokenExpires()"></span>
+    </a>
+    @end
 
     @zig {
       if (zmpl.ref("operation.parameters")) |params| {

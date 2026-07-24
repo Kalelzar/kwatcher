@@ -28,20 +28,47 @@ pub fn serialize(doc: model.Document, writer: *Writer) !void {
     try s.objectField("paths");
     try emitPaths(&s, doc.paths);
 
-    if (doc.components.schemas.count() > 0) {
+    if (doc.components.schemas.count() > 0 or doc.components.security_schemes.count() > 0) {
         try s.objectField("components");
         try s.beginObject();
-        try s.objectField("schemas");
-        try s.beginObject();
-        var it = doc.components.schemas.iterator();
-        while (it.next()) |entry| {
-            try s.objectField(entry.key_ptr.*);
-            try emitSchema(&s, entry.value_ptr.*);
+        if (doc.components.schemas.count() > 0) {
+            try s.objectField("schemas");
+            try s.beginObject();
+            var it = doc.components.schemas.iterator();
+            while (it.next()) |entry| {
+                try s.objectField(entry.key_ptr.*);
+                try emitSchema(&s, entry.value_ptr.*);
+            }
+            try s.endObject();
         }
-        try s.endObject();
+        if (doc.components.security_schemes.count() > 0) {
+            try s.objectField("securitySchemes");
+            try s.beginObject();
+            var it = doc.components.security_schemes.iterator();
+            while (it.next()) |entry| {
+                try s.objectField(entry.key_ptr.*);
+                try emitSecurityScheme(&s, entry.value_ptr.*);
+            }
+            try s.endObject();
+        }
         try s.endObject();
     }
 
+    try s.endObject();
+}
+
+fn emitSecurityScheme(s: *Stringify, scheme: model.SecurityScheme) !void {
+    try s.beginObject();
+    switch (scheme.kind) {
+        .http_bearer => {
+            try s.objectField("type");
+            try s.write("http");
+            try s.objectField("scheme");
+            try s.write("bearer");
+            try s.objectField("bearerFormat");
+            try s.write("JWT");
+        },
+    }
     try s.endObject();
 }
 
@@ -115,6 +142,20 @@ fn emitOperation(s: *Stringify, op: model.Operation) !void {
         try s.endObject();
     }
     try s.endObject();
+
+    if (op.security.len > 0) {
+        try s.objectField("security");
+        try s.beginArray();
+        for (op.security) |sec| {
+            try s.beginObject();
+            try s.objectField(sec.scheme);
+            try s.beginArray();
+            for (sec.scopes) |scope| try s.write(scope);
+            try s.endArray();
+            try s.endObject();
+        }
+        try s.endArray();
+    }
 
     try s.endObject();
 }
@@ -298,6 +339,7 @@ test "emits a minimal valid-looking document" {
         .properties = &.{.{ .name = "id", .schema = .{ .kind = .integer, .format = "int64" } }},
         .required = &.{"id"},
     });
+    try components.security_schemes.put(a, "bearer", .{ .kind = .http_bearer });
 
     const doc: model.Document = .{
         .openapi_version = .v3_2_0,
@@ -318,6 +360,7 @@ test "emits a minimal valid-looking document" {
                     .{ .status = 200, .description = "OK", .content = &.{.{ .content_type = "application/json", .schema = .{ .kind = .ref, .ref = "#/components/schemas/Thing" } }} },
                     .{ .status = 404, .description = "Not Found" },
                 },
+                .security = &.{.{ .scheme = "bearer", .scopes = &.{"profile"} }},
             }},
         }},
         .components = components,
@@ -337,4 +380,12 @@ test "emits a minimal valid-looking document" {
     try std.testing.expect(resp.get("200") != null);
     try std.testing.expect(resp.get("404") != null);
     try std.testing.expect(root.get("components").?.object.get("schemas").?.object.get("Thing") != null);
+
+    // Security: per-op requirement + components scheme.
+    const sec = op.get("security").?.array.items[0].object;
+    try std.testing.expectEqualStrings("profile", sec.get("bearer").?.array.items[0].string);
+    const scheme = root.get("components").?.object.get("securitySchemes").?.object.get("bearer").?.object;
+    try std.testing.expectEqualStrings("http", scheme.get("type").?.string);
+    try std.testing.expectEqualStrings("bearer", scheme.get("scheme").?.string);
+    try std.testing.expectEqualStrings("JWT", scheme.get("bearerFormat").?.string);
 }

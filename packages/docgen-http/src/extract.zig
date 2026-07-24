@@ -102,6 +102,11 @@ fn buildOperation(
         }
     }
 
+    const sec = comptime securityEntries(R);
+    inline for (sec) |e| {
+        try ctx.components.security_schemes.put(ctx.allocator, e.ref.scheme, .{ .kind = e.kind });
+    }
+
     return .{
         .method = comptime methodOf(R.method),
         // `R.id` is the route identifier — guaranteed unique across the driver.
@@ -111,7 +116,40 @@ fn buildOperation(
         .parameters = try params.toOwnedSlice(arena),
         .request_body = request_body,
         .responses = try buildResponses(R.Return, ctx, arena),
+        .security = comptime blk: {
+            var refs: []const model.SecurityRef = &.{};
+            for (sec) |e| refs = refs ++ .{e.ref};
+            break :blk refs;
+        },
     };
+}
+
+const SecurityEntry = struct {
+    ref: model.SecurityRef,
+    kind: model.SecurityScheme.Kind,
+};
+
+/// Security metadata attached by auth middleware (`RouteBase.wrapWith`).
+/// Matched structurally (scheme/kind/scopes fields) rather than by type
+/// identity: the build-time docgen module deliberately does not depend on
+/// kw-http, where `security.SecurityRequirement` lives.
+fn securityEntries(comptime R: type) []const SecurityEntry {
+    comptime {
+        if (!@hasDecl(R, "metadata")) return &.{};
+        var entries: []const SecurityEntry = &.{};
+        for (R.metadata) |entry| {
+            const T = @TypeOf(entry);
+            if (@typeInfo(T) != .@"struct") continue;
+            if (!@hasField(T, "scheme") or !@hasField(T, "kind") or !@hasField(T, "scopes")) continue;
+            if (@typeInfo(@TypeOf(entry.kind)) != .@"enum") continue;
+            const kind = std.meta.stringToEnum(model.SecurityScheme.Kind, @tagName(entry.kind)) orelse continue;
+            entries = entries ++ .{SecurityEntry{
+                .ref = .{ .scheme = entry.scheme, .scopes = entry.scopes },
+                .kind = kind,
+            }};
+        }
+        return entries;
+    }
 }
 
 /// Locate a status union on the return type and emit one response per variant;
@@ -453,6 +491,52 @@ test "query params and request body" {
     try std.testing.expect(post.request_body != null);
     try std.testing.expectEqualStrings("application/json", post.request_body.?.content_type);
     try std.testing.expectEqual(model.SchemaKind.object, post.request_body.?.schema.kind); // anonymous -> inline
+}
+
+test "security metadata flows to op.security and components.security_schemes" {
+    const Ctx = struct { request: *u8, response: *u8 };
+    // Shape-compatible with kw-http's security.SecurityRequirement — matched
+    // structurally, so the test needn't depend on kw-http either.
+    const Requirement = struct {
+        scheme: []const u8,
+        kind: enum { http_bearer },
+        scopes: []const []const u8 = &.{},
+    };
+    const Secured = struct {
+        pub const method = TestVerb.get;
+        pub const id = "GET /secured";
+        pub const inner = .{ .path = &[_]TestSeg{.{ .static = "secured" }}, .raw = "GET /secured" };
+        pub const CallContext = Ctx;
+        pub const Return = HeartbeatMessage;
+        pub const metadata = .{Requirement{
+            .scheme = "bearer",
+            .kind = .http_bearer,
+            .scopes = &.{"profile"},
+        }};
+    };
+    const Driver = struct {
+        pub const Routes = &[_]type{
+            Secured,
+            TestRoute(.get, "GET /open", &.{.{ .static = "open" }}, Ctx, HeartbeatMessage),
+        };
+    };
+    const r = try buildTestDoc(Driver);
+    defer {
+        r.arena.deinit();
+        std.testing.allocator.destroy(r.arena);
+    }
+
+    const secured = findOp(r.doc, "/secured", .get).?;
+    try std.testing.expectEqual(@as(usize, 1), secured.security.len);
+    try std.testing.expectEqualStrings("bearer", secured.security[0].scheme);
+    try std.testing.expectEqual(@as(usize, 1), secured.security[0].scopes.len);
+    try std.testing.expectEqualStrings("profile", secured.security[0].scopes[0]);
+
+    const open = findOp(r.doc, "/open", .get).?;
+    try std.testing.expectEqual(@as(usize, 0), open.security.len);
+
+    const scheme = r.doc.components.security_schemes.get("bearer").?;
+    try std.testing.expectEqual(model.SecurityScheme.Kind.http_bearer, scheme.kind);
 }
 
 test "generic status union (not the Json helper) yields a response per status" {

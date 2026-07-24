@@ -53,6 +53,7 @@ const runtime_types =
     \\pub const HttpField = struct { name: []const u8, type: []const u8, required: bool, description: []const u8 };
     \\pub const HttpBody = struct { content_type: []const u8, fields: []const HttpField };
     \\pub const HttpResponse = struct { status: u16, description: []const u8, content_types: []const []const u8, examples: []const HttpExample };
+    \\pub const HttpSecurity = struct { scheme: []const u8, scopes: []const []const u8 };
     \\pub const HttpOperation = struct {
     \\    id: []const u8,
     \\    method: []const u8,
@@ -63,6 +64,7 @@ const runtime_types =
     \\    body: ?HttpBody,
     \\    request_example: ?HttpExample,
     \\    responses: []const HttpResponse,
+    \\    security: ?HttpSecurity,
     \\};
     \\pub const HttpDocument = struct { key: []const u8, title: []const u8, version: []const u8, operations: []const HttpOperation };
     \\
@@ -165,6 +167,21 @@ fn emitOperation(
         }
     } else {
         try w.writeAll(", .request_example = null");
+    }
+
+    // First security requirement only: routes carry at most one today.
+    if (op.security.len > 0) {
+        try w.writeAll(", .security = .{ .scheme = ");
+        try emitStr(w, op.security[0].scheme);
+        try w.writeAll(", .scopes = &.{");
+        for (op.security[0].scopes) |scope| {
+            try w.writeByte(' ');
+            try emitStr(w, scope);
+            try w.writeByte(',');
+        }
+        try w.writeAll(" } }");
+    } else {
+        try w.writeAll(", .security = null");
     }
 
     try w.writeAll(", .responses = &.{");

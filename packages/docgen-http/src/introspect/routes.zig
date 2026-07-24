@@ -19,6 +19,7 @@ const OpStub = struct {
     method: []const u8,
     path: []const u8,
     summary: []const u8,
+    secured: bool = false,
 };
 
 /// One operation's introspection JSON. `port` is the configured port of the http mount that
@@ -76,7 +77,13 @@ fn Browser(comptime Docs: type) type {
 
             const stubs = try allocator.value.alloc(OpStub, doc.operations.len);
             for (doc.operations, 0..) |op, i| {
-                stubs[i] = .{ .id = op.id, .method = op.method, .path = op.path, .summary = op.summary };
+                stubs[i] = .{
+                    .id = op.id,
+                    .method = op.method,
+                    .path = op.path,
+                    .summary = op.summary,
+                    .secured = op.security != null,
+                };
             }
 
             return .{ .value = .{ .ok = .{ .key = doc.key, .operations = stubs } } };
