@@ -5,6 +5,7 @@
     .fingerprint = 0x4062cf7321bdbdc0,
     .dependencies = .{},
     .paths = .{
+        "LICENSE",
         "build.zig",
         "build.zig.zon",
         "src",
