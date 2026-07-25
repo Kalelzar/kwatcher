@@ -145,7 +145,6 @@ pub fn DriverBuilder(
 ) *const fn (comptime u12) type {
     _ = listen;
     _ = ErrorHandler;
-    const Routes = RealRoutes(_Routes);
     const Tables = TableDefs(_Routes);
     const MigrationSrc = MigrationDef(_Routes);
     const H = struct {
@@ -192,6 +191,9 @@ pub fn DriverBuilder(
                     const old: orm.ir.Schema = if (MigrationSrc) |M| M.committed_snapshot else .{ .tables = &.{} };
                     break :blk orm.migration.renderMigration(orm.migration.diff(old, schema), .down);
                 };
+                /// The routes slice minus carriers — the per-route surface
+                /// docgen backends project (id/meta/CallContext/Result).
+                pub const Routes = RealRoutes(_Routes);
                 pub const RouteKeys = shared.EnumerateRoutes(Routes);
                 pub const CallContext = shared.UniteCallContext(Routes);
                 pub const Dependencies = shared.MergeDeps(Routes, &.{std.mem.Allocator});
@@ -294,7 +296,12 @@ pub fn DriverBuilder(
                             pub fn callImmediate(
                                 self: @This(),
                                 comptime tag: std.meta.Tag(CallContext),
-                                args: std.meta.TagPayload(CallContext, tag),
+                                // @FieldType, not std.meta.TagPayload: the
+                                // latter's comptime field scan re-runs per
+                                // instantiation and blows the eval-branch
+                                // quota once a bridge inline-else expands
+                                // this for every route of a large driver.
+                                args: @FieldType(CallContext, @tagName(tag)),
                                 inj: *dep.DepCtx,
                             ) anyerror!Routes[@intFromEnum(tag)].Result {
                                 const R = Routes[@intFromEnum(tag)];
@@ -422,10 +429,15 @@ pub const Capability = union(CapabilityType) {
     name: []const u8,
 };
 
-pub fn RouteBase(comptime HandlerFac: anytype, comptime parsed_id: []const u8) type {
+/// Docgen-facing route identity. `raw` is the original fn name — the doc
+/// index is keyed by it, so it survives `.mod(.{ .name = ... })` renames.
+pub const Meta = struct { raw: []const u8 };
+
+pub fn RouteBase(comptime HandlerFac: anytype, comptime parsed_id: []const u8, comptime route_meta: Meta) type {
     return struct {
         pub const Handler = HandlerFac(@This());
         pub const id = parsed_id;
+        pub const meta = route_meta;
 
         pub const CallContext = Handler.CallContext;
         pub const Dependencies = Handler.Dependencies;
@@ -434,15 +446,15 @@ pub fn RouteBase(comptime HandlerFac: anytype, comptime parsed_id: []const u8) t
         pub const name = Handler.name;
 
         pub fn swap(comptime NextHandler: anytype) type {
-            return RouteBase(NextHandler, parsed_id);
+            return RouteBase(NextHandler, parsed_id, route_meta);
         }
 
         pub fn wrap(comptime NextHandlerFac: anytype) type {
-            return RouteBase(NextHandlerFac(HandlerFac).make, parsed_id);
+            return RouteBase(NextHandlerFac(HandlerFac).make, parsed_id, route_meta);
         }
 
         pub fn requires(comptime ct: anytype) void {
-            if (comptime !meta.hasKey(CapabilityType, ct)) {
+            if (comptime !server.meta.hasKey(CapabilityType, ct)) {
                 @compileError(
                     "Required capability '" ++ @tagName(ct) ++ "' is not supported by SQLITE routes.",
                 );
@@ -450,14 +462,14 @@ pub fn RouteBase(comptime HandlerFac: anytype, comptime parsed_id: []const u8) t
         }
 
         pub fn satisfies(comptime ct: anytype) bool {
-            return meta.hasKey(CapabilityType, ct);
+            return server.meta.hasKey(CapabilityType, ct);
         }
 
         pub fn mod(
             comptime capability: Capability,
         ) type {
             return switch (capability) {
-                inline .name => |n| RouteBase(HandlerFac, n),
+                inline .name => |n| RouteBase(HandlerFac, n, route_meta),
             };
         }
 
@@ -570,10 +582,291 @@ pub fn RouteParser() type {
                     }
                 };
 
-                const RB = RouteBase(H.make, fnname);
+                const RB = RouteBase(H.make, fnname, .{ .raw = fnname });
 
                 return self.extend(RB);
             }
+        }
+    };
+}
+
+/// Console safety valve: an arbitrary SELECT stops rendering after this many
+/// rows so a `SELECT * FROM huge` can't balloon the introspection response.
+const max_console_rows = 500;
+
+/// One executed statement's rendered result — every cell stringified so the
+/// introspection console can render it with no type information.
+pub const QueryResult = struct {
+    columns: []const []const u8 = &.{},
+    /// rows[i][j] is the stringified value of column j in row i.
+    rows: []const []const []const u8 = &.{},
+    /// Affected-row count, set when the statement returned no columns (DML).
+    affected: ?i64 = null,
+    /// True when `max_console_rows` cut the result short.
+    truncated: bool = false,
+    /// The sqlite error message when preparation or stepping failed.
+    err: ?[]const u8 = null,
+};
+
+/// A named-query invocation's rendered outcome.
+pub const RunResult = struct {
+    /// JSON of the route's result; empty for void routes.
+    output: []const u8 = "",
+    err: ?[]const u8 = null,
+};
+
+/// Executes one SQL statement against the given connection and renders the
+/// full result as arena-owned strings. Only the FIRST statement of `sql`
+/// runs — sqlite's prepare discards everything after the first ';'. SQL-level
+/// failures come back in `.err`; error returns are allocation failures only.
+pub fn rawQuery(db: *Db, sql: []const u8, arena: std.mem.Allocator) !QueryResult {
+    var stmt = db.conn.prepare(sql) catch {
+        return .{ .err = try arena.dupe(u8, std.mem.span(db.conn.lastError())) };
+    };
+    defer stmt.deinit();
+
+    var columns: []const []const u8 = &.{};
+    var rows: std.ArrayList([]const []const u8) = .empty;
+    var truncated = false;
+    while (true) {
+        const has_row = stmt.step() catch {
+            return .{
+                .columns = columns,
+                .rows = rows.items,
+                .err = try arena.dupe(u8, std.mem.span(db.conn.lastError())),
+            };
+        };
+        if (!has_row) break;
+        if (columns.len == 0) {
+            // zqlite's columnCount wraps sqlite3_data_count, which is only
+            // valid while the statement sits on a row — read the header here,
+            // not after prepare.
+            const ncols: usize = @intCast(@max(0, stmt.columnCount()));
+            const cols = try arena.alloc([]const u8, ncols);
+            for (cols, 0..) |*col, i| col.* = try arena.dupe(u8, std.mem.span(stmt.columnName(i)));
+            columns = cols;
+        }
+        if (rows.items.len >= max_console_rows) {
+            truncated = true;
+            break;
+        }
+        const cells = try arena.alloc([]const u8, columns.len);
+        for (cells, 0..) |*cell, i| cell.* = switch (stmt.columnType(i)) {
+            .null => "NULL",
+            .int => try std.fmt.allocPrint(arena, "{d}", .{stmt.int(i)}),
+            .float => try std.fmt.allocPrint(arena, "{d}", .{stmt.float(i)}),
+            // Text is only valid until the next step: copy now.
+            .text => try arena.dupe(u8, stmt.text(i)),
+            .blob => try std.fmt.allocPrint(arena, "<blob {d} B>", .{stmt.columnBytes(i)}),
+            .unknown => "?",
+        };
+        try rows.append(arena, cells);
+    }
+
+    return .{
+        .columns = columns,
+        .rows = rows.items,
+        .truncated = truncated,
+        // A row-returning statement that yielded zero rows lands here too
+        // (no row, so no header was readable) — gate the affected count on
+        // the statement's first keyword so an empty SELECT doesn't report a
+        // stale connection-global change count.
+        .affected = if (rows.items.len == 0 and !returnsRows(sql))
+            @as(i64, @intCast(db.conn.changes()))
+        else
+            null,
+    };
+}
+
+/// Whether the statement's first keyword marks it row-returning. Only used to
+/// suppress the misleading affected-count on empty result sets; DML with a
+/// RETURNING clause is handled naturally by its rows.
+fn returnsRows(sql: []const u8) bool {
+    const t = std.mem.trimLeft(u8, sql, " \t\r\n(");
+    inline for (.{ "SELECT", "WITH", "VALUES", "PRAGMA", "EXPLAIN" }) |kw| {
+        if (std.ascii.startsWithIgnoreCase(t, kw)) return true;
+    }
+    return false;
+}
+
+/// Type-erased handle to a sqlite driver's live connection and routes.
+///
+/// The real `Yield(ET, EV).Scheduler` is parameterized by the app's event
+/// union — types only known once the driver set is assembled — so framework
+/// packages (the introspection UI) depend on this fixed vtable instead, the
+/// cron `SchedulerShim` model. All surface types are file-scope.
+pub const DbShim = struct {
+    _queryFn: *const fn (*anyopaque, []const u8, std.mem.Allocator) anyerror!QueryResult,
+    _runNamedFn: *const fn (*anyopaque, []const u8, []const []const u8, *dep.DepCtx, std.mem.Allocator) anyerror!RunResult,
+    _ctx: *anyopaque,
+
+    /// Runs one arbitrary SQL statement; see `rawQuery` for the contract.
+    pub fn query(self: @This(), sql: []const u8, arena: std.mem.Allocator) !QueryResult {
+        return self._queryFn(self._ctx, sql, arena);
+    }
+
+    /// Runs the named route synchronously with one string per call-context
+    /// element, each converted to the element's type. The route's DI deps
+    /// resolve from the CALLER's injector — a dep the caller's mount cannot
+    /// see fails resolution and surfaces as an error return.
+    pub fn runNamed(
+        self: @This(),
+        route: []const u8,
+        args: []const []const u8,
+        inj: *dep.DepCtx,
+        arena: std.mem.Allocator,
+    ) !RunResult {
+        return self._runNamedFn(self._ctx, route, args, inj, arena);
+    }
+};
+
+/// Converts one string element to a call-context element type. Primitives get
+/// friendly bare forms (`42`, `true`, an unquoted string / enum tag); any
+/// other type is parsed as JSON text — the same shape a REST caller embeds
+/// inline in the args array. Failures report at runtime rather than
+/// compile-erroring the bridge.
+fn convertArg(comptime T: type, s: []const u8, arena: std.mem.Allocator) !T {
+    return switch (@typeInfo(T)) {
+        .int => std.fmt.parseInt(T, std.mem.trim(u8, s, " \t"), 10) catch error.InvalidArgument,
+        .float => std.fmt.parseFloat(T, std.mem.trim(u8, s, " \t")) catch error.InvalidArgument,
+        .bool => blk: {
+            const t = std.mem.trim(u8, s, " \t");
+            if (std.ascii.eqlIgnoreCase(t, "true") or std.mem.eql(u8, t, "1")) break :blk true;
+            if (std.ascii.eqlIgnoreCase(t, "false") or std.mem.eql(u8, t, "0")) break :blk false;
+            break :blk error.InvalidArgument;
+        },
+        .@"enum" => std.meta.stringToEnum(T, std.mem.trim(u8, s, " \t")) orelse error.InvalidArgument,
+        // An empty field means null; anything present converts as the child.
+        .optional => |o| if (s.len == 0) null else try convertArg(o.child, s, arena),
+        .pointer => |p| if (comptime p.size == .slice and p.child == u8 and p.sentinel_ptr == null)
+            try arena.dupe(u8, s)
+        else
+            jsonArg(T, s, arena),
+        else => jsonArg(T, s, arena),
+    };
+}
+
+/// Non-primitive elements (structs, arrays, unions, non-u8 slices) arrive as
+/// JSON text.
+fn jsonArg(comptime T: type, s: []const u8, arena: std.mem.Allocator) !T {
+    return std.json.parseFromSliceLeaky(T, arena, s, .{ .allocate = .alloc_always }) catch error.InvalidArgument;
+}
+
+/// Adapts a concrete sqlite `Scheduler` to the type-erased `DbShim` vtable.
+/// Route names map to `RouteKeys` at runtime via `stringToEnum`, then to a
+/// comptime tag via `inline else` — `callImmediate` needs one so the result
+/// type flows through.
+pub fn DbBridge(comptime RealScheduler: type) type {
+    // Extract the driver's nested per-app types from method signatures.
+    const CallContext = @typeInfo(@TypeOf(RealScheduler.call)).@"fn".params[1].type.?;
+    const RouteKeys = std.meta.Tag(CallContext);
+
+    return struct {
+        real: RealScheduler,
+
+        fn queryImpl(ctx: *anyopaque, sql: []const u8, arena: std.mem.Allocator) anyerror!QueryResult {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            return rawQuery(&self.real.parent.db, sql, arena);
+        }
+
+        fn runNamedImpl(
+            ctx: *anyopaque,
+            route: []const u8,
+            args: []const []const u8,
+            inj: *dep.DepCtx,
+            arena: std.mem.Allocator,
+        ) anyerror!RunResult {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            const tag = std.meta.stringToEnum(RouteKeys, route) orelse return error.UnknownRoute;
+            switch (tag) {
+                inline else => |ctag| {
+                    const Args = @FieldType(CallContext, @tagName(ctag));
+                    const arg_fields = std.meta.fields(Args);
+                    if (args.len != arg_fields.len) {
+                        return .{ .err = try std.fmt.allocPrint(
+                            arena,
+                            "expected {d} argument(s), got {d}",
+                            .{ arg_fields.len, args.len },
+                        ) };
+                    }
+                    var call_args: Args = undefined;
+                    inline for (arg_fields, 0..) |f, i| {
+                        call_args[i] = convertArg(f.type, args[i], arena) catch |e| {
+                            return .{ .err = try std.fmt.allocPrint(
+                                arena,
+                                "argument {d} ({s}): {s}",
+                                .{ i, @typeName(f.type), @errorName(e) },
+                            ) };
+                        };
+                    }
+                    const res = self.real.callImmediate(ctag, call_args, inj) catch |e| {
+                        return .{ .err = try std.fmt.allocPrint(arena, "route failed: {s}", .{@errorName(e)}) };
+                    };
+                    if (comptime @TypeOf(res) == void) {
+                        return .{};
+                    } else {
+                        return .{ .output = try std.fmt.allocPrint(
+                            arena,
+                            "{f}",
+                            .{std.json.fmt(res, .{ .whitespace = .indent_2 })},
+                        ) };
+                    }
+                },
+            }
+        }
+
+        pub fn toShim(self: *@This()) DbShim {
+            return .{
+                ._queryFn = &queryImpl,
+                ._runNamedFn = &runNamedImpl,
+                ._ctx = @ptrCast(self),
+            };
+        }
+    };
+}
+
+/// DI factory wrapper that lazily builds a `DbBridge` on first request.
+/// `shimDbFac` depends on the concrete `RealScheduler`, which the DI system
+/// resolves from the `SchedulerCtx` the Server registers in `bind()`.
+pub fn BridgeShimCtx(comptime RealScheduler: type) type {
+    const BridgeType = DbBridge(RealScheduler);
+    return struct {
+        bridge: ?BridgeType = null,
+
+        pub fn shimDbFac(self: *@This(), real_sched: RealScheduler) DbShim {
+            if (self.bridge == null) {
+                self.bridge = .{ .real = real_sched };
+            }
+            return self.bridge.?.toShim();
+        }
+    };
+}
+
+/// Dephub extension registering the type-erased sqlite DB shim under `.all`
+/// (visible to every mount, including the private introspection UI).
+/// Wire with `.with(.<sqlite driver key>, sqlite.defaultFor(<registry>), allocator)`.
+pub fn defaultFor(comptime drv: server.DriverRegistry) type {
+    return struct {
+        pub fn apply(
+            dephub: anytype,
+            comptime category: anytype,
+            allocator: std.mem.Allocator,
+            comptime DriverConfig: type,
+        ) Return(category, DriverConfig, @TypeOf(dephub)) {
+            _ = allocator;
+            const drk: drv.DriverKeys() = category;
+            const Shim = BridgeShimCtx(drv.Schedulers()[@intFromEnum(drk)]);
+            const H = struct {
+                var shim = Shim{};
+            };
+            return dephub.static(.all, &H.shim);
+        }
+
+        pub fn Return(comptime category: anytype, comptime DriverConfig: type, comptime DH: type) type {
+            _ = DriverConfig;
+            const drk: drv.DriverKeys() = category;
+            const Shim = BridgeShimCtx(drv.Schedulers()[@intFromEnum(drk)]);
+            return DH.Static(.all, *Shim);
         }
     };
 }
@@ -617,6 +910,11 @@ const TestRoutes = struct {
 
     pub fn count(db: *Db) !i64 {
         return db.scalarInt("SELECT COUNT(*) FROM t");
+    }
+
+    /// Composite call-context element: reachable from the shim via JSON text.
+    pub fn insertRecord(ctx: struct { struct { n: i64 } }, db: *Db) !void {
+        try db.conn.exec("INSERT INTO t (n) VALUES (?1)", .{ctx[0].n});
     }
 };
 
@@ -685,7 +983,7 @@ test "MigrationSource carrier is partitioned out and publishes decls" {
     const Built = TestMigDriver(100);
     // The carrier is invisible to routing: same routes/tables as TestDriver.
     try std.testing.expectEqual(1, Built.tables.len);
-    try std.testing.expectEqual(4, @typeInfo(Built.RouteKeys).@"enum".fields.len);
+    try std.testing.expectEqual(5, @typeInfo(Built.RouteKeys).@"enum".fields.len);
     try std.testing.expect(Built.migration_source != null);
     try std.testing.expectEqual(0, Built.committed_migrations.len);
     // Empty snapshot -> the candidate is the full schema create.
@@ -710,8 +1008,8 @@ test "From partitions tables from routes" {
     const Built = TestDriver(100);
     try std.testing.expectEqual(1, Built.tables.len);
     try std.testing.expect(Built.tables[0] == TestRoutes.T);
-    // simple, insert, withDI, count — NotATable produced nothing.
-    try std.testing.expectEqual(4, @typeInfo(Built.RouteKeys).@"enum".fields.len);
+    // simple, insert, withDI, count, insertRecord — NotATable produced nothing.
+    try std.testing.expectEqual(5, @typeInfo(Built.RouteKeys).@"enum".fields.len);
 }
 
 test "init migrates the collected tables and callImmediate hits the db" {
@@ -749,6 +1047,123 @@ test "callLater builds the event without queueing" {
     try std.testing.expectEqual(@field(TestET, "sqlite_call"), ev.event_type);
     const data = @field(ev.event_data, "sqlite");
     try std.testing.expectEqual(@as(i64, 1), data.call.insert[0]);
+}
+
+test "rawQuery renders SELECT rows, DML affected count, and errors" {
+    var conf: Config = .{ .path = ":memory:" };
+    var h = try TestHandler.init(&conf, std.testing.allocator);
+    defer h.deinit(std.testing.allocator);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try h.db.exec("INSERT INTO t (n) VALUES (5)");
+    try h.db.exec("INSERT INTO t (n) VALUES (7)");
+
+    const sel = try rawQuery(&h.db, "SELECT n FROM t ORDER BY n", arena);
+    try std.testing.expect(sel.err == null);
+    try std.testing.expectEqual(1, sel.columns.len);
+    try std.testing.expectEqualStrings("n", sel.columns[0]);
+    try std.testing.expectEqual(2, sel.rows.len);
+    try std.testing.expectEqualStrings("5", sel.rows[0][0]);
+    try std.testing.expectEqualStrings("7", sel.rows[1][0]);
+    try std.testing.expect(sel.affected == null);
+
+    const dml = try rawQuery(&h.db, "DELETE FROM t WHERE n = 5", arena);
+    try std.testing.expect(dml.err == null);
+    try std.testing.expectEqual(0, dml.columns.len);
+    try std.testing.expectEqual(@as(?i64, 1), dml.affected);
+
+    // Empty result set: no header is readable, but it must not report a
+    // stale affected count either.
+    const empty = try rawQuery(&h.db, "SELECT n FROM t WHERE n = 999", arena);
+    try std.testing.expect(empty.err == null);
+    try std.testing.expectEqual(0, empty.rows.len);
+    try std.testing.expect(empty.affected == null);
+
+    const bad = try rawQuery(&h.db, "SELEC 1", arena);
+    try std.testing.expect(bad.err != null);
+}
+
+test "DbShim runs named routes with string args and arbitrary SQL" {
+    var conf: Config = .{ .path = ":memory:" };
+    var h = try TestHandler.init(&conf, std.testing.allocator);
+    defer h.deinit(std.testing.allocator);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Never dereferenced: the exercised routes have no DI deps and the
+    // immediate path does not stamp.
+    var inj: dep.DepCtx = undefined;
+    var bridge = DbBridge(@TypeOf(h.scheduler())){ .real = h.scheduler() };
+    const shim = bridge.toShim();
+
+    // insert takes (i64) — one converted string arg, void result.
+    const ins = try shim.runNamed("insert", &.{"42"}, &inj, arena);
+    try std.testing.expect(ins.err == null);
+    try std.testing.expectEqualStrings("", ins.output);
+
+    // count takes no args and returns i64 — JSON output flows back.
+    const cnt = try shim.runNamed("count", &.{}, &inj, arena);
+    try std.testing.expect(cnt.err == null);
+    try std.testing.expectEqualStrings("1", cnt.output);
+
+    // A composite (struct) element arrives as JSON text.
+    const rec = try shim.runNamed("insertRecord", &.{"{\"n\": 7}"}, &inj, arena);
+    try std.testing.expect(rec.err == null);
+    const cnt2 = try shim.runNamed("count", &.{}, &inj, arena);
+    try std.testing.expectEqualStrings("2", cnt2.output);
+
+    // Arg-count mismatch and failed conversion surface as error strings.
+    const wrong = try shim.runNamed("insert", &.{}, &inj, arena);
+    try std.testing.expect(wrong.err != null);
+    const badconv = try shim.runNamed("insert", &.{"pear"}, &inj, arena);
+    try std.testing.expect(badconv.err != null);
+
+    // An unknown route is a hard error, not a rendered result.
+    try std.testing.expectError(error.UnknownRoute, shim.runNamed("nope", &.{}, &inj, arena));
+
+    const sel = try shim.query("SELECT COUNT(*) AS c FROM t", arena);
+    try std.testing.expect(sel.err == null);
+    try std.testing.expectEqualStrings("c", sel.columns[0]);
+    try std.testing.expectEqualStrings("2", sel.rows[0][0]);
+}
+
+test "convertArg parses enums and JSON composites" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const E = enum { alpha, beta };
+    try std.testing.expectEqual(E.beta, try convertArg(E, "beta", arena));
+    try std.testing.expectError(error.InvalidArgument, convertArg(E, "gamma", arena));
+
+    const S = struct { n: i64, s: []const u8 };
+    const v = try convertArg(S, "{\"n\": 4, \"s\": \"x\"}", arena);
+    try std.testing.expectEqual(@as(i64, 4), v.n);
+    try std.testing.expectEqualStrings("x", v.s);
+    try std.testing.expectError(error.InvalidArgument, convertArg(S, "notjson", arena));
+
+    const arr = try convertArg([]const i64, "[1, 2, 3]", arena);
+    try std.testing.expectEqual(@as(i64, 2), arr[1]);
+}
+
+test "routes expose meta.raw across renames" {
+    const Rts = From(TestRoutes);
+    const R1 = comptime blk: {
+        for (Rts) |R| {
+            if (!isTableCarrier(R)) break :blk R;
+        }
+        unreachable;
+    };
+    try std.testing.expectEqualStrings(R1.id, R1.meta.raw);
+    const R2 = R1.mod(.{ .name = "renamed" });
+    try std.testing.expectEqualStrings("renamed", R2.id);
+    // The doc-index key survives the rename.
+    try std.testing.expectEqualStrings(R1.id, R2.meta.raw);
 }
 
 test "call pushes onto the bound queue" {
