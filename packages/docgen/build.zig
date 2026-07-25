@@ -9,14 +9,18 @@ pub fn build(b: *std.Build) !void {
     const build_all = b.option(bool, "all", "Build all components. You can still disable individual components") orelse false;
     const build_executable = b.option(bool, "exe", "Build an executable") orelse build_all;
     const include_metrics = b.option(bool, "metrics", "Include metrics generation in code.") orelse true;
-    const module_only = b.option(bool, "module_only", "Generate only modules.") orelse false;
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
     const o = b.addOptions();
     o.addOption(bool, "enable_metrics", include_metrics);
-    o.addOption(bool, "module_only", module_only);
+    // Keeps this options module content-distinct from the kwatcher packages'
+    // `build_config` (which is also just enable_metrics): zig caches options
+    // by content, and two module names rooted at the same generated file in
+    // one compilation is a hard "file exists in modules" error. `module_only`
+    // used to provide the distinction before kw-modgen was removed.
+    o.addOption([]const u8, "package", "kw-docgen");
 
     const kw_docgen = b.addModule("kw-docgen", .{
         .root_source_file = b.path("src/root.zig"),
@@ -53,27 +57,37 @@ pub fn build(b: *std.Build) !void {
     });
     kw_docexample.addImport("kw-docschema", kw_docschema);
 
+    // Self-hosted backend for Debug-at-musl, LLVM otherwise: musl is what
+    // keeps the self-hosted linker away from the system glibc CRT (.sframe
+    // sections it can't process), and the backend is Debug-quality — release
+    // builds want LLVM's optimizer. The old LLVM pin (u128 queue atomics,
+    // ziglang/zig#24181) is dead since kw-core's queue header went u64.
+    const no_llvm = target.result.abi == .musl and optimize == .Debug;
+
     const tests = b.addTest(.{
         .root_module = kw_docgen,
-        .use_llvm = true,
+        .use_llvm = !no_llvm,
     });
 
     const docschema_tests = b.addTest(.{
         .root_module = kw_docschema,
-        .use_llvm = true,
+        .use_llvm = !no_llvm,
     });
 
     const docexample_tests = b.addTest(.{
         .root_module = kw_docexample,
-        .use_llvm = true,
+        .use_llvm = !no_llvm,
     });
 
     // Artifacts:
     const exe = b.addExecutable(.{
-        .name = if (module_only) "kw-modgen" else "kw-docgen",
+        .name = "kw-docgen",
         .root_module = kw_docgen,
-        .linkage = .dynamic,
-        .use_llvm = true,
+        // Static under musl: dynamic musl would need /lib/ld-musl on the
+        // host, and the whole point of musl here is keeping the self-hosted
+        // linker away from the system glibc objects.
+        .linkage = if (target.result.abi == .musl) .static else .dynamic,
+        .use_llvm = !no_llvm,
     });
 
     if (build_executable) {
@@ -106,11 +120,15 @@ pub fn build(b: *std.Build) !void {
     const check = b.step("check", "Build without generating artifacts.");
     check.dependOn(&exe.step);
 
+    // The exe deliberately does NOT depend on the test runs: the orchestrator
+    // tests compile the consumer's whole app graph (they import `entrypoint`),
+    // and gating the generator on them serializes ~20s of test compile ahead
+    // of the codegen chain. Consumers reach this `test` step through
+    // `build_docgen.wire`'s Result and run it in parallel instead.
     const test_step = b.step("test", "Run the unit tests.");
     test_step.dependOn(&run_tests.step);
     test_step.dependOn(&run_docschema_tests.step);
     test_step.dependOn(&run_docexample_tests.step);
-    exe.step.dependOn(&run_tests.step);
 
     // The orchestrator module imports the build-time-injected `entrypoint` /
     // `kw-gen--modules`, so it only compiles once `build_docgen.wire` runs. The

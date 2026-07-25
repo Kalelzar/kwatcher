@@ -11,6 +11,15 @@ const Zoir = std.zig.Zoir;
 
 const Manifest = struct { name: []const u8, version: []const u8 };
 
+/// The docgen backend for a driver kind, via the `kw-gen--modules` re-export
+/// map. That map exists because `@import` demands literal strings, so kind
+/// names can't be turned into imports here; `build_docgen.wire` writes it
+/// from the consumer's backend list as a plain WriteFile step (the old
+/// kw-modgen pass compiled the whole app graph to emit the same lines).
+fn backend(comptime kind: anytype) type {
+    return @field(modules, @tagName(kind));
+}
+
 pub fn generate(alloc: std.mem.Allocator, out_dir: []const u8, source_roots: []const []const u8) !void {
     const D = user_root.drivers.drivers;
     std.log.info("Generating docs at: {s}", .{out_dir});
@@ -50,10 +59,15 @@ pub fn generate(alloc: std.mem.Allocator, out_dir: []const u8, source_roots: []c
     defer index.deinit();
 
     inline for (D.drivers) |Drv| {
-        const kind = Drv.kind;
-        const module_name = @tagName(kind);
-        const module = @field(modules, module_name);
-        try module.docgen(Drv, out, alloc, &index, manifest.name, manifest.version);
+        if (comptime @hasDecl(modules, @tagName(Drv.kind))) {
+            const module = backend(Drv.kind);
+            try module.docgen(Drv, out, alloc, &index, manifest.name, manifest.version);
+        } else {
+            std.log.info("No docgen backend for {s} driver '{s}'; skipping.", .{
+                @tagName(Drv.kind),
+                @tagName(Drv.key),
+            });
+        }
     }
 
     // Runtime doc data: let each backend that wants to be introspectable in-app append
@@ -67,9 +81,11 @@ pub fn generate(alloc: std.mem.Allocator, out_dir: []const u8, source_roots: []c
     };
     const unique_kinds = core.shared.SetUnionEql(type, .{}, D.drivers, KindCtx);
     inline for (unique_kinds) |Drv| {
-        const module = @field(modules, @tagName(Drv.kind));
-        if (@hasDecl(module, "emitRuntime")) {
-            try module.emitRuntime(D.drivers, wi, alloc, &index, manifest.name, manifest.version);
+        if (comptime @hasDecl(modules, @tagName(Drv.kind))) {
+            const module = backend(Drv.kind);
+            if (@hasDecl(module, "emitRuntime")) {
+                try module.emitRuntime(D.drivers, wi, alloc, &index, manifest.name, manifest.version);
+            }
         }
     }
     try wi.flush();

@@ -1,16 +1,17 @@
-//! Build-time helper that wires the two-stage docgen pipeline (kw-modgen + kw-docgen)
+//! Build-time helper that wires the docgen pipeline (the kw-docgen generator)
 //! into a consumer's build graph. Pure build-graph logic — references only `std.Build`
 //! types, never the runtime docgen code. Re-exported from this package's `build.zig` as
 //! `build_docgen`, so a consumer uses `@import("kw_docgen").build_docgen.wire(b, .{…})`.
 const std = @import("std");
 
 /// One driver-kind → docgen-backend-module mapping. The consumer owns this decision
-/// (which kinds its app uses, and which backend documents each); the helper stays
-/// generic and never enumerates kinds itself.
+/// (which kinds it wants documented, and which backend documents each); the helper
+/// stays generic and never enumerates kinds itself. Kinds with no entry are
+/// skipped by the generator, so only list what you need.
 pub const Backend = struct {
     /// Driver kind tag as it appears in `@tagName(Driver.kind)`, e.g. "http", "cron".
     kind: []const u8,
-    /// The kw-docgen--<kind> backend module (e.g. kw-docgen--http / --none).
+    /// The kw-docgen--<kind> backend module (e.g. kw-docgen--http).
     module: *std.Build.Module,
 };
 
@@ -38,50 +39,65 @@ pub const Options = struct {
 
 pub const Result = struct {
     build_step: *std.Build.Step.Compile,
-    modgen_step: *std.Build.Step.Run,
     docgen_step: *std.Build.Step.Run,
     install_docs: *std.Build.Step.InstallDir,
     /// The docgen output directory (openapi/asyncapi JSON, sqlite schema +
     /// candidate migration files) — for steps that consume the artifacts.
     docgen_path: std.Build.LazyPath,
+    /// The docgen-package test suite. It compiles the consumer's full app
+    /// graph, so it is NOT a gate on the generator exe — hang it off a step
+    /// that runs concurrently with the codegen chain (e.g. the install step)
+    /// to keep the regression signal without serializing it.
+    docgen_tests: *std.Build.Step,
 };
 
-/// Wire the docgen pipeline. Builds the docgen package twice (module_only on/off) to get
-/// the kw-modgen and kw-docgen artifacts, runs them in sequence, mines doc comments from
-/// the app sources plus every package in the build graph, installs the emitted JSON, and
-/// stitches the generated-module graph back into both the consumer and the docgen module.
+/// Wire the docgen pipeline: builds the kw-docgen generator against the app,
+/// runs it, mines doc comments from the app sources plus every package in the
+/// build graph, installs the emitted JSON, and stitches the generated manifest
+/// back into the consumer. The driver-kind → backend mapping is resolved at
+/// comptime inside the generator (`kw-docgen--<kind>` imports added below) —
+/// there is no separate module-generation pass.
 pub fn wire(b: *std.Build, opts: Options) Result {
-    const kw_modgen_dep = b.dependency(opts.docgen_dep_name, .{
-        .target = b.graph.host,
-        .optimize = opts.optimize,
-        .module_only = true,
-        .all = true,
-    });
-
     const kw_docgen_dep = b.dependency(opts.docgen_dep_name, .{
-        .target = b.graph.host,
+        .target = opts.target,
         .optimize = opts.optimize,
-        .module_only = false,
         .all = true,
     });
 
-    const kw_modgen = kw_modgen_dep.artifact("kw-modgen");
     const kw_docgen = kw_docgen_dep.artifact("kw-docgen");
 
-    const kw_modgen_mod = kw_modgen_dep.module("kw-docgen");
     const kw_docgen_mod = kw_docgen_dep.module("kw-docgen");
 
     const entrypoint = opts.entrypoint orelse deriveEntrypoint(b, opts.consumer);
-    kw_modgen_mod.addImport("entrypoint", entrypoint);
     kw_docgen_mod.addImport("entrypoint", entrypoint);
+
+    // The kind → backend re-export map the generator resolves at comptime
+    // (`kw-gen--modules`). `@import` demands literal strings, so the mapping
+    // must be a real file with literal imports — but it's written right here
+    // from the consumer's backend list as a WriteFile step; the old kw-modgen
+    // pass compiled the entire app graph to emit these same lines. Kinds
+    // without an entry are skipped by the generator (with a log line), so
+    // list only the backends you actually want — no placeholders needed.
+    var modules_src: std.ArrayListUnmanaged(u8) = .empty;
+    for (opts.backends) |back| {
+        modules_src.appendSlice(
+            b.allocator,
+            b.fmt("pub const {s} = @import(\"kw-docgen--{s}\");\n", .{ back.kind, back.kind }),
+        ) catch @panic("OOM");
+    }
+    const modules_wf = b.addWriteFiles();
+    const docgen_modules = b.createModule(.{
+        .root_source_file = modules_wf.add("modules.zig", modules_src.items),
+    });
+    for (opts.backends) |back| {
+        docgen_modules.addImport(b.fmt("kw-docgen--{s}", .{back.kind}), back.module);
+    }
+    kw_docgen_mod.addImport("kw-gen--modules", docgen_modules);
 
     entrypoint.addImport("kw-gen--docs", kw_docgen_dep.module("dummy"));
 
     const docgen = b.addRunArtifact(kw_docgen);
-    const modgen = b.addRunArtifact(kw_modgen);
-    kw_docgen.step.dependOn(&kw_modgen.step);
 
-    const modgen_path = modgen.addOutputDirectoryArg("kw-modgen");
     const docgen_path = docgen.addOutputDirectoryArg("kw-docgen");
     // Source roots for doc-comment mining (kw-docindex), walked at generation time.
     // The app's own sources, plus every package in the build graph (transitive,
@@ -95,7 +111,7 @@ pub fn wire(b: *std.Build, opts: Options) Result {
 
     // Copy the generated documents into zig-out/docs on install: OpenAPI/AsyncAPI
     // JSON plus the sqlite schema artifacts (DDL + IR snapshot). The generated
-    // .zig modules (manifest/modules) stay out — they are wired as modules below.
+    // manifest.zig stays out — it is wired as a module below.
     const install_docs = b.addInstallDirectory(.{
         .source_dir = docgen_path,
         .install_dir = .prefix,
@@ -111,22 +127,12 @@ pub fn wire(b: *std.Build, opts: Options) Result {
     });
     opts.consumer.addImport("kw-gen--docs", docs_mod);
 
-    const docgen_modules = b.createModule(.{
-        .root_source_file = modgen_path.path(b, "modules.zig"),
-    });
-
-    for (opts.backends) |back| {
-        docgen_modules.addImport(b.fmt("kw-docgen--{s}", .{back.kind}), back.module);
-    }
-
-    kw_docgen_mod.addImport("kw-gen--modules", docgen_modules);
-
     return .{
         .docgen_step = docgen,
-        .modgen_step = modgen,
-        .build_step = kw_modgen,
+        .build_step = kw_docgen,
         .install_docs = install_docs,
         .docgen_path = docgen_path,
+        .docgen_tests = &kw_docgen_dep.builder.top_level_steps.get("test").?.step,
     };
 }
 
@@ -140,7 +146,10 @@ fn deriveEntrypoint(b: *std.Build, consumer: *std.Build.Module) *std.Build.Modul
     const dummy = b.createModule(.{
         .root_source_file = consumer.root_source_file,
         .target = b.graph.host,
-        .optimize = .ReleaseFast,
+        // Debug, not ReleaseFast: this module is the whole app graph compiled
+        // inside both generator exes, and optimizing it is pure LLVM cost —
+        // the generators run for well under a second either way.
+        .optimize = .Debug,
         .dwarf_format = consumer.dwarf_format,
         .link_libc = consumer.link_libc,
         .omit_frame_pointer = consumer.omit_frame_pointer,

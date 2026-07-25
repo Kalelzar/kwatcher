@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const build_config = @import("build_config");
 
-pub const generator = if (build_config.module_only) @import("modgen.zig") else @import("docgen.zig");
+pub const generator = @import("docgen.zig");
 
 pub fn juicyMain(allocator: std.mem.Allocator) !void {
     var args = try std.process.argsWithAllocator(allocator);
