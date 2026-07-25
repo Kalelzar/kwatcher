@@ -90,7 +90,10 @@ pub fn build(b: *std.Build) !void {
     // zettel schema codegen: schema/*.ztl -> the kw-core-schema module.
     // Nothing generated is checked in; dependents re-run zettel over the
     // same sources through the exported "schema-dir" named path.
-    const zettel_dep = b.dependency("zettel", .{ .optimize = .ReleaseSafe });
+    // Debug, deliberately: the schema compiler runs in ~50ms on these inputs,
+    // while a ReleaseSafe build of it costs ~50s of LLVM at the head of the
+    // build graph. Debug also skips LLVM entirely (self-hosted backend).
+    const zettel_dep = b.dependency("zettel", .{ .optimize = .Debug });
     const kw_core_schema = zettel.schemaModule(b, zettel_dep, .{
         .source_dir = b.path("schema"),
         .root_module = "kwatcher:core",

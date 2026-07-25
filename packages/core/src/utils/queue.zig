@@ -3,12 +3,26 @@ const std = @import("std");
 /// A thread-safe generic ring buffer queue backed by a static memory buffer.
 /// This queue is lock-free but it cannot push in new elements without free space.
 /// If that is important to you @see StaticLenient
-pub fn StaticStrict(comptime T: type) type {
+///
+/// `Header` is the packed `head | len` word the queue's atomics operate on;
+/// each half indexes the ring, so a `uN` header supports buffers up to
+/// 2^(N/2 - 1) slots. Smaller headers use cheaper atomics — a u64 header
+/// needs no cmpxchg16b, so it works on baseline x86_64 and the self-hosted
+/// backend — but shrink the head counter's wrap period (2^(N/2) pops), which
+/// is also the ABA window on the pop CAS: u32 halves wrap every 4Bi pops
+/// (safe in practice), u16 halves every 65536 (do not use under contention).
+pub fn StaticStrictHeader(comptime T: type, comptime Header: type) type {
+    const info = @typeInfo(Header).int;
+    comptime std.debug.assert(info.signedness == .unsigned);
+    comptime std.debug.assert(info.bits % 2 == 0);
+    const half_bits = info.bits / 2;
+    const Half = std.meta.Int(.unsigned, half_bits);
+    const half_mask: Header = std.math.maxInt(Half);
     return struct {
         used: std.Thread.Semaphore,
         free: std.Thread.Semaphore,
         buffer: []T,
-        header: u128 align(16), // head u64 | len u64
+        header: Header align(@sizeOf(Header)), // head Half | len Half
         occupancy: []u1,
         mask: usize,
 
@@ -16,10 +30,13 @@ pub fn StaticStrict(comptime T: type) type {
 
         /// Initialize a new queue backed by a buffer.
         ///
-        /// `buffer.len` must be a power of two.
+        /// `buffer.len` must be a power of two no larger than half the
+        /// `Half` range (the len half must hold buffer.len inclusive, and
+        /// the head half's wrap must stay divisible by buffer.len).
         pub fn init(buffer: []T, occupancy_buffer: []u1) Self {
             std.debug.assert(buffer.len == occupancy_buffer.len);
             std.debug.assert(std.math.isPowerOfTwo(buffer.len));
+            std.debug.assert(buffer.len <= std.math.maxInt(Half) / 2 + 1);
             @memset(occupancy_buffer, 0);
             return .{
                 .header = 0,
@@ -47,12 +64,11 @@ pub fn StaticStrict(comptime T: type) type {
             return &self.buffer[i];
         }
 
-        fn pushOne(self: *Self, data: T) u64 {
-            const bitmask: u64 = 0 -% @as(u64, 1);
-            const old = @atomicRmw(u128, &self.header, .Add, 1, .acq_rel);
-            const len: u128 = (old & bitmask);
-            const head: u128 = (old & (@as(u128, bitmask) << 64)) >> 64;
-            const index: u64 = @intCast((head + len) & @as(u128, self.mask));
+        fn pushOne(self: *Self, data: T) usize {
+            const old = @atomicRmw(Header, &self.header, .Add, 1, .acq_rel);
+            const len: Header = old & half_mask;
+            const head: Header = old >> half_bits;
+            const index: usize = @intCast((head + len) & @as(Header, @intCast(self.mask)));
             while (true) {
                 if (@atomicLoad(u1, &self.occupancy[index], .acquire) == 1) {
                     std.atomic.spinLoopHint();
@@ -79,19 +95,20 @@ pub fn StaticStrict(comptime T: type) type {
         }
 
         fn popOne(self: *Self) T {
-            const bitmask: u64 = 0 -% @as(u64, 1);
-            var old = @atomicLoad(u128, &self.header, .acquire);
+            var old = @atomicLoad(Header, &self.header, .acquire);
             while (true) {
-                const len: u128 = old & bitmask;
-                const head: u128 = (old & (@as(u128, bitmask) << 64)) >> 64;
-                const index: usize = @intCast(head & @as(u128, self.mask));
+                const len: Header = old & half_mask;
+                const head: Header = old >> half_bits;
+                const index: usize = @intCast(head & @as(Header, @intCast(self.mask)));
                 if (@atomicLoad(u1, &self.occupancy[index], .acquire) == 0) {
                     std.atomic.spinLoopHint();
                     continue;
                 }
                 const slot = self.buffer[index];
-                const new = (len - 1) | ((head +% 1) << 64);
-                if (@cmpxchgWeak(u128, &self.header, old, new, .acq_rel, .acquire)) |next| {
+                // The shifted-out bit of a wrapping head is discarded by <<,
+                // which is exactly the mod-2^half wrap the ring needs.
+                const new = (len - 1) | ((head +% 1) << half_bits);
+                if (@cmpxchgWeak(Header, &self.header, old, new, .acq_rel, .acquire)) |next| {
                     old = next;
                     std.atomic.spinLoopHint();
                     continue;
@@ -105,8 +122,8 @@ pub fn StaticStrict(comptime T: type) type {
         /// This is flaky at best and is best used as a
         /// heuristic.
         pub fn empty(self: *Self) bool {
-            const old = @atomicLoad(u128, &self.header, .acquire);
-            const len: u64 = @truncate(old);
+            const old = @atomicLoad(Header, &self.header, .acquire);
+            const len: Half = @truncate(old);
             return len == 0;
         }
 
@@ -114,10 +131,10 @@ pub fn StaticStrict(comptime T: type) type {
         /// This is flaky at best and is best used as a
         /// heuristic.
         pub fn peek(self: *Self) ?T {
-            const old = @atomicLoad(u128, &self.header, .acquire);
-            const len: u64 = @truncate(old);
+            const old = @atomicLoad(Header, &self.header, .acquire);
+            const len: Half = @truncate(old);
             if (len == 0) return null;
-            const head: usize = @truncate(old >> 64);
+            const head: usize = @intCast(old >> half_bits);
 
             return self.buffer[head & self.mask];
         }
@@ -128,6 +145,13 @@ pub fn StaticStrict(comptime T: type) type {
             return self.push(self.pop());
         }
     };
+}
+
+/// `StaticStrictHeader` at the default u64 header (u32 head/len halves):
+/// plain 64-bit atomics — no cmpxchg16b, so baseline x86_64 and the
+/// self-hosted backend both work — with a 4-billion-pop ABA window.
+pub fn StaticStrict(comptime T: type) type {
+    return StaticStrictHeader(T, u64);
 }
 
 /// A thread-safe generic ring buffer queue backed by a static memory buffer.
@@ -319,5 +343,6 @@ pub fn StaticLenient(comptime T: type) type {
 // Ref all decls
 comptime {
     std.testing.refAllDeclsRecursive(StaticStrict(u8));
+    std.testing.refAllDeclsRecursive(StaticStrictHeader(u8, u32));
     std.testing.refAllDeclsRecursive(StaticLenient(u8));
 }
