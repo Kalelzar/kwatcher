@@ -481,6 +481,13 @@ pub fn DriverBuilder(
                                     },
                                 }
                             }
+
+                            pub fn dupe(self: Id, allocator: std.mem.Allocator) !Id {
+                                return switch (self) {
+                                    .route => self,
+                                    .anonymous => |a| .{ .anonymous = try allocator.dupe(u8, a) },
+                                };
+                            }
                         };
 
                         const Schedule = struct {
