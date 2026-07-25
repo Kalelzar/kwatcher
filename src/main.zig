@@ -13,10 +13,15 @@ const sqlite = @import("kw-sqlite");
 const auth_oidc = @import("kw-auth-oidc");
 const httpz = @import("httpz");
 
-const introspect = @import("kw-introspect");
-const introspect_http = @import("kw-introspect--http");
-const introspect_cron = @import("kw-introspect--cron");
-const introspect_signal = @import("kw-introspect--signal");
+const build_options = @import("build_options");
+
+// UI-less builds (-Dui=false) have none of the introspect modules wired into
+// the module graph, so these @imports must only be analyzed in the taken
+// branch — every use below is gated on `build_options.ui`.
+const introspect = if (build_options.ui) @import("kw-introspect") else struct {};
+const introspect_http = if (build_options.ui) @import("kw-introspect--http") else struct {};
+const introspect_cron = if (build_options.ui) @import("kw-introspect--cron") else struct {};
+const introspect_signal = if (build_options.ui) @import("kw-introspect--signal") else struct {};
 
 const docs = @import("kw-gen--docs");
 
@@ -46,7 +51,9 @@ pub const Config = struct {
     driver: struct {
         amqp: core.config.BaseConfig,
         public: http.Config,
-        private: http.Config,
+        /// Defaulted so the UI-less config file can omit it (the private
+        /// mount only exists in UI builds).
+        private: http.Config = .{},
         sqlite: sqlite.Config = .{},
     },
     middleware: struct {
@@ -60,8 +67,11 @@ pub const Config = struct {
         .audience = "kwatcher",
     },
     /// IntrospectUI-only knobs — deliberately separate from `auth`: the UI
-    /// is its own application with its own OIDC client/audience.
-    introspect: struct {
+    /// is its own application with its own OIDC client/audience. The whole
+    /// section only exists in UI builds (its types come from kw-introspect);
+    /// UI-less builds load `example.noui.json`, which omits it, since the
+    /// config parser rejects unknown fields.
+    introspect: if (!build_options.ui) struct {} else struct {
         /// Verification settings for the UI's own bearer protection (the
         /// "introspect" scheme): same provider realm, distinct audience.
         auth: auth_oidc.Settings = .{
@@ -161,16 +171,16 @@ const AmqpRoutes = struct {
 
     /// Demonstrates the secret protocol's callback flow, following the
     /// "cancel the publish and call yourself back" pattern: if the secret
-    /// isn't cached yet we hand the registry a self-callback event, cancel
-    /// this publish, and get re-run once the store's response is decrypted.
-    /// It never actually publishes — returning null cancels — so the
-    /// secret itself stays local and off the broker.
+    /// isn't cached yet we hand the registry a self-callback event and get
+    /// re-run once the store's response is decrypted, plus arm a 5-minute
+    /// `rerequest` retry in case the answer never comes. It never actually
+    /// publishes — returning null cancels — so the secret itself stays
+    /// local and off the broker.
     pub fn @"publish!:secret-demo amq.direct/secret.demo"(
         reg: *protocol.secret.registry,
         persistent: std.mem.Allocator,
         inj: *core.deps.DepCtx,
     ) !?core.schema.Message(HeartbeatMessage) {
-        const secret_sched = try inj.require(protocol.secret.Scheduler);
         const amqp_sched = try inj.require(Scheduler(.amqp));
 
         const callback = try amqp_sched.publishLater(.{ .@"secret-demo" = .{} }, .{ .inj = inj });
@@ -178,13 +188,23 @@ const AmqpRoutes = struct {
         errdefer persistent.destroy(ev);
         ev.* = callback;
 
-        if (try reg.getOrRequest(persistent, "secret", @ptrCast(ev), secret_sched, .{ .inj = inj })) |secret| {
+        if (try reg.getOrRequest(persistent, "secret", @ptrCast(ev), amqp_sched, .{ .inj = inj })) |secret| {
             persistent.destroy(ev); // cache hit: the callback event is still ours
             log.info("[secret-demo] secret 'secret' = '{s}' ({d} bytes)", .{ secret, secret.len });
             return null;
         }
 
+        // Not cached: the registry owns `ev` now and re-enqueues it once the
+        // response lands. Arm a retry in case the store never answers — it
+        // neutralizes itself if the secret arrived in the meantime, so no
+        // timer bookkeeping is needed on the happy path.
+        const action_sched = try inj.require(Scheduler(.action));
+        const cron_sched = try inj.require(Scheduler(.cron));
+        const act = try action_sched.callLater(.{ .rerequest = .{"secret"} }, .{ .inj = inj });
+        _ = try cron_sched.after(5 * std.time.s_per_min, act);
+
         log.info("[secret-demo] not cached yet; requested it and registered a self-callback", .{});
+
         return null;
     }
 };
@@ -252,6 +272,21 @@ const ActionRoutes = struct {
         } else {
             log.info("Job was already done: {s}", .{name});
         }
+    }
+
+    /// Fire-and-forget retry for a secret the store hasn't answered yet:
+    /// republishes `secret-get` directly on the AMQP scheduler without
+    /// registering a new callback — the original request's pending event is
+    /// still armed and resumes the demo route when the answer finally
+    /// lands. No-ops if the secret arrived in the meantime.
+    pub fn rerequest(
+        ctx: struct { []const u8 },
+        inj: *core.deps.DepCtx,
+        reg: *protocol.secret.registry,
+    ) !void {
+        if (reg.get(ctx.@"0") != null) return;
+        const sched = try inj.require(Scheduler(.amqp));
+        try sched.publish(.{ .@"secret-get" = .{ctx.@"0"} }, .{ .inj = inj });
     }
 };
 
@@ -552,11 +587,22 @@ const cron_driver = cron.Driver
 /// renderers) goes behind the OIDC bearer middleware; shells and the login flows stay open
 /// (browser navigations can't carry headers). The UI's own login page authenticates against
 /// the "bearer" scheme and stores its token under kw:introspect:token.
-const introspection = introspect.MountWith(
+const introspection = if (build_options.ui) introspect.MountWith(
     docs,
     .{ introspect_http, introspect_cron, introspect_signal },
     .{ .auth = "introspect" },
-);
+) else NoopMount;
+
+/// Stand-in for the introspection mount when the UI is compiled out — mirrors
+/// `MountWith`'s `register` shape so the driver-registry wiring below stays
+/// unconditional. `deps` is deliberately not mirrored: the `.private`
+/// category itself only exists in UI builds, so the whole deps chain is
+/// gated in `juicyMain` instead.
+const NoopMount = struct {
+    pub fn register(comptime base: anytype) @TypeOf(base) {
+        return base;
+    }
+};
 
 const http_driver = http.Driver
     .new(.public)
@@ -648,8 +694,11 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     defer core.metrics.deinitialize();
 
     // Load configuration from file
-    config_slot = try core.config.findConfigFile(Config, arena.allocator(), "example") orelse {
-        std.log.err("Could not load config! Create 'example.json' with the required fields.", .{});
+    // UI-less builds load their own config file (no `introspect` /
+    // `driver.private` sections) — the parser rejects unknown fields.
+    const config_name = if (build_options.ui) "example" else "example.noui";
+    config_slot = try core.config.findConfigFile(Config, arena.allocator(), config_name) orelse {
+        std.log.err("Could not load config! Create '" ++ config_name ++ ".json' with the required fields.", .{});
         std.log.err("Example config:", .{});
         std.log.err(
             \\{{
@@ -683,17 +732,22 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     // is deliberate: AuthSchemes/LoginClients describe the *application's*
     // schemes (what the Auth tab lists for Try-it logins), while UiAuth is
     // the UI's own scheme/login client, which must never show up in the tab.
-    var scheme_storage = [_]introspect.security.RuntimeScheme{
+    // All UI-only: their types come from kw-introspect and their pointers are
+    // registered into the `.private` scope, neither of which exists in
+    // UI-less builds.
+    var scheme_storage = if (comptime build_options.ui) [_]introspect.security.RuntimeScheme{
         .{ .name = "bearer", .well_known = config_slot.auth.well_known },
-    };
-    var auth_schemes: introspect.security.AuthSchemesCtx = .{ .schemes = .{ .schemes = &scheme_storage } };
-    var login_clients: introspect.security.LoginClientsCtx = .{
+    } else {};
+    var auth_schemes = if (comptime build_options.ui)
+        introspect.security.AuthSchemesCtx{ .schemes = .{ .schemes = &scheme_storage } }
+    else {};
+    var login_clients = if (comptime build_options.ui) introspect.security.LoginClientsCtx{
         .clients = .{ .clients = config_slot.introspect.tryit_clients },
-    };
-    var ui_auth: introspect.security.UiAuthCtx = .{ .ui = .{
+    } else {};
+    var ui_auth = if (comptime build_options.ui) introspect.security.UiAuthCtx{ .ui = .{
         .scheme = .{ .name = "introspect", .well_known = config_slot.introspect.auth.well_known },
         .client_id = config_slot.introspect.auth_client_id,
-    } };
+    } } else {};
 
     // Build the dependency container
     // The chain of .with() and .static() calls registers dependencies at different lifetimes:
@@ -727,19 +781,22 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         // resolves it at init to open its connection.
         .with(.sqlite, kwatcher.default.config(sqlite.Config, "driver.sqlite"), allocator)
         // Register our custom counter as a static dependency
-        .static(.public, &ctx)
+        .static(.all, &ctx)
         .static(.amqp, &counter);
 
     // The private introspection mount's deps (cors config + a keyed http.Config per served http
-    // mount + its own config). `introspection.deps` no-ops during docgen, so this stays one
-    // unconditional `.with`.
-    const with_mount = base_deps.with(.private, introspection.deps, allocator);
+    // mount + its own config). `introspection.deps` no-ops during docgen, so within UI builds
+    // this stays one unconditional `.with`; UI-less builds have no `.private` category at all.
+    const with_mount = if (comptime build_options.ui)
+        base_deps.with(.private, introspection.deps, allocator)
+    else
+        base_deps;
 
     // The private mount enforces the UI's own "introspect" scheme (its own
     // audience/client), and carries the scheme + login-client registries the
     // Auth tab and both login flows read. Gated like the mount itself:
-    // during docgen the `.private` category does not exist.
-    const deps = if (comptime docs.isDocgen) with_mount else with_mount
+    // during docgen (and UI-less builds) the `.private` category does not exist.
+    const deps = if (comptime !build_options.ui or docs.isDocgen) with_mount else with_mount
         .with(.private, auth_oidc.extension("introspect.auth"), allocator)
         .static(.private, &auth_schemes)
         .static(.private, &login_clients)

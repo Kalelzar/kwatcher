@@ -13,6 +13,8 @@ fn wireApp(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     openapi_version: []const u8,
+    ui: bool,
+    build_opts_mod: *std.Build.Module,
 ) *std.Build.Module {
     const app = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -45,51 +47,63 @@ fn wireApp(
     // 3rd Party:
     const httpz = b.dependency("httpz", .{ .target = target, .optimize = optimize }).module("httpz");
 
+    // The `build_options` module (currently just the `ui` flag) — main.zig gates
+    // all introspection wiring on it.
+    app.addImport("build_options", build_opts_mod);
+
     // Runtime-facing introspection UI modules (separate from the build-time codegen backends
     // wired in `build`): the generic core and the HTTP backend, served over the app's HTTP
-    // driver.
-    const kw_docgen_dep = b.dependency("kw_docgen", .{ .target = target, .optimize = optimize });
-    const kw_docgen_http_dep = b.dependency("kw_docgen_http", .{
-        .target = target,
-        .optimize = optimize,
-        .openapi_version = openapi_version,
-    });
-    const kw_docgen_cron_dep = b.dependency("kw_docgen_cron", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const kw_docgen_signal_dep = b.dependency("kw_docgen_signal", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const kw_introspect = kw_docgen_dep.module("kw-introspect");
-    const kw_introspect_http = kw_docgen_http_dep.module("kw-introspect--http");
-    const kw_introspect_cron = kw_docgen_cron_dep.module("kw-introspect--cron");
-    const kw_introspect_signal = kw_docgen_signal_dep.module("kw-introspect--signal");
+    // driver. UI builds only — UI-less builds leave these modules (and the whole zmpl
+    // template machinery) out of the graph; main.zig's uses are gated on `build_options.ui`.
+    if (ui) {
+        const kw_docgen_dep = b.dependency("kw_docgen", .{ .target = target, .optimize = optimize });
+        const kw_docgen_http_dep = b.dependency("kw_docgen_http", .{
+            .target = target,
+            .optimize = optimize,
+            .openapi_version = openapi_version,
+        });
+        const kw_docgen_cron_dep = b.dependency("kw_docgen_cron", .{
+            .target = target,
+            .optimize = optimize,
+        });
+        const kw_docgen_signal_dep = b.dependency("kw_docgen_signal", .{
+            .target = target,
+            .optimize = optimize,
+        });
+        const kw_introspect = kw_docgen_dep.module("kw-introspect");
+        const kw_introspect_http = kw_docgen_http_dep.module("kw-introspect--http");
+        const kw_introspect_cron = kw_docgen_cron_dep.module("kw-introspect--cron");
+        const kw_introspect_signal = kw_docgen_signal_dep.module("kw-introspect--signal");
 
-    // The template machinery owns its own zmpl dependency; we hand it every contributing
-    // template source (each with a prefix namespace) and it returns a module wired to a zmpl
-    // instance whose manifest covers them all. The introspection backends ship their `.zmpl`
-    // files inside their packages; `packageSource` resolves those dirs to absolute paths. One
-    // shared module so every generator's `WithTemplates` lookups (core + http prefixes) resolve.
-    const kw_http_template = http_template.wire(b, .{
-        .target = target,
-        .optimize = optimize,
-        .sources = &.{
-            http_template.packageSource(kw_docgen_dep, "core", &.{"templates"}),
-            http_template.packageSource(kw_docgen_http_dep, "http", &.{"templates"}),
-            http_template.packageSource(kw_docgen_cron_dep, "cron", &.{"templates"}),
-            http_template.packageSource(kw_docgen_signal_dep, "signal", &.{"templates"}),
-        },
-    });
+        // The template machinery owns its own zmpl dependency; we hand it every contributing
+        // template source (each with a prefix namespace) and it returns a module wired to a zmpl
+        // instance whose manifest covers them all. The introspection backends ship their `.zmpl`
+        // files inside their packages; `packageSource` resolves those dirs to absolute paths. One
+        // shared module so every generator's `WithTemplates` lookups (core + http prefixes) resolve.
+        const kw_http_template = http_template.wire(b, .{
+            .target = target,
+            .optimize = optimize,
+            .sources = &.{
+                http_template.packageSource(kw_docgen_dep, "core", &.{"templates"}),
+                http_template.packageSource(kw_docgen_http_dep, "http", &.{"templates"}),
+                http_template.packageSource(kw_docgen_cron_dep, "cron", &.{"templates"}),
+                http_template.packageSource(kw_docgen_signal_dep, "signal", &.{"templates"}),
+            },
+        });
 
-    // The introspection modules call `WithTemplates`, which resolves `zmpl` against their own
-    // `kw-http-template` import — so override their package default with this wired instance
-    // (whose manifest covers the core + http prefixes).
-    kw_introspect.addImport("kw-http-template", kw_http_template);
-    kw_introspect_http.addImport("kw-http-template", kw_http_template);
-    kw_introspect_cron.addImport("kw-http-template", kw_http_template);
-    kw_introspect_signal.addImport("kw-http-template", kw_http_template);
+        // The introspection modules call `WithTemplates`, which resolves `zmpl` against their own
+        // `kw-http-template` import — so override their package default with this wired instance
+        // (whose manifest covers the core + http prefixes).
+        kw_introspect.addImport("kw-http-template", kw_http_template);
+        kw_introspect_http.addImport("kw-http-template", kw_http_template);
+        kw_introspect_cron.addImport("kw-http-template", kw_http_template);
+        kw_introspect_signal.addImport("kw-http-template", kw_http_template);
+
+        app.addImport("kw-introspect", kw_introspect);
+        app.addImport("kw-introspect--http", kw_introspect_http);
+        app.addImport("kw-introspect--cron", kw_introspect_cron);
+        app.addImport("kw-introspect--signal", kw_introspect_signal);
+    }
 
     // Imports:
     app.addImport("kw-core", kw_core);
@@ -103,10 +117,6 @@ fn wireApp(
     app.addImport("kw-sqlite", kw_sqlite);
     app.addImport("kw-auth-oidc", kw_auth_oidc);
     app.addImport("httpz", httpz);
-    app.addImport("kw-introspect", kw_introspect);
-    app.addImport("kw-introspect--http", kw_introspect_http);
-    app.addImport("kw-introspect--cron", kw_introspect_cron);
-    app.addImport("kw-introspect--signal", kw_introspect_signal);
 
     return app;
 }
@@ -119,11 +129,28 @@ pub fn build(b: *std.Build) !void {
     const openapi_version = b.option([]const u8, "openapi_version", "Target OpenAPI version for HTTP docgen") orelse "3.2.0";
     const asyncapi_version = b.option([]const u8, "asyncapi_version", "Target AsyncAPI version for AMQP docgen") orelse "3.0.0";
 
-    const target = b.standardTargetOptions(.{});
+    const target_std = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Dev fast path: retarget the whole app at host-musl so Debug builds can
+    // use the self-hosted backend end to end (same reasoning as gen_target
+    // below — zig's bundled musl CRT is the only thing the self-hosted linker
+    // can process, and libc is unavoidable via sqlite/rabbitmq). Static musl
+    // binaries differ subtly at runtime (musl DNS resolver, no dlopen), so
+    // this is a dev convenience — release/CI builds stay native glibc + LLVM.
+    const dev_musl = b.option(bool, "musl", "Target the app at host-musl for fast self-hosted Debug builds (dev only)") orelse false;
+    const target = if (dev_musl) b.resolveTargetQuery(.{ .abi = .musl }) else target_std;
+
+    // The private introspection UI (and with it the zmpl template machinery and
+    // the non-sqlite docgen backends). Compiling it out roughly halves the
+    // example's compile; sqlite docgen always stays — it generates migrations.
+    const build_ui = b.option(bool, "ui", "Build the private introspection UI into the example") orelse true;
+    const app_opts = b.addOptions();
+    app_opts.addOption(bool, "ui", build_ui);
+    const app_opts_mod = app_opts.createModule();
+
     // The installed application, built for the requested target.
-    const kwatcher_example = wireApp(b, target, optimize, openapi_version);
+    const kwatcher_example = wireApp(b, target, optimize, openapi_version, build_ui, app_opts_mod);
 
     const kwatcher_kwev = b.createModule(.{
         .root_source_file = b.path("src/kwev/main.zig"),
@@ -141,7 +168,12 @@ pub fn build(b: *std.Build) !void {
     const example = b.addExecutable(.{
         .name = "kwatcher-example",
         .root_module = kwatcher_example,
-        .use_llvm = true, // Due to https://github.com/ziglang/zig/issues/24181
+        // Historically pinned to LLVM for ziglang/zig#24181 (u128 queue
+        // atomics) — gone since the queue header went u64. Self-hosted now
+        // works for Debug-at-musl (`-Dmusl`); everything else keeps LLVM
+        // (glibc CRT .sframe blocks the self-hosted linker, and release
+        // builds want LLVM's optimizer).
+        .use_llvm = !(target.result.abi == .musl and optimize == .Debug),
     });
 
     if (build_example) {
@@ -151,7 +183,9 @@ pub fn build(b: *std.Build) !void {
     const kwev = b.addExecutable(.{
         .name = "kwev",
         .root_module = kwatcher_kwev,
-        .use_llvm = true, // Due to https://github.com/ziglang/zig/issues/24181
+        // Always ReleaseSafe (see the module above) — LLVM for the optimizer,
+        // not for the old #24181 atomics pin (dead since the queue went u64).
+        .use_llvm = true,
     });
     if (build_kwev) {
         b.installArtifact(kwev);
@@ -180,19 +214,14 @@ pub fn build(b: *std.Build) !void {
     // Docgen generator graph. The generators (kw-modgen/kw-docgen) are build-time tools that
     // run on the build host and `@import` the application to introspect its drivers — so the
     // app they compile against must be built for a host-runnable target, as must the docgen
-    // backends they link. When building natively the installed app graph already satisfies
-    // that, so we let `docgen.wire` derive the entrypoint from it (the cheap path). For any
-    // `-Dtarget` / `-Dcpu` override the app graph is no longer host-native: building it into
-    // the host tool would put the same source file in two differently-targeted modules and
-    // Zig refuses ("file exists in modules 'kw-core' and 'kw-core0'"). So build a dedicated
-    // host copy of the app — and the backends — purely for the generators to consume.
-    const native = target.query.isNative();
-    const gen_target = if (native) target else b.graph.host;
-
-    const kw_docgen_none = b.dependency("kw_docgen_none", .{
-        .target = gen_target,
-        .optimize = optimize,
-    }).module("kw-docgen--none");
+    // backends they link. The generators (and everything in their compilations, backends and
+    // entrypoint included) target host-musl rather than the host's native
+    // glibc: with zig's bundled musl the self-hosted linker never meets the
+    // system CRT it can't process (.sframe, GCC-16 glibc), which is what lets
+    // the generator exes drop LLVM entirely (see the docgen package's
+    // build.zig). Static musl exes run on any linux build host, so this also
+    // covers `-Dtarget`/`-Dcpu` cross-builds.
+    const gen_target = b.resolveTargetQuery(.{ .abi = .musl });
 
     const kw_docgen_http = b.dependency("kw_docgen_http", .{
         .target = gen_target,
@@ -221,34 +250,45 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     }).module("kw-docgen--sqlite");
 
-    // Host-built copy of the app for the generators to introspect; only needed when the
-    // installed app isn't itself host-native. `null` lets the helper derive it from the
-    // consumer (reusing the installed app's modules).
-    const entrypoint: ?*std.Build.Module = if (native)
-        null
-    else
-        wireApp(b, b.graph.host, optimize, openapi_version);
+    // Dedicated copy of the app graph for the generators to introspect, at the
+    // generators' own musl target. Always explicit now: the installed app's
+    // native modules can't be mixed into a musl compilation, so the old
+    // "derive from the consumer" cheap path for native builds no longer
+    // applies.
+    const entrypoint: ?*std.Build.Module =
+        wireApp(b, gen_target, optimize, openapi_version, build_ui, app_opts_mod);
 
     // Docgen: wired after the example's imports are in place so the helper can mirror
     // them onto the host-target entrypoint it derives internally. This also adds the
     // generated `kw-gen--docs` module to `kwatcher_example`.
+    // Kinds without a backend entry are simply skipped by the generator, so
+    // only the ones we actually document are listed — no placeholders.
+    // UI-less builds keep just the sqlite backend (it generates the
+    // migrations); the OpenAPI/AsyncAPI emitters never compile.
+    const backends: []const docgen.Backend = if (build_ui) &.{
+        .{ .kind = "http", .module = kw_docgen_http },
+        .{ .kind = "cron", .module = kw_docgen_cron },
+        .{ .kind = "amqp", .module = kw_docgen_amqp },
+        .{ .kind = "sqlite", .module = kw_docgen_sqlite },
+        .{ .kind = "signal", .module = kw_docgen_signal },
+    } else &.{
+        .{ .kind = "sqlite", .module = kw_docgen_sqlite },
+    };
+
     const docs = docgen.wire(b, .{
         .target = gen_target,
         .optimize = optimize,
         .consumer = kwatcher_example,
         .entrypoint = entrypoint,
-        .backends = &.{
-            .{ .kind = "http", .module = kw_docgen_http },
-            .{ .kind = "cron", .module = kw_docgen_cron },
-            .{ .kind = "amqp", .module = kw_docgen_amqp },
-            .{ .kind = "action", .module = kw_docgen_none },
-            .{ .kind = "sqlite", .module = kw_docgen_sqlite },
-            .{ .kind = "signal", .module = kw_docgen_signal },
-            .{ .kind = "internal", .module = kw_docgen_none },
-        },
+        .backends = backends,
     });
 
     example.step.dependOn(&docs.docgen_step.step);
+
+    // The docgen-package test suite still runs on every build and still fails
+    // it on regression — but as a sibling of the codegen chain, not a gate in
+    // front of it, so its app-graph compile happens in parallel.
+    b.getInstallStep().dependOn(docs.docgen_tests);
 
     // Promote the generated candidate sqlite migration to a committed one:
     // `zig build commit-migration -Dmigration-name=<name>`.

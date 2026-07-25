@@ -34,9 +34,6 @@
         .kw_docgen = .{
             .path = "packages/docgen",
         },
-        .kw_docgen_none = .{
-            .path = "packages/docgen-none",
-        },
         .kw_docgen_http = .{
             .path = "packages/docgen-http",
         },
