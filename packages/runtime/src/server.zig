@@ -214,7 +214,7 @@ pub fn Server(comptime _Deps: type, comptime D: Drivers) type {
         }
 
         fn run(self: *Self) void {
-            var buffer: [D.drivers.len * 8 * 1024]u8 = undefined;
+            var buffer: [D.drivers.len * 16 * 1024]u8 = undefined;
             var fba = std.heap.FixedBufferAllocator.init(&buffer);
             var driver_map: [D.drivers.len]dep.DepCtx = undefined;
             var rec: recorder.Recorder = undefined;
