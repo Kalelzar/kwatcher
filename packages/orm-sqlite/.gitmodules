@@ -1,0 +1,3 @@
+[submodule "vendor/sqlite3"]
+	path = vendor/sqlite3
+	url = https://git.kalelzar.xyz/kalelzar/sqlite3.git

@@ -9,7 +9,7 @@
         },
         .kw_core_vendored = .{ .path = "vendor/core" },
         .zstd = .{
-            .path = "../../vendor/zstd",
+            .path = "vendor/zstd",
         },
     },
     .paths = .{

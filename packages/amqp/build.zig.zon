@@ -17,7 +17,7 @@
             .hash = "klib-0.0.0-vum4ZE-TAAAQBM7CM-zftirjIOFLrms-j6bzgaWdMPF-",
         },
         .zamqp = .{
-            .path = "../../vendor/zamqp",
+            .path = "vendor/zamqp",
         },
         .uuid = .{
             .url = "git+https://github.com/r4gus/uuid-zig.git#93f35b4abbef52db7b48fd20084e73d3c6e20ee0",
