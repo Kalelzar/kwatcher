@@ -35,13 +35,13 @@ pub fn build(b: *std.Build) !void {
 
     kw_docgen_amqp.addOptions("build_config", o);
 
-    const kw_docindex = b.dependency("kw_docindex", .{ .target = target, .optimize = optimize }).module("kw-docindex");
+    const kw_docindex = kwDependency(b, "kw_docindex", "kw_docindex_vendored", "docindex", .{ .target = target, .optimize = optimize }).module("kw-docindex");
     kw_docgen_amqp.addImport("kw-docindex", kw_docindex);
 
     // The shared JSON-Schema kernel and the reusable AsyncAPI core.
-    const kw_docschema = b.dependency("kw_docgen", .{ .target = target, .optimize = optimize }).module("kw-docschema");
+    const kw_docschema = kwDependency(b, "kw_docgen", "kw_docgen_vendored", "docgen", .{ .target = target, .optimize = optimize }).module("kw-docschema");
     kw_docgen_amqp.addImport("kw-docschema", kw_docschema);
-    const kw_asyncapi = b.dependency("kw_asyncapi", .{ .target = target, .optimize = optimize }).module("kw-asyncapi");
+    const kw_asyncapi = kwDependency(b, "kw_asyncapi", "kw_asyncapi_vendored", "asyncapi", .{ .target = target, .optimize = optimize }).module("kw-asyncapi");
     kw_docgen_amqp.addImport("kw-asyncapi", kw_asyncapi);
 
     const tests = b.addTest(.{
@@ -81,4 +81,36 @@ pub fn build(b: *std.Build) !void {
     fmt_step.dependOn(&fmt.step);
     check.dependOn(fmt_step);
     b.getInstallStep().dependOn(fmt_step);
+}
+
+fn kwWorkspace(b: *std.Build) bool {
+    b.build_root.handle.access("../../.kw-workspace", .{}) catch return false;
+    return true;
+}
+
+fn kwAccessible(b: *std.Build, comptime path: []const u8) bool {
+    b.build_root.handle.access(path, .{}) catch return false;
+    return true;
+}
+
+/// Resolve a kw dependency: prefer the sibling checkout (umbrella packages/
+/// or another repo's flat vendor/ layout, gated on the ../../.kw-workspace
+/// marker) so every consumer shares one module instance; fall back to this
+/// package's own vendored submodule for standalone checkouts.
+fn kwDependency(
+    b: *std.Build,
+    comptime sibling_dep: []const u8,
+    comptime vendored_dep: []const u8,
+    comptime dir_name: []const u8,
+    args: anytype,
+) *std.Build.Dependency {
+    if (kwWorkspace(b) and kwAccessible(b, "../" ++ dir_name ++ "/build.zig.zon"))
+        return b.dependency(sibling_dep, args);
+    if (kwAccessible(b, "vendor/" ++ dir_name ++ "/build.zig.zon"))
+        return b.dependency(vendored_dep, args);
+    std.process.fatal(
+        "kw dependency '{s}': neither ../{s} nor vendor/{s} is a valid checkout;" ++
+            " run `git submodule update --init --recursive`",
+        .{ sibling_dep, dir_name, dir_name },
+    );
 }

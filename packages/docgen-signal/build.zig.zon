@@ -7,15 +7,19 @@
         .kw_docindex = .{
             .path = "../docindex",
         },
+        .kw_docindex_vendored = .{ .path = "vendor/docindex" },
         .kw_core = .{
             .path = "../core",
         },
+        .kw_core_vendored = .{ .path = "vendor/core" },
         .kw_http = .{
             .path = "../http",
         },
+        .kw_http_vendored = .{ .path = "vendor/http" },
         .kw_http_template = .{
             .path = "../kw-http-template",
         },
+        .kw_http_template_vendored = .{ .path = "vendor/kw-http-template" },
     },
     .paths = .{
         "LICENSE",

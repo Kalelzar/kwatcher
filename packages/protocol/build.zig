@@ -93,10 +93,10 @@ pub fn build(b: *std.Build) !void {
 
     // Dependencies:
     // 1st Party:
-    const kw_core_dep = b.dependency("kw_core", .{ .target = target, .optimize = optimize });
+    const kw_core_dep = kwDependency(b, "kw_core", "kw_core_vendored", "core", .{ .target = target, .optimize = optimize });
     const kw_core = kw_core_dep.module("kw-core");
-    const kw_amqp = b.dependency("kw_amqp", .{ .target = target, .optimize = optimize }).module("kw-amqp");
-    const kw_cron = b.dependency("kw_cron", .{ .target = target, .optimize = optimize }).module("kw-cron");
+    const kw_amqp = kwDependency(b, "kw_amqp", "kw_amqp_vendored", "amqp", .{ .target = target, .optimize = optimize }).module("kw-amqp");
+    const kw_cron = kwDependency(b, "kw_cron", "kw_cron_vendored", "cron", .{ .target = target, .optimize = optimize }).module("kw-cron");
     const klib = b.dependency("klib", .{ .target = target, .optimize = optimize }).module("klib");
 
     // Imports:
@@ -112,7 +112,7 @@ pub fn build(b: *std.Build) !void {
     // one Context/ZettelError.
     // Debug for build speed — must stay in lockstep with kw-core's zettel
     // dependency so the two instantiations dedup into one.
-    const zettel_dep = b.dependency("zettel", .{ .optimize = .Debug });
+    const zettel_dep = kwDependency(b, "zettel_sibling", "zettel", "zettel", .{ .optimize = .Debug });
     const core_schema = zettel.SchemaImport{
         .name = "kw-core-schema",
         .dir = kw_core_dep.namedLazyPath("schema-dir"),
@@ -131,4 +131,36 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
         }));
     }
+}
+
+fn kwWorkspace(b: *std.Build) bool {
+    b.build_root.handle.access("../../.kw-workspace", .{}) catch return false;
+    return true;
+}
+
+fn kwAccessible(b: *std.Build, comptime path: []const u8) bool {
+    b.build_root.handle.access(path, .{}) catch return false;
+    return true;
+}
+
+/// Resolve a kw dependency: prefer the sibling checkout (umbrella packages/
+/// or another repo's flat vendor/ layout, gated on the ../../.kw-workspace
+/// marker) so every consumer shares one module instance; fall back to this
+/// package's own vendored submodule for standalone checkouts.
+fn kwDependency(
+    b: *std.Build,
+    comptime sibling_dep: []const u8,
+    comptime vendored_dep: []const u8,
+    comptime dir_name: []const u8,
+    args: anytype,
+) *std.Build.Dependency {
+    if (kwWorkspace(b) and kwAccessible(b, "../" ++ dir_name ++ "/build.zig.zon"))
+        return b.dependency(sibling_dep, args);
+    if (kwAccessible(b, "vendor/" ++ dir_name ++ "/build.zig.zon"))
+        return b.dependency(vendored_dep, args);
+    std.process.fatal(
+        "kw dependency '{s}': neither ../{s} nor vendor/{s} is a valid checkout;" ++
+            " run `git submodule update --init --recursive`",
+        .{ sibling_dep, dir_name, dir_name },
+    );
 }

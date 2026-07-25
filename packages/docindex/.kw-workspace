@@ -1,0 +1,2 @@
+Marks a kw workspace root: sibling checkouts below this directory may
+resolve each other in place of their vendored submodules.

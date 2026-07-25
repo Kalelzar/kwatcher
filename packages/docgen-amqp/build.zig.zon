@@ -7,12 +7,15 @@
         .kw_docindex = .{
             .path = "../docindex",
         },
+        .kw_docindex_vendored = .{ .path = "vendor/docindex" },
         .kw_docgen = .{
             .path = "../docgen",
         },
+        .kw_docgen_vendored = .{ .path = "vendor/docgen" },
         .kw_asyncapi = .{
             .path = "../asyncapi",
         },
+        .kw_asyncapi_vendored = .{ .path = "vendor/asyncapi" },
     },
     .paths = .{
         "LICENSE",

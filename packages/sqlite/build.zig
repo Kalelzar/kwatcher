@@ -90,15 +90,47 @@ pub fn build(b: *std.Build) !void {
 
     // Dependencies:
     // 1st Party:
-    const kw_core = b.dependency("kw_core", .{ .target = target, .optimize = optimize }).module("kw-core");
+    const kw_core = kwDependency(b, "kw_core", "kw_core_vendored", "core", .{ .target = target, .optimize = optimize }).module("kw-core");
     const klib = b.dependency("klib", .{ .target = target, .optimize = optimize }).module("klib");
     // The ORM brings its own zqlite bindings and the vendored sqlite3 static
     // lib attached at module level, so no linkLibrary is needed here.
-    const kw_orm_sqlite = b.dependency("kw_orm_sqlite", .{ .target = target, .optimize = optimize }).module("kw-orm-sqlite");
+    const kw_orm_sqlite = kwDependency(b, "kw_orm_sqlite", "kw_orm_sqlite_vendored", "orm-sqlite", .{ .target = target, .optimize = optimize }).module("kw-orm-sqlite");
 
     // Imports:
     // 1st Party:
     kw_sqlite.addImport("kw-core", kw_core);
     kw_sqlite.addImport("klib", klib);
     kw_sqlite.addImport("kw-orm-sqlite", kw_orm_sqlite);
+}
+
+fn kwWorkspace(b: *std.Build) bool {
+    b.build_root.handle.access("../../.kw-workspace", .{}) catch return false;
+    return true;
+}
+
+fn kwAccessible(b: *std.Build, comptime path: []const u8) bool {
+    b.build_root.handle.access(path, .{}) catch return false;
+    return true;
+}
+
+/// Resolve a kw dependency: prefer the sibling checkout (umbrella packages/
+/// or another repo's flat vendor/ layout, gated on the ../../.kw-workspace
+/// marker) so every consumer shares one module instance; fall back to this
+/// package's own vendored submodule for standalone checkouts.
+fn kwDependency(
+    b: *std.Build,
+    comptime sibling_dep: []const u8,
+    comptime vendored_dep: []const u8,
+    comptime dir_name: []const u8,
+    args: anytype,
+) *std.Build.Dependency {
+    if (kwWorkspace(b) and kwAccessible(b, "../" ++ dir_name ++ "/build.zig.zon"))
+        return b.dependency(sibling_dep, args);
+    if (kwAccessible(b, "vendor/" ++ dir_name ++ "/build.zig.zon"))
+        return b.dependency(vendored_dep, args);
+    std.process.fatal(
+        "kw dependency '{s}': neither ../{s} nor vendor/{s} is a valid checkout;" ++
+            " run `git submodule update --init --recursive`",
+        .{ sibling_dep, dir_name, dir_name },
+    );
 }

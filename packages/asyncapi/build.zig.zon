@@ -7,6 +7,7 @@
         .kw_docgen = .{
             .path = "../docgen",
         },
+        .kw_docgen_vendored = .{ .path = "vendor/docgen" },
     },
     .paths = .{
         "LICENSE",

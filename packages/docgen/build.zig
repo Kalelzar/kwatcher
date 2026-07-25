@@ -169,9 +169,9 @@ pub fn build(b: *std.Build) !void {
 
     // Dependencies:
     // 1st Party:
-    const kw_core = b.dependency("kw_core", .{ .target = target, .optimize = optimize }).module("kw-core");
-    const kwatcher = b.dependency("kwatcher", .{ .target = target, .optimize = optimize }).module("kwatcher");
-    const kw_docindex = b.dependency("kw_docindex", .{ .target = target, .optimize = optimize }).module("kw-docindex");
+    const kw_core = kwDependency(b, "kw_core", "kw_core_vendored", "core", .{ .target = target, .optimize = optimize }).module("kw-core");
+    const kwatcher = kwDependency(b, "kwatcher", "kwatcher_vendored", "runtime", .{ .target = target, .optimize = optimize }).module("kwatcher");
+    const kw_docindex = kwDependency(b, "kw_docindex", "kw_docindex_vendored", "docindex", .{ .target = target, .optimize = optimize }).module("kw-docindex");
 
     // Imports:
     // 1st Party:
@@ -187,8 +187,8 @@ pub fn build(b: *std.Build) !void {
     // it and, at build time, override `kw-http-template` with their wired instance (whose zmpl
     // manifest covers the introspect template prefixes) and inject the generated `kw-gen--docs`
     // — neither is wired here, so the module compiles only inside a consumer's graph.
-    const kw_http = b.dependency("kw_http", .{ .target = target, .optimize = optimize }).module("kw-http");
-    const kw_http_template = b.dependency("kw_http_template", .{ .target = target, .optimize = optimize }).module("kw-http-template");
+    const kw_http = kwDependency(b, "kw_http", "kw_http_vendored", "http", .{ .target = target, .optimize = optimize }).module("kw-http");
+    const kw_http_template = kwDependency(b, "kw_http_template", "kw_http_template_vendored", "kw-http-template", .{ .target = target, .optimize = optimize }).module("kw-http-template");
     const kw_introspect = b.addModule("kw-introspect", .{
         .root_source_file = b.path("src/introspect/root.zig"),
         .target = target,
@@ -196,10 +196,42 @@ pub fn build(b: *std.Build) !void {
     });
     kw_introspect.addImport("kw-core", kw_core);
     kw_introspect.addImport("kw-http", kw_http);
-    kw_introspect.addImport("kw-auth-oidc", b.dependency("kw_auth_oidc", .{ .target = target, .optimize = optimize }).module("kw-auth-oidc"));
+    kw_introspect.addImport("kw-auth-oidc", kwDependency(b, "kw_auth_oidc", "kw_auth_oidc_vendored", "auth-oidc", .{ .target = target, .optimize = optimize }).module("kw-auth-oidc"));
     kw_introspect.addImport("kw-http-template", kw_http_template);
     // The hardcoded private mount (private_mount.zig) wires its config deps via kwatcher.default.
     // The `kwatcher` module dep is already declared (build.zig.zon) and bound above; this is
     // acyclic — kwatcher imports no introspect package.
     kw_introspect.addImport("kwatcher", kwatcher);
+}
+
+fn kwWorkspace(b: *std.Build) bool {
+    b.build_root.handle.access("../../.kw-workspace", .{}) catch return false;
+    return true;
+}
+
+fn kwAccessible(b: *std.Build, comptime path: []const u8) bool {
+    b.build_root.handle.access(path, .{}) catch return false;
+    return true;
+}
+
+/// Resolve a kw dependency: prefer the sibling checkout (umbrella packages/
+/// or another repo's flat vendor/ layout, gated on the ../../.kw-workspace
+/// marker) so every consumer shares one module instance; fall back to this
+/// package's own vendored submodule for standalone checkouts.
+fn kwDependency(
+    b: *std.Build,
+    comptime sibling_dep: []const u8,
+    comptime vendored_dep: []const u8,
+    comptime dir_name: []const u8,
+    args: anytype,
+) *std.Build.Dependency {
+    if (kwWorkspace(b) and kwAccessible(b, "../" ++ dir_name ++ "/build.zig.zon"))
+        return b.dependency(sibling_dep, args);
+    if (kwAccessible(b, "vendor/" ++ dir_name ++ "/build.zig.zon"))
+        return b.dependency(vendored_dep, args);
+    std.process.fatal(
+        "kw dependency '{s}': neither ../{s} nor vendor/{s} is a valid checkout;" ++
+            " run `git submodule update --init --recursive`",
+        .{ sibling_dep, dir_name, dir_name },
+    );
 }

@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) !void {
 
     kw_docgen_none.addOptions("build_config", o);
 
-    const kw_docindex = b.dependency("kw_docindex", .{ .target = target, .optimize = optimize }).module("kw-docindex");
+    const kw_docindex = kwDependency(b, "kw_docindex", "kw_docindex_vendored", "docindex", .{ .target = target, .optimize = optimize }).module("kw-docindex");
     kw_docgen_none.addImport("kw-docindex", kw_docindex);
 
     const tests = b.addTest(.{
@@ -92,4 +92,36 @@ pub fn build(b: *std.Build) !void {
     const docs_step = b.step("docs", "Generate docs");
     docs_step.dependOn(&install_docs.step);
     docs_step.dependOn(&lib.step);
+}
+
+fn kwWorkspace(b: *std.Build) bool {
+    b.build_root.handle.access("../../.kw-workspace", .{}) catch return false;
+    return true;
+}
+
+fn kwAccessible(b: *std.Build, comptime path: []const u8) bool {
+    b.build_root.handle.access(path, .{}) catch return false;
+    return true;
+}
+
+/// Resolve a kw dependency: prefer the sibling checkout (umbrella packages/
+/// or another repo's flat vendor/ layout, gated on the ../../.kw-workspace
+/// marker) so every consumer shares one module instance; fall back to this
+/// package's own vendored submodule for standalone checkouts.
+fn kwDependency(
+    b: *std.Build,
+    comptime sibling_dep: []const u8,
+    comptime vendored_dep: []const u8,
+    comptime dir_name: []const u8,
+    args: anytype,
+) *std.Build.Dependency {
+    if (kwWorkspace(b) and kwAccessible(b, "../" ++ dir_name ++ "/build.zig.zon"))
+        return b.dependency(sibling_dep, args);
+    if (kwAccessible(b, "vendor/" ++ dir_name ++ "/build.zig.zon"))
+        return b.dependency(vendored_dep, args);
+    std.process.fatal(
+        "kw dependency '{s}': neither ../{s} nor vendor/{s} is a valid checkout;" ++
+            " run `git submodule update --init --recursive`",
+        .{ sibling_dep, dir_name, dir_name },
+    );
 }

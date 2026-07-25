@@ -7,9 +7,11 @@
         .kw_http = .{
             .path = "../http",
         },
+        .kw_http_vendored = .{ .path = "vendor/http" },
         .kw_core = .{
             .path = "../core",
         },
+        .kw_core_vendored = .{ .path = "vendor/core" },
         .zmpl = .{
             .url = "git+https://github.com/Kalelzar/zmpl#6680cd0b64d88483929cc7426bb382ab8a834532",
             .hash = "zmpl-0.0.1-SYFGBvCpAwBMy-Jq3m0JmYDjSUao_nxygGiePASA-SJj",

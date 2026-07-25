@@ -7,6 +7,7 @@
         .kw_docindex = .{
             .path = "../docindex",
         },
+        .kw_docindex_vendored = .{ .path = "vendor/docindex" },
     },
     .paths = .{
         "LICENSE",
