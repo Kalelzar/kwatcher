@@ -28,7 +28,7 @@ pub const PoolAllocator = struct {
         errdefer self.underlying.destroy(new_block);
         new_block.* = .{
             .len = 0,
-            .page = try self.underlying.alloc(u8, std.heap.page_size_max),
+            .page = try self.underlying.alloc(u8, 2 * std.heap.page_size_max),
         };
         errdefer self.underlying.free(new_block.page);
         try self.used.append(self.underlying, new_block);

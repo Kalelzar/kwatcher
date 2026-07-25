@@ -95,8 +95,14 @@ pub fn StaticStrictHeader(comptime T: type, comptime Header: type) type {
         }
 
         fn popOne(self: *Self) T {
-            var old = @atomicLoad(Header, &self.header, .acquire);
             while (true) {
+                // Re-read the header EVERY iteration, including on the
+                // occupancy spin: a sibling consumer may pop the slot we
+                // snapshotted and clear its occupancy bit — with a stale
+                // head we would spin on that empty slot until the ring
+                // wraps a full lap (a 100%-CPU livelock under sparse
+                // traffic, holding an unserved token).
+                const old = @atomicLoad(Header, &self.header, .acquire);
                 const len: Header = old & half_mask;
                 const head: Header = old >> half_bits;
                 const index: usize = @intCast(head & @as(Header, @intCast(self.mask)));
@@ -108,8 +114,7 @@ pub fn StaticStrictHeader(comptime T: type, comptime Header: type) type {
                 // The shifted-out bit of a wrapping head is discarded by <<,
                 // which is exactly the mod-2^half wrap the ring needs.
                 const new = (len - 1) | ((head +% 1) << half_bits);
-                if (@cmpxchgWeak(Header, &self.header, old, new, .acq_rel, .acquire)) |next| {
-                    old = next;
+                if (@cmpxchgWeak(Header, &self.header, old, new, .acq_rel, .acquire) != null) {
                     std.atomic.spinLoopHint();
                     continue;
                 }
@@ -145,6 +150,50 @@ pub fn StaticStrictHeader(comptime T: type, comptime Header: type) type {
             return self.push(self.pop());
         }
     };
+}
+
+test "concurrent consumers do not livelock on a shared head slot" {
+    // Regression: popOne used to snapshot the header once — a sibling
+    // consumer popping the snapshotted slot and clearing its occupancy bit
+    // left the loser spinning on an empty slot (stale head) until the ring
+    // wrapped a full lap. A tiny ring with competing consumers hits that
+    // interleaving constantly; before the fix this test livelocks.
+    const Q = StaticStrictHeader(u64, u64);
+    const ops_per_producer = 20_000;
+    const n_producers = 2;
+    const n_consumers = 2;
+
+    var buf: [4]u64 = undefined;
+    var occ = [_]u1{0} ** 4;
+    var q = Q.init(&buf, &occ);
+
+    const Ctx = struct {
+        fn produce(queue: *Q) void {
+            var i: u64 = 1;
+            while (i <= ops_per_producer) : (i += 1) {
+                _ = queue.push(i);
+            }
+        }
+        fn consume(queue: *Q, acc: *u64) void {
+            var got: usize = 0;
+            var sum: u64 = 0;
+            while (got < ops_per_producer) : (got += 1) {
+                sum += queue.pop();
+            }
+            acc.* = sum;
+        }
+    };
+
+    var sums = [_]u64{0} ** n_consumers;
+    var threads: [n_producers + n_consumers]std.Thread = undefined;
+    for (0..n_consumers) |i| threads[i] = try std.Thread.spawn(.{}, Ctx.consume, .{ &q, &sums[i] });
+    for (0..n_producers) |i| threads[n_consumers + i] = try std.Thread.spawn(.{}, Ctx.produce, .{&q});
+    for (&threads) |*t| t.join();
+
+    var total: u64 = 0;
+    for (sums) |s| total += s;
+    const expected: u64 = n_producers * (ops_per_producer * (ops_per_producer + 1) / 2);
+    try std.testing.expectEqual(expected, total);
 }
 
 /// `StaticStrictHeader` at the default u64 header (u32 head/len halves):
