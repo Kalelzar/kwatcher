@@ -94,6 +94,8 @@ pub fn docgen(
     );
 }
 
+pub const emitRuntime = @import("runtime.zig").emitRuntime;
+
 comptime {
     std.testing.refAllDeclsRecursive(@This());
 }

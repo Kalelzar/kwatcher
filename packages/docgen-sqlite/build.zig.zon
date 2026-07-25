@@ -7,10 +7,23 @@
         .kw_docindex = .{
             .path = "../docindex",
         },
+        .kw_core = .{
+            .path = "../core",
+        },
+        .kw_http = .{
+            .path = "../http",
+        },
+        .kw_http_template = .{
+            .path = "../kw-http-template",
+        },
+        .kw_sqlite = .{
+            .path = "../sqlite",
+        },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
+        "templates",
     },
 }
