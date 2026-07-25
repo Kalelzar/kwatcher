@@ -5,8 +5,13 @@ const builtin = @import("builtin");
 /// On x86_64 with SSE4.2 this uses the dedicated crc32 instruction: the std
 /// table implementation runs at ~1 GB/s and dominates whole-archive reads,
 /// the instruction is an order of magnitude faster. Results are identical.
+/// LLVM-only: the self-hosted backend rejects the inline asm's "q" register
+/// constraint, so `-Dmusl`-style self-hosted Debug builds take the table
+/// path (the kwev tool proper is always ReleaseSafe+LLVM and keeps the
+/// instruction).
 pub const Crc32c = if (builtin.cpu.arch == .x86_64 and
-    std.Target.x86.featureSetHas(builtin.cpu.features, .sse4_2))
+    std.Target.x86.featureSetHas(builtin.cpu.features, .sse4_2) and
+    builtin.zig_backend == .stage2_llvm)
     HwCrc32c
 else
     std.hash.crc.Crc32Iscsi;
