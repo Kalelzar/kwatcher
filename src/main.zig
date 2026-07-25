@@ -22,6 +22,7 @@ const introspect = if (build_options.ui) @import("kw-introspect") else struct {}
 const introspect_http = if (build_options.ui) @import("kw-introspect--http") else struct {};
 const introspect_cron = if (build_options.ui) @import("kw-introspect--cron") else struct {};
 const introspect_signal = if (build_options.ui) @import("kw-introspect--signal") else struct {};
+const introspect_sqlite = if (build_options.ui) @import("kw-introspect--sqlite") else struct {};
 
 const docs = @import("kw-gen--docs");
 
@@ -589,7 +590,7 @@ const cron_driver = cron.Driver
 /// the "bearer" scheme and stores its token under kw:introspect:token.
 const introspection = if (build_options.ui) introspect.MountWith(
     docs,
-    .{ introspect_http, introspect_cron, introspect_signal },
+    .{ introspect_http, introspect_cron, introspect_signal, introspect_sqlite },
     .{ .auth = "introspect" },
 ) else NoopMount;
 
@@ -780,6 +781,9 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         // Register the sqlite driver's config (database file path); the driver
         // resolves it at init to open its connection.
         .with(.sqlite, kwatcher.default.config(sqlite.Config, "driver.sqlite"), allocator)
+        // Register the type-erased sqlite DB shim (drives the introspection
+        // Queries/Console tabs)
+        .with(.sqlite, sqlite.defaultFor(drivers.drivers), allocator)
         // Register our custom counter as a static dependency
         .static(.all, &ctx)
         .static(.amqp, &counter);

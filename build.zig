@@ -70,10 +70,15 @@ fn wireApp(
             .target = target,
             .optimize = optimize,
         });
+        const kw_docgen_sqlite_dep = b.dependency("kw_docgen_sqlite", .{
+            .target = target,
+            .optimize = optimize,
+        });
         const kw_introspect = kw_docgen_dep.module("kw-introspect");
         const kw_introspect_http = kw_docgen_http_dep.module("kw-introspect--http");
         const kw_introspect_cron = kw_docgen_cron_dep.module("kw-introspect--cron");
         const kw_introspect_signal = kw_docgen_signal_dep.module("kw-introspect--signal");
+        const kw_introspect_sqlite = kw_docgen_sqlite_dep.module("kw-introspect--sqlite");
 
         // The template machinery owns its own zmpl dependency; we hand it every contributing
         // template source (each with a prefix namespace) and it returns a module wired to a zmpl
@@ -88,6 +93,7 @@ fn wireApp(
                 http_template.packageSource(kw_docgen_http_dep, "http", &.{"templates"}),
                 http_template.packageSource(kw_docgen_cron_dep, "cron", &.{"templates"}),
                 http_template.packageSource(kw_docgen_signal_dep, "signal", &.{"templates"}),
+                http_template.packageSource(kw_docgen_sqlite_dep, "sqlite", &.{"templates"}),
             },
         });
 
@@ -98,11 +104,13 @@ fn wireApp(
         kw_introspect_http.addImport("kw-http-template", kw_http_template);
         kw_introspect_cron.addImport("kw-http-template", kw_http_template);
         kw_introspect_signal.addImport("kw-http-template", kw_http_template);
+        kw_introspect_sqlite.addImport("kw-http-template", kw_http_template);
 
         app.addImport("kw-introspect", kw_introspect);
         app.addImport("kw-introspect--http", kw_introspect_http);
         app.addImport("kw-introspect--cron", kw_introspect_cron);
         app.addImport("kw-introspect--signal", kw_introspect_signal);
+        app.addImport("kw-introspect--sqlite", kw_introspect_sqlite);
     }
 
     // Imports:
