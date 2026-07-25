@@ -1,3 +1,0 @@
-[submodule "vendor/zamqp"]
-	path = vendor/zamqp
-	url = https://github.com/Kalelzar/zamqp.git

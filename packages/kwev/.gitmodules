@@ -1,3 +1,0 @@
-[submodule "vendor/zstd"]
-	path = vendor/zstd
-	url = https://git.kalelzar.xyz/kalelzar/zstd.git

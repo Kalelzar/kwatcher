@@ -1,15 +1,75 @@
-[submodule "vendor/zamqp"]
-	path = packages/amqp/vendor/zamqp
-	url = https://github.com/Kalelzar/zamqp.git
-[submodule "packages/kwev/vendor/zstd"]
-	path = packages/kwev/vendor/zstd
-	url = https://git.kalelzar.xyz/kalelzar/zstd.git
-[submodule "packages/orm-sqlite/vendor/sqlite3"]
-	path = packages/orm-sqlite/vendor/sqlite3
-	url = https://git.kalelzar.xyz/kalelzar/sqlite3.git
-[submodule "packages/core/vendor/zettel"]
-	path = packages/core/vendor/zettel
-	url = https://git.kalelzar.xyz/kalelzar/zettel.git
-[submodule "packages/protocol/vendor/zettel"]
-	path = packages/protocol/vendor/zettel
+[submodule "packages/runtime"]
+	path = packages/runtime
+	url = https://git.kalelzar.xyz/kalelzar/kw-runtime.git
+[submodule "packages/docgen-signal"]
+	path = packages/docgen-signal
+	url = https://git.kalelzar.xyz/kalelzar/kw-docgen-signal.git
+[submodule "packages/docgen-amqp"]
+	path = packages/docgen-amqp
+	url = https://git.kalelzar.xyz/kalelzar/kw-docgen-amqp.git
+[submodule "packages/docgen-none"]
+	path = packages/docgen-none
+	url = https://git.kalelzar.xyz/kalelzar/kw-docgen-none.git
+[submodule "packages/auth-oidc"]
+	path = packages/auth-oidc
+	url = https://git.kalelzar.xyz/kalelzar/kw-auth-oidc.git
+[submodule "packages/sqlite"]
+	path = packages/sqlite
+	url = https://git.kalelzar.xyz/kalelzar/kw-sqlite.git
+[submodule "packages/kwev"]
+	path = packages/kwev
+	url = https://git.kalelzar.xyz/kalelzar/kw-kwev.git
+[submodule "packages/docgen-http"]
+	path = packages/docgen-http
+	url = https://git.kalelzar.xyz/kalelzar/kw-docgen-http.git
+[submodule "packages/template"]
+	path = packages/template
+	url = https://git.kalelzar.xyz/kalelzar/kw-placeholder.git
+[submodule "packages/amqp"]
+	path = packages/amqp
+	url = https://git.kalelzar.xyz/kalelzar/kw-amqp.git
+[submodule "packages/signal"]
+	path = packages/signal
+	url = https://git.kalelzar.xyz/kalelzar/kw-signal.git
+[submodule "packages/cron"]
+	path = packages/cron
+	url = https://git.kalelzar.xyz/kalelzar/kw-cron.git
+[submodule "packages/kw-http-template"]
+	path = packages/kw-http-template
+	url = https://git.kalelzar.xyz/kalelzar/kw-http-template.git
+[submodule "packages/action"]
+	path = packages/action
+	url = https://git.kalelzar.xyz/kalelzar/kw-action.git
+[submodule "packages/asyncapi"]
+	path = packages/asyncapi
+	url = https://git.kalelzar.xyz/kalelzar/kw-asyncapi.git
+[submodule "packages/protocol"]
+	path = packages/protocol
+	url = https://git.kalelzar.xyz/kalelzar/kw-protocol.git
+[submodule "packages/docgen-sqlite"]
+	path = packages/docgen-sqlite
+	url = https://git.kalelzar.xyz/kalelzar/kw-docgen-sqlite.git
+[submodule "packages/docindex"]
+	path = packages/docindex
+	url = https://git.kalelzar.xyz/kalelzar/kw-docindex.git
+[submodule "packages/orm-sqlite"]
+	path = packages/orm-sqlite
+	url = https://git.kalelzar.xyz/kalelzar/kw-orm-sqlite.git
+[submodule "packages/docgen-cron"]
+	path = packages/docgen-cron
+	url = https://git.kalelzar.xyz/kalelzar/kw-docgen-cron.git
+[submodule "packages/core"]
+	path = packages/core
+	url = https://git.kalelzar.xyz/kalelzar/kw-core.git
+[submodule "packages/docgen"]
+	path = packages/docgen
+	url = https://git.kalelzar.xyz/kalelzar/kw-docgen.git
+[submodule "packages/cache"]
+	path = packages/cache
+	url = https://git.kalelzar.xyz/kalelzar/kw-cache.git
+[submodule "packages/http"]
+	path = packages/http
+	url = https://git.kalelzar.xyz/kalelzar/kw-http.git
+[submodule "packages/zettel"]
+	path = packages/zettel
 	url = https://git.kalelzar.xyz/kalelzar/zettel.git

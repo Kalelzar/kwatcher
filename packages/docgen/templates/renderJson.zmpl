@@ -1,1 +1,0 @@
-@partial viewJson(body: $.body)
