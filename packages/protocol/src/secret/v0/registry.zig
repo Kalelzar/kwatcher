@@ -116,12 +116,15 @@ pub const RequestExtra = struct { inj: ?*dep.DepCtx = null };
 /// `identifier` must be long-lived (a literal in practice): it is duped
 /// for the pending key but travels by reference through the secret-get
 /// scheduler — the same contract as scheduling `secret-get` directly.
+/// `scheduler` is anything whose `publish` takes `.{ .@"secret-get" =
+/// .{identifier} }`: the app's concrete AMQP scheduler, or the secret
+/// shim where only DI is available (protocol-internal routes).
 pub fn getOrRequest(
     self: *SecretRegistry,
     allocator: std.mem.Allocator,
     identifier: []const u8,
     ev: *anyopaque,
-    scheduler: Scheduler,
+    scheduler: anytype,
     extra: RequestExtra,
 ) !?[]const u8 {
     if (self.secrets.get(identifier)) |secret| return secret;
@@ -138,7 +141,7 @@ pub fn request(
     allocator: std.mem.Allocator,
     identifier: []const u8,
     ev: *anyopaque,
-    scheduler: Scheduler,
+    scheduler: anytype,
     extra: RequestExtra,
 ) !void {
     // Pending before publish: the response must never be able to overtake

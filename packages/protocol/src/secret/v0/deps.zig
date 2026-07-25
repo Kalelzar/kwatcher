@@ -48,7 +48,11 @@ pub fn default(comptime drv: Drivers, comptime Context: type) type {
                 var shim = Shim{};
             };
 
-            return dephub.static(category, &H.fixme_move_elsewhere_cache)
+            // The registry statics go in `.all`, not the category: app
+            // routes on other drivers (e.g. an action retrying a
+            // `secret-get`) read the registry too. The category only
+            // selects which driver's scheduler the bridge shim wraps.
+            return dephub.static(.all, &H.fixme_move_elsewhere_cache)
                 .static(.all, &H.shim);
         }
 
@@ -62,7 +66,7 @@ pub fn default(comptime drv: Drivers, comptime Context: type) type {
                 Scheduler,
                 drv.Schedulers()[@intFromEnum(drk)],
             );
-            return DH.Static(category, *Static(Context, Config))
+            return DH.Static(.all, *Static(Context, Config))
                 .Static(.all, *Shim);
         }
     };

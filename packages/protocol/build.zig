@@ -94,7 +94,9 @@ pub fn build(b: *std.Build) !void {
     // compiled against kw-core's schema sources via --import so foreign
     // names lower to @import("kw-core-schema") and the whole tree shares
     // one Context/ZettelError.
-    const zettel_dep = b.dependency("zettel", .{ .optimize = .ReleaseSafe });
+    // Debug for build speed — must stay in lockstep with kw-core's zettel
+    // dependency so the two instantiations dedup into one.
+    const zettel_dep = b.dependency("zettel", .{ .optimize = .Debug });
     const core_schema = zettel.SchemaImport{
         .name = "kw-core-schema",
         .dir = kw_core_dep.namedLazyPath("schema-dir"),
