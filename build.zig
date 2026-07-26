@@ -197,7 +197,7 @@ pub fn build(b: *std.Build) !void {
         // works for Debug-at-musl (`-Dmusl`); everything else keeps LLVM
         // (glibc CRT .sframe blocks the self-hosted linker, and release
         // builds want LLVM's optimizer).
-        .use_llvm = !(target.result.abi == .musl and optimize == .Debug),
+        .use_llvm = !(target.result.cpu.arch == .x86_64 and target.result.abi == .musl and optimize == .Debug),
     });
 
     if (build_example) {
