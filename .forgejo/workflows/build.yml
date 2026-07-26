@@ -14,8 +14,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive
           token: ${{secrets.FETCH_TOKEN}}
+      - name: Bootstrap submodules
+        run: |
+          git config --global url."https://oauth2:${{secrets.FETCH_TOKEN}}@git.kalelzar.xyz/".insteadOf "https://git.kalelzar.xyz/"
+          ./bootstrap.sh
       - name: Get Zig
         uses: https://github.com/mlugg/setup-zig@v2
       - name: Check
