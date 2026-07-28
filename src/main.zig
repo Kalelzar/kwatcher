@@ -677,11 +677,20 @@ pub const drivers = struct {
             .registerHandler(amqp_driver)
             .registerHandler(http_driver)
             .registerHandler(action_driver)
-            .registerHandler(signal_driver)
             .registerHandler(sqlite_driver);
+        // The signal driver is POSIX-only: its listener thread is a
+        // `rt_sigtimedwait` syscall loop, which nothing outside linux can
+        // serve. Registering it is what instantiates that loop, so gating the
+        // registration is what keeps it out of the binary — the driver and its
+        // routes above stay declared either way. Drop this once a driver
+        // backed by the Windows primitives exists to swap in.
+        const with_signal = if (builtin.os.tag == .linux)
+            base.registerHandler(signal_driver)
+        else
+            base;
         // The private introspection mount is appended only in normal runtime builds, not during
         // docgen (the UI is generated *from* the docs); `register` handles that gating.
-        break :reg introspection.register(base);
+        break :reg introspection.register(with_signal);
     };
 };
 

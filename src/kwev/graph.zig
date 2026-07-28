@@ -217,27 +217,14 @@ fn extractTask(t: *ExtractTask) void {
     var scratch = std.heap.ArenaAllocator.init(t.gpa);
     defer scratch.deinit();
     for (t.records) |r| {
-        const cid = parseCidFast(r.properties) orelse blk: {
-            // Non-canonical properties (foreign writer, older format): pay
-            // for a real zon parse.
-            defer _ = scratch.reset(.retain_capacity);
-            const source = scratch.allocator().dupeZ(u8, r.properties) catch |e| {
-                t.err = e;
-                return;
-            };
-            const props = std.zon.parse.fromSlice(core.event.Properties, scratch.allocator(), source, null, .{
-                .ignore_unknown_fields = true,
-            }) catch |e| switch (e) {
-                error.ParseZon => {
-                    t.uncorrelated += 1;
-                    continue;
-                },
-                else => {
-                    t.err = e;
-                    return;
-                },
-            };
-            break :blk props.correlation_id;
+        defer _ = scratch.reset(.retain_capacity);
+        const maybe_cid = inspection.recordCid(scratch.allocator(), r.properties) catch |e| {
+            t.err = e;
+            return;
+        };
+        const cid = maybe_cid orelse {
+            t.uncorrelated += 1;
+            continue;
         };
         if (cid.isUnset()) {
             t.uncorrelated += 1;
@@ -286,40 +273,6 @@ fn shardTask(t: *ShardTask) void {
         t.err = e;
         return;
     };
-}
-
-/// Fast path for pulling the correlation id out of the canonical zon the
-/// recorder writes (`.{.attempts=N,.correlation_id=.{.timestamp=...,...}}`):
-/// a full zon parse per record dominates graph's runtime on large archives.
-/// Anything unexpected returns null and the caller falls back to std.zon.
-fn parseCidFast(props: []const u8) ?core.correlation.CorrelationID {
-    const marker = ".correlation_id=.{";
-    const start = (std.mem.indexOf(u8, props, marker) orelse return null) + marker.len;
-    var cid: core.correlation.CorrelationID = .unset;
-    var i = start;
-    while (i < props.len) {
-        if (props[i] != '.') return null;
-        i += 1;
-        const name_end = std.mem.indexOfScalarPos(u8, props, i, '=') orelse return null;
-        const name = props[i..name_end];
-        i = name_end + 1;
-        var value_end = i;
-        while (value_end < props.len and props[value_end] != ',' and props[value_end] != '}') {
-            value_end += 1;
-        }
-        if (value_end == props.len) return null;
-        const value = props[i..value_end];
-
-        inline for (@typeInfo(core.correlation.CorrelationID).@"struct".fields) |f| {
-            if (std.mem.eql(u8, name, f.name)) {
-                @field(cid, f.name) = std.fmt.parseInt(f.type, value, 10) catch return null;
-            }
-        }
-
-        if (props[value_end] == '}') return cid;
-        i = value_end + 1;
-    }
-    return null;
 }
 
 const GraphItem = struct {

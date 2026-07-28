@@ -36,7 +36,11 @@ fn wireApp(
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        .dwarf_format = .@"64",
+        // DWARF64 is an ELF-only debug format; asking for it on COFF/Mach-O
+        // targets is rejected by the compiler driver outright
+        // ("-gdwarf64 only allowed with ELF platforms"), so let non-ELF
+        // targets take the default.
+        .dwarf_format = if (target.result.ofmt == .elf) .@"64" else null,
         // Derived from the graph rather than pinned off: kw-sqlite links the
         // vendored sqlite3 static lib, which needs libc.
         .link_libc = null,
@@ -183,7 +187,8 @@ pub fn build(b: *std.Build) !void {
         // millions of record parses); a Debug build of it pins a core for
         // ages. Debug builds of the repo still get an optimized tool.
         .optimize = if (optimize == .Debug) .ReleaseSafe else optimize,
-        .dwarf_format = .@"64",
+        // ELF-only; see the app module above.
+        .dwarf_format = if (target.result.ofmt == .elf) .@"64" else null,
         .link_libc = false,
         .omit_frame_pointer = false,
     });
@@ -313,6 +318,19 @@ pub fn build(b: *std.Build) !void {
     // it on regression — but as a sibling of the codegen chain, not a gate in
     // front of it, so its app-graph compile happens in parallel.
     b.getInstallStep().dependOn(docs.docgen_tests);
+
+    // Top-level `test` (the CI entry point): the example module's own test
+    // block (refAllDecls over the whole framework surface) plus the docgen
+    // orchestrator suite exposed by the wire result.
+    const example_tests = b.addTest(.{
+        .root_module = kwatcher_example,
+        // Same self-hosted gate as the example exe: x86_64-only.
+        .use_llvm = !(target.result.cpu.arch == .x86_64 and target.result.abi == .musl and optimize == .Debug),
+    });
+    const run_example_tests = b.addRunArtifact(example_tests);
+    const test_step = b.step("test", "Run the test suites over the example app graph.");
+    test_step.dependOn(&run_example_tests.step);
+    test_step.dependOn(docs.docgen_tests);
 
     // Promote the generated candidate sqlite migration to a committed one:
     // `zig build commit-migration -Dmigration-name=<name>`.

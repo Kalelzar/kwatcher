@@ -24,6 +24,7 @@ const inspect = @import("inspect.zig");
 const consolidate = @import("consolidate.zig");
 const train = @import("train.zig");
 const graph = @import("graph.zig");
+const query = @import("query.zig");
 
 pub fn main() void {
     const result = if (comptime builtin.mode == .Debug) blk: {
@@ -48,6 +49,7 @@ const Cmd = enum {
     consolidate,
     train,
     graph,
+    query,
 };
 
 const commands = std.StaticStringMap(Cmd).initComptime(&.{
@@ -56,6 +58,7 @@ const commands = std.StaticStringMap(Cmd).initComptime(&.{
     .{ "consolidate", .consolidate },
     .{ "train", .train },
     .{ "graph", .graph },
+    .{ "query", .query },
 });
 
 const Ctx = struct {
@@ -99,6 +102,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         .consolidate => try cmdConsolidate(ctx, args),
         .train => try cmdTrain(ctx, args),
         .graph => try cmdGraph(ctx, args),
+        .query => try cmdQuery(ctx, args),
     }
 }
 
@@ -183,12 +187,28 @@ fn cmdGraph(ctx: Ctx, args: []const []const u8) !void {
     try graph.run(ctx.arena, ctx.gpa, ctx.stdout, ctx.stderr, args[0], args[1..]);
 }
 
+fn cmdQuery(ctx: Ctx, args: []const []const u8) !void {
+    var output: ?[]const u8 = null;
+    var rest = std.ArrayList([]const u8){};
+    for (args) |arg| {
+        if (flagValue(arg, "--out")) |path| {
+            output = path;
+        } else {
+            try rest.append(ctx.arena, arg);
+        }
+    }
+    // <correlation-id> plus at least one input.
+    if (rest.items.len < 2) return usage(ctx.stderr);
+    try query.run(ctx.arena, ctx.gpa, ctx.stdout, ctx.stderr, rest.items[0], rest.items[1..], output);
+}
+
 fn usage(stderr: *std.Io.Writer) error{BadArguments} {
     stderr.print(
         \\Usage: kwev <dump|inspect> <filepath>
         \\       kwev consolidate [--compress[=zstd|none]] [--dict=<dict.kwev>] <output> <input...>
         \\       kwev train [--dict-id=N] [--dict-version=N] [--max-size=N] <output.kwev> <input...>
         \\       kwev graph <output.dot> <input...>
+        \\       kwev query [--out=<file.kwev>] <correlation-id> <input...>
         \\
     , .{}) catch {};
     return error.BadArguments;

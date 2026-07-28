@@ -159,7 +159,7 @@ pub fn run(
 
 /// All consolidated inputs must describe their events identically: same
 /// HDRA, same driver table, same event type mappings.
-fn expectSameDefs(reference: *const Inspection, insp: *const Inspection, path: []const u8) !void {
+pub fn expectSameDefs(reference: *const Inspection, insp: *const Inspection, path: []const u8) !void {
     const a = reference.header.?;
     const b = insp.header.?;
     const header_match = a.version == b.version and
