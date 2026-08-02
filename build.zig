@@ -63,6 +63,7 @@ fn wireApp(
     const kw_signal = b.dependency("kw_signal", .{ .target = target, .optimize = optimize }).module("kw-signal");
     const kw_sqlite = b.dependency("kw_sqlite", .{ .target = target, .optimize = optimize }).module("kw-sqlite");
     const kw_auth_oidc = b.dependency("kw_auth_oidc", .{ .target = target, .optimize = optimize }).module("kw-auth-oidc");
+    const kw_http_client = b.dependency("kw_http_client", .{ .target = target, .optimize = optimize }).module("kw-http-client");
 
     // 3rd Party:
     const httpz = b.dependency("httpz", .{ .target = target, .optimize = optimize }).module("httpz");
@@ -144,6 +145,7 @@ fn wireApp(
     app.addImport("kw-signal", kw_signal);
     app.addImport("kw-sqlite", kw_sqlite);
     app.addImport("kw-auth-oidc", kw_auth_oidc);
+    app.addImport("kw-http-client", kw_http_client);
     app.addImport("httpz", httpz);
 
     return app;
@@ -279,6 +281,11 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     }).module("kw-docgen--sqlite");
 
+    const kw_docgen_http_client = b.dependency("kw_docgen_http_client", .{
+        .target = gen_target,
+        .optimize = optimize,
+    }).module("kw-docgen--http_client");
+
     // Dedicated copy of the app graph for the generators to introspect, at the
     // generators' own musl target. Always explicit now: the installed app's
     // native modules can't be mixed into a musl compilation, so the old
@@ -300,6 +307,7 @@ pub fn build(b: *std.Build) !void {
         .{ .kind = "amqp", .module = kw_docgen_amqp },
         .{ .kind = "sqlite", .module = kw_docgen_sqlite },
         .{ .kind = "signal", .module = kw_docgen_signal },
+        .{ .kind = "http_client", .module = kw_docgen_http_client },
     } else &.{
         .{ .kind = "sqlite", .module = kw_docgen_sqlite },
     };

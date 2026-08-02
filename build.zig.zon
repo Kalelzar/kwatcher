@@ -46,6 +46,9 @@
         .kw_docgen_signal = .{
             .path = "packages/docgen-signal",
         },
+        .kw_docgen_http_client = .{
+            .path = "packages/docgen-http-client",
+        },
         .kw_docgen_sqlite = .{
             .path = "packages/docgen-sqlite",
         },
@@ -57,6 +60,9 @@
         },
         .kw_sqlite = .{
             .path = "packages/sqlite",
+        },
+        .kw_http_client = .{
+            .path = "packages/http-client",
         },
         .kw_auth_oidc = .{
             .path = "packages/auth-oidc",

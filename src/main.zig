@@ -27,6 +27,7 @@ const action = @import("kw-action");
 const signal = @import("kw-signal");
 const sqlite = @import("kw-sqlite");
 const auth_oidc = @import("kw-auth-oidc");
+const client = @import("kw-http-client");
 const httpz = @import("httpz");
 
 const build_options = @import("build_options");
@@ -72,6 +73,9 @@ pub const Config = struct {
         /// mount only exists in UI builds).
         private: http.Config = .{},
         sqlite: sqlite.Config = .{},
+        /// Egress loopback driver (kw-http-client demo): talks back into our
+        /// own public ingress, so it works without any external upstream.
+        loopback: client.Config = .{ .base_uri = "http://localhost:2000" },
     },
     middleware: struct {
         cors: http.middleware.Cors.Config,
@@ -117,6 +121,9 @@ pub const Config = struct {
 pub const AppConfig = struct {
     greeting: []const u8 = "Hello",
     interval_seconds: u32 = 5,
+    /// The amount of workers to spawn for the purpose of
+    /// consuming events from the queue.
+    workers: u8 = 2,
 };
 
 // ============================================================================
@@ -247,6 +254,90 @@ const CronRoutes = struct {
         try sq.call(.{ .recordVisit = .{ timestamp, "heartbeat" } }, .{ .inj = inj });
         try sq.call(.{ .logVisitCount = .{} }, .{ .inj = inj });
     }
+
+    /// Keep the loopback PROVIDE cache warm and demo the async egress path.
+    pub fn @"loopback_refresh */30 * * * * *"(inj: *core.deps.DepCtx) !void {
+        const sched = try inj.require(Scheduler(.loopback));
+        try sched.request(.{ .freshHealth = .{} }, .{ .inj = inj });
+        try sched.request(.{ .createUser = .{ .body = .{ .name = "loopback" } } }, .{ .inj = inj });
+
+        // The freshest snapshot from the previous refresh, injected through
+        // the PROVIDE cache (fails harmlessly before the first fetch).
+        if (inj.require(client.Provided(LoopbackRoutes.HealthSnapshot))) |snap| {
+            log.info("[loopback] cached health '{s}' fetched at {d}", .{ snap.value.status, snap.fetched_at });
+        } else |_| {
+            log.info("[loopback] health not fetched yet", .{});
+        }
+    }
+};
+
+/// Egress routes looping back into this app's own public ingress — the
+/// kw-http-client demo. Both route forms: simple const declarations (the
+/// declared type IS the 2xx response schema) and operation structs
+/// (`request` builds the request; other pub fns are per-status handlers).
+const LoopbackRoutes = struct {
+    /// The wire shape of the ingress `/health` endpoint.
+    pub const HealthSnapshot = struct { status: []const u8 };
+
+    /// The client-side mirror of `HeartbeatMessage`'s wire shape.
+    pub const Heartbeat = struct {
+        schema_version: u32,
+        schema_name: []const u8,
+        timestamp: i64,
+        event: []const u8,
+        count: u64,
+        greeting: []const u8,
+    };
+
+    /// Plain fetch; sync `invoke` returns it typed, async validates + drops.
+    pub const @"GET /health @health": HealthSnapshot = undefined;
+
+    /// The freshest health snapshot: refreshed by the cron schedule below,
+    /// injectable anywhere as `client.Provided(HealthSnapshot)`.
+    pub const @"PROVIDE GET /health @freshHealth": HealthSnapshot = undefined;
+
+    /// Create a user upstream; the scheduling site hands the draft through
+    /// `Ctx.body`, `request` turns it into the wire body.
+    pub const @"POST /api/v1/users @createUser" = struct {
+        pub const Ctx = struct { body: struct { name: []const u8 } };
+
+        pub fn request(ctx: Ctx) struct { name: []const u8 } {
+            return .{ .name = ctx.body.name };
+        }
+
+        pub fn ok(rctx: struct { body: Heartbeat }) void {
+            log.info("[loopback] upstream created user; greeting={s}", .{rctx.body.greeting});
+        }
+
+        pub fn client_error(rctx: struct { status: std.http.Status }) void {
+            log.warn("[loopback] createUser rejected: {d}", .{@intFromEnum(rctx.status)});
+        }
+
+        pub fn failed(rctx: struct { err: anyerror, attempts: u32 }) void {
+            log.warn("[loopback] createUser transport failure: {t} (attempt {d})", .{ rctx.err, rctx.attempts });
+        }
+    };
+
+    /// Typed captures against the user endpoint.
+    pub const @"GET /api/v1/users/{id} @getUser" = struct {
+        pub const Ctx = struct { captures: struct { id: u64 } };
+
+        pub fn request(ctx: Ctx) void {
+            _ = ctx;
+        }
+
+        pub fn ok(rctx: struct { body: Heartbeat, captures: struct { id: u64 } }) void {
+            log.info("[loopback] user {d}: event={s}", .{ rctx.captures.id, rctx.body.event });
+        }
+
+        pub fn @"error"(rctx: struct { status: std.http.Status }) void {
+            log.warn("[loopback] getUser failed upstream: {d}", .{@intFromEnum(rctx.status)});
+        }
+
+        pub fn failed(rctx: struct { err: anyerror }) void {
+            log.warn("[loopback] getUser transport failure: {t}", .{rctx.err});
+        }
+    };
 };
 
 /// Action route handlers.
@@ -656,6 +747,18 @@ const sqlite_driver = sqlite.Driver
     .routes(sqlite.From(SqliteRoutes) ++ sqlite.Migrations(sqlite_snapshot, @import("kw-sqlite--migrations")))
     .build();
 
+/// The egress loopback driver: one origin (our own public ingress), a
+/// dedicated request pool of 2 blocking-IO threads fed by a driver-owned
+/// queue — event workers never block on the network.
+const loopback_driver = client.Driver
+    .new(.loopback)
+    .config("driver.loopback")
+    .listen(true)
+    .jobs(2)
+    .routes(client.From(LoopbackRoutes, RouteContext))
+    .error_handler(client.DefaultErrorHandler)
+    .build();
+
 /// The signal driver's routes, hoisted so the driver and the process-wide block
 /// mask (`signal.blockRouted` in `juicyMain`) share one source of truth.
 const signal_routes = signal.From(SignalRoutes) ++ signal.From(signal.default.Shutdown);
@@ -677,7 +780,8 @@ pub const drivers = struct {
             .registerHandler(amqp_driver)
             .registerHandler(http_driver)
             .registerHandler(action_driver)
-            .registerHandler(sqlite_driver);
+            .registerHandler(sqlite_driver)
+            .registerHandler(loopback_driver);
         // The signal driver is POSIX-only: its listener thread is a
         // `rt_sigtimedwait` syscall loop, which nothing outside linux can
         // serve. Registering it is what instantiates that loop, so gating the
@@ -809,6 +913,9 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         // Register the type-erased sqlite DB shim (drives the introspection
         // Queries/Console tabs)
         .with(.sqlite, sqlite.defaultFor(drivers.drivers), allocator)
+        // Register the egress loopback driver's config + shared transport
+        // (one pooled std.http.Client) + PROVIDE caches
+        .with(.loopback, client.defaultFor(drivers.drivers, RouteContext), allocator)
         // Register our custom counter as a static dependency
         .static(.all, &ctx)
         .static(.amqp, &counter);
@@ -833,7 +940,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
 
     // Create and start the server
     var server = try kwatcher.server.Server(@TypeOf(deps), drivers.drivers)
-        .init(allocator, deps, 4); // 4 consumer threads
+        .init(allocator, deps, config_slot.app.workers); // 4 consumer threads
     defer server.deinit();
 
     log.info("Starting example server...", .{});
