@@ -76,6 +76,10 @@ pub const Config = struct {
         /// Egress loopback driver (kw-http-client demo): talks back into our
         /// own public ingress, so it works without any external upstream.
         loopback: client.Config = .{ .base_uri = "http://localhost:2000" },
+        /// Egress driver for the OIDC provider: discovery + JWKS refreshes
+        /// ride the event queue (recorded IdP traffic). base_uri is the
+        /// IdP *origin*; the well-known path comes from `auth.well_known`.
+        oidc: client.Config = .{ .base_uri = "http://localhost:8080" },
     },
     middleware: struct {
         cors: http.middleware.Cors.Config,
@@ -253,6 +257,19 @@ const CronRoutes = struct {
         const sq = try inj.require(Scheduler(.sqlite));
         try sq.call(.{ .recordVisit = .{ timestamp, "heartbeat" } }, .{ .inj = inj });
         try sq.call(.{ .logVisitCount = .{} }, .{ .inj = inj });
+    }
+
+    /// Keep the OIDC discovery + key material warm: every IdP fetch goes
+    /// through the queue (recorded, correlation-stamped). The 30s cadence
+    /// bounds the startup cold window and key-rotation recovery; identical
+    /// payloads are change-detected by the store, so steady-state cost is
+    /// two keep-alive GETs. On the first tick the JWKS request may cancel
+    /// silently (its URL comes from the discovery document); the next tick
+    /// lands it.
+    pub fn @"oidc_refresh */30 * * * * *"(inj: *core.deps.DepCtx) !void {
+        const sched = try inj.require(Scheduler(.oidc));
+        try sched.request(.{ .oidcDiscovery = .{} }, .{ .inj = inj });
+        try sched.request(.{ .oidcJwks = .{} }, .{ .inj = inj });
     }
 
     /// Keep the loopback PROVIDE cache warm and demo the async egress path.
@@ -658,6 +675,9 @@ const RouteContext = struct {
     request_id: u64 = 0,
     client: protocol.client_registration.registry = .{ .assigned_id = null, .state = .unregistered },
     secrets: protocol.secret.registry = .{},
+    /// OIDC egress fragment: the spread segment in `auth_oidc.egress.Routes`
+    /// resolves `oidc.well_known_path` (filled from config at startup).
+    oidc: auth_oidc.egress.Context = .{},
 };
 
 /// The protocols the example app speaks. `.secret` requires
@@ -759,6 +779,17 @@ const loopback_driver = client.Driver
     .error_handler(client.DefaultErrorHandler)
     .build();
 
+/// The OIDC egress driver: discovery + JWKS fetches as recorded events
+/// (see `auth_oidc.egress`). One job — the IdP is low-traffic.
+const oidc_driver = client.Driver
+    .new(.oidc)
+    .config("driver.oidc")
+    .listen(true)
+    .jobs(1)
+    .routes(client.From(auth_oidc.egress.Routes, RouteContext))
+    .error_handler(client.DefaultErrorHandler)
+    .build();
+
 /// The signal driver's routes, hoisted so the driver and the process-wide block
 /// mask (`signal.blockRouted` in `juicyMain`) share one source of truth.
 const signal_routes = signal.From(SignalRoutes) ++ signal.From(signal.default.Shutdown);
@@ -781,7 +812,8 @@ pub const drivers = struct {
             .registerHandler(http_driver)
             .registerHandler(action_driver)
             .registerHandler(sqlite_driver)
-            .registerHandler(loopback_driver);
+            .registerHandler(loopback_driver)
+            .registerHandler(oidc_driver);
         // The signal driver is POSIX-only: its listener thread is a
         // `rt_sigtimedwait` syscall loop, which nothing outside linux can
         // serve. Registering it is what instantiates that loop, so gating the
@@ -857,6 +889,12 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     // Create singleton dependencies
     var counter = CounterDependency{};
     var ctx: RouteContext = .{};
+    ctx.oidc.well_known_path = auth_oidc.egress.pathOf(config_slot.auth.well_known);
+
+    // The OIDC discovery/JWKS store: written only by the egress driver,
+    // read by the verification middleware in every enforced scope.
+    var oidc_store = auth_oidc.DiscoveryStoreCtx{};
+    oidc_store.store.alloc = allocator;
 
     // The private mount's registries — the app owns all three, and the split
     // is deliberate: AuthSchemes/LoginClients describe the *application's*
@@ -916,6 +954,10 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         // Register the egress loopback driver's config + shared transport
         // (one pooled std.http.Client) + PROVIDE caches
         .with(.loopback, client.defaultFor(drivers.drivers, RouteContext), allocator)
+        // Register the OIDC egress driver's config + transport, and the
+        // process-wide discovery store it feeds
+        .with(.oidc, client.defaultFor(drivers.drivers, RouteContext), allocator)
+        .static(.all, &oidc_store)
         // Register our custom counter as a static dependency
         .static(.all, &ctx)
         .static(.amqp, &counter);

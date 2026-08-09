@@ -73,3 +73,12 @@
 [submodule "packages/zettel"]
 	path = packages/zettel
 	url = https://git.kalelzar.xyz/kalelzar/zettel.git
+[submodule "packages/http-core"]
+	path = packages/http-core
+	url = https://git.kalelzar.xyz/kalelzar/kw-http-core.git
+[submodule "packages/http-client"]
+	path = packages/http-client
+	url = https://git.kalelzar.xyz/kalelzar/kw-http-client.git
+[submodule "packages/docgen-http-client"]
+	path = packages/docgen-http-client
+	url = https://git.kalelzar.xyz/kalelzar/kw-docgen-http-client.git
