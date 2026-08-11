@@ -17,17 +17,25 @@ do_repo() {
   echo "=== updating $dir"
   (
     cd "$dir"
-    git pull --ff-only
+    # Submodules sit on detached HEADs (no branch to `git pull`); the
+    # umbrella is on a real branch. Rebase local commits onto the remote
+    # branch tip and push back to it explicitly.
+    local branch
+    branch="$(git symbolic-ref --short -q HEAD || echo master)"
+    git fetch origin
+    if git rev-parse --verify -q "origin/$branch" >/dev/null; then
+      git rebase --autostash "origin/$branch"
+    fi
     nix flake update
     "$KW_NIX/scripts/update-deps-hash.sh" .
     nix build .#default --no-link --print-build-logs
     if ! git diff --quiet -- flake.nix flake.lock; then
       git add flake.nix flake.lock
       git commit -m "nix: bump flake locks"
-      git push
     else
       echo "    (no lock changes)"
     fi
+    git push origin "HEAD:$branch"
   )
 }
 

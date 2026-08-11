@@ -66,7 +66,7 @@ do_repo() { # dir, commit-msg
     branch="$(git symbolic-ref --short -q HEAD || echo master)"
     git fetch origin
     if git rev-parse --verify -q "origin/$branch" >/dev/null; then
-      git rebase "origin/$branch"
+      git rebase --autostash "origin/$branch"
     fi
     git push origin "HEAD:$branch"
   )
