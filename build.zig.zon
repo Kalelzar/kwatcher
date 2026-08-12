@@ -16,6 +16,9 @@
         .kw_protocol = .{
             .path = "packages/protocol",
         },
+        .kw_config = .{
+            .path = "packages/config",
+        },
         .kw_http = .{
             .path = "packages/http",
         },

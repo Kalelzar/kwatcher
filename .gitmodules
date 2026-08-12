@@ -82,3 +82,6 @@
 [submodule "packages/docgen-http-client"]
 	path = packages/docgen-http-client
 	url = https://git.kalelzar.xyz/kalelzar/kw-docgen-http-client.git
+[submodule "packages/config"]
+	path = packages/config
+	url = https://git.kalelzar.xyz/kalelzar/kw-config.git

@@ -28,6 +28,7 @@ const signal = @import("kw-signal");
 const sqlite = @import("kw-sqlite");
 const auth_oidc = @import("kw-auth-oidc");
 const client = @import("kw-http-client");
+const kw_config = @import("kw-config");
 const httpz = @import("httpz");
 
 const build_options = @import("build_options");
@@ -128,6 +129,12 @@ pub const AppConfig = struct {
     /// The amount of workers to spawn for the purpose of
     /// consuming events from the queue.
     workers: u8 = 2,
+    /// A secret-backed value: the JSON supplies only a reference
+    /// (`"api_token": "@secret"`) and the SECRET protocol delivers the
+    /// plaintext at runtime. Deliberately without a default so a deployment
+    /// cannot forget to bind it. Consumed through the `Resolved(AppConfig)`
+    /// snapshot (null until a store answers) — see `SecretConfig` below.
+    api_token: kw_config.Secret([]const u8),
 };
 
 // ============================================================================
@@ -240,6 +247,18 @@ const AmqpRoutes = struct {
 /// Cron route handlers.
 /// Function names follow the pattern: "job_name schedule"
 const CronRoutes = struct {
+    /// Demonstrates consuming a secret-backed config value: the dependency
+    /// is a plain snapshot struct (`Resolved(AppConfig)`), so the secret
+    /// field is just a `?[]const u8` — null until a store answers the
+    /// kw-config resolver. Only the length is logged; the value stays put.
+    pub fn @"secret_config_demo */30 * * * * *"(app: kw_config.Resolved(AppConfig)) !void {
+        if (app.api_token) |token| {
+            log.info("[secret-config] app.api_token is resolved ({d} bytes)", .{token.len});
+        } else {
+            log.info("[secret-config] app.api_token is not resolved yet", .{});
+        }
+    }
+
     /// Triggers every 5 seconds.
     pub fn @"heartbeat_tick */5 * * * * *"(inj: *core.deps.DepCtx) !void {
         const scheduler = try inj.require(Scheduler(.amqp));
@@ -608,7 +627,10 @@ const HTTPRoutes = struct {
 
     pub fn @"PUT /api/v1/config @updateConfig"(ctx: http.data.Request(
         struct { greeting: []const u8, interval_seconds: u32 },
-    )) AppConfig {
+    )) kw_config.Resolved(AppConfig) {
+        // The echo uses the requestor-facing projection: the secret-backed
+        // field is a plain optional there (left null — the response must
+        // not carry the token).
         return .{
             .greeting = ctx.body.greeting,
             .interval_seconds = ctx.body.interval_seconds,
@@ -685,6 +707,25 @@ const RouteContext = struct {
 /// registration id).
 const protocols: []const protocol.Kind = &.{ .client_registration, .secret };
 
+/// Secret-backed config resolution (kw-config): finds every `Secret(T)`
+/// field in `Config`, requests the identifiers over the SECRET protocol,
+/// and flips the slots in the DI-owned config copy as answers arrive.
+/// Stitched below: `Actions` into the action driver (the delivery
+/// callback), `Timers` into the cron driver (request + retry-forever
+/// loop), and `Deps` into the container (the `Resolved(...)` snapshot
+/// factories handlers consume).
+const SecretConfig = kw_config.Resolver(Config, .{
+    .protocols = protocols,
+    .projections = &.{"app"},
+    // Lazy accessor: naming `Scheduler(.action)` directly here would close
+    // a comptime cycle (routes → drivers → routes).
+    .schedulers = struct {
+        pub fn Action() type {
+            return Scheduler(.action);
+        }
+    },
+});
+
 /// AMQP driver configuration
 const amqp_driver = amqp.Driver
     .new(.amqp)
@@ -704,7 +745,7 @@ const cron_driver = cron.Driver
     .new(.cron)
     .listen(true)
     .jobs(1)
-    .routes(cron.From(CronRoutes) ++ cron.From(amqp.Replay) ++ protocol.use(struct {
+    .routes(cron.From(CronRoutes) ++ cron.From(amqp.Replay) ++ cron.From(SecretConfig.Timers) ++ protocol.use(struct {
         pub const kind = .cron;
     }, protocols, RouteContext))
     .build();
@@ -749,7 +790,7 @@ const action_driver = action.Driver
     .new(.action)
     .listen(false)
     .jobs(0)
-    .routes(action.From(ActionRoutes))
+    .routes(action.From(ActionRoutes) ++ action.From(SecretConfig.Actions))
     .build();
 
 /// The sqlite driver: non-listening like action, but config-taking — the
@@ -930,6 +971,10 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         }), allocator)
         // Register app-specific config resolver
         .with(.all, kwatcher.default.config(AppConfig, "app"), allocator)
+        // Register the kw-config snapshot factories: handlers inject
+        // `kw_config.Resolved(AppConfig)` (and `Resolved(Config)`) as plain
+        // structs whose secret fields are ?T — null until resolved.
+        .with(.all, SecretConfig.Deps, allocator)
         // Register the base server's own config (kwev recording directory etc.)
         .with(.all, kwatcher.default.config(kwatcher.server.Config, "server"), allocator)
         .with(.public, kwatcher.default.config(http.middleware.Cors.Config, "middleware.cors"), allocator)
