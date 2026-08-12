@@ -47,14 +47,40 @@
     },
     "kw-amqp_2": {
       "inputs": {
-        "kw-cache": "kw-cache_35",
-        "kw-core": "kw-core_111",
+        "kw-cache": "kw-cache_8",
+        "kw-core": "kw-core_24",
         "kw-nix": [
+          "kw-config",
           "kw-protocol",
           "kw-nix"
         ],
         "rabbitmq-c": "rabbitmq-c_2",
         "zamqp": "zamqp_2"
+      },
+      "locked": {
+        "lastModified": 1786463700,
+        "narHash": "sha256-q3UWuVh62cms47OmyD4j+mcQrbIU4gEzwUHizQi/bR4=",
+        "ref": "refs/heads/master",
+        "rev": "188b45cd4e4862f39cca453795e50e11d3667b54",
+        "revCount": 53,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-amqp.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-amqp.git"
+      }
+    },
+    "kw-amqp_3": {
+      "inputs": {
+        "kw-cache": "kw-cache_36",
+        "kw-core": "kw-core_116",
+        "kw-nix": [
+          "kw-protocol",
+          "kw-nix"
+        ],
+        "rabbitmq-c": "rabbitmq-c_3",
+        "zamqp": "zamqp_3"
       },
       "locked": {
         "lastModified": 1786463700,
@@ -163,7 +189,7 @@
     },
     "kw-auth-oidc_3": {
       "inputs": {
-        "kw-core": "kw-core_24",
+        "kw-core": "kw-core_29",
         "kw-http": "kw-http_5",
         "kw-http-client": "kw-http-client_3",
         "kw-nix": [
@@ -187,7 +213,7 @@
     },
     "kw-auth-oidc_4": {
       "inputs": {
-        "kw-core": "kw-core_37",
+        "kw-core": "kw-core_42",
         "kw-http": "kw-http_8",
         "kw-http-client": "kw-http-client_4",
         "kw-nix": [
@@ -213,7 +239,7 @@
     },
     "kw-auth-oidc_5": {
       "inputs": {
-        "kw-core": "kw-core_50",
+        "kw-core": "kw-core_55",
         "kw-http": "kw-http_11",
         "kw-http-client": "kw-http-client_5",
         "kw-nix": [
@@ -238,7 +264,7 @@
     },
     "kw-auth-oidc_6": {
       "inputs": {
-        "kw-core": "kw-core_71",
+        "kw-core": "kw-core_76",
         "kw-http": "kw-http_16",
         "kw-http-client": "kw-http-client_6",
         "kw-nix": [
@@ -285,10 +311,11 @@
     },
     "kw-cache_10": {
       "inputs": {
-        "kw-core": "kw-core_30",
+        "kw-core": "kw-core_32",
         "kw-nix": [
           "kw-docgen",
-          "kw-http",
+          "kw-auth-oidc",
+          "kw-http-client",
           "kw-nix"
         ]
       },
@@ -308,10 +335,9 @@
     },
     "kw-cache_11": {
       "inputs": {
-        "kw-core": "kw-core_33",
+        "kw-core": "kw-core_35",
         "kw-nix": [
           "kw-docgen",
-          "kw-http-template",
           "kw-http",
           "kw-nix"
         ]
@@ -333,6 +359,30 @@
     "kw-cache_12": {
       "inputs": {
         "kw-core": "kw-core_38",
+        "kw-nix": [
+          "kw-docgen",
+          "kw-http-template",
+          "kw-http",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786463570,
+        "narHash": "sha256-9DeBNHY380jITb9h85E5a8Q38BmU31ude4SzoT/Mzzo=",
+        "ref": "refs/heads/master",
+        "rev": "846b680bd592581a6364af1ccde0e55b60e89de5",
+        "revCount": 29,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
+      }
+    },
+    "kw-cache_13": {
+      "inputs": {
+        "kw-core": "kw-core_43",
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-asyncapi",
@@ -356,9 +406,9 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
       }
     },
-    "kw-cache_13": {
+    "kw-cache_14": {
       "inputs": {
-        "kw-core": "kw-core_40",
+        "kw-core": "kw-core_45",
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-asyncapi",
@@ -382,39 +432,13 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
       }
     },
-    "kw-cache_14": {
-      "inputs": {
-        "kw-core": "kw-core_43",
-        "kw-nix": [
-          "kw-docgen-amqp",
-          "kw-asyncapi",
-          "kw-docgen",
-          "kw-http",
-          "kw-nix"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786463570,
-        "narHash": "sha256-9DeBNHY380jITb9h85E5a8Q38BmU31ude4SzoT/Mzzo=",
-        "ref": "refs/heads/master",
-        "rev": "846b680bd592581a6364af1ccde0e55b60e89de5",
-        "revCount": 29,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
-      }
-    },
     "kw-cache_15": {
       "inputs": {
-        "kw-core": "kw-core_46",
+        "kw-core": "kw-core_48",
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
-          "kw-http-template",
           "kw-http",
           "kw-nix"
         ]
@@ -438,8 +462,9 @@
         "kw-core": "kw-core_51",
         "kw-nix": [
           "kw-docgen-amqp",
+          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
+          "kw-http-template",
           "kw-http",
           "kw-nix"
         ]
@@ -460,7 +485,32 @@
     },
     "kw-cache_17": {
       "inputs": {
-        "kw-core": "kw-core_53",
+        "kw-core": "kw-core_56",
+        "kw-nix": [
+          "kw-docgen-amqp",
+          "kw-docgen",
+          "kw-auth-oidc",
+          "kw-http",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786463570,
+        "narHash": "sha256-9DeBNHY380jITb9h85E5a8Q38BmU31ude4SzoT/Mzzo=",
+        "ref": "refs/heads/master",
+        "rev": "846b680bd592581a6364af1ccde0e55b60e89de5",
+        "revCount": 29,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
+      }
+    },
+    "kw-cache_18": {
+      "inputs": {
+        "kw-core": "kw-core_58",
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
@@ -483,37 +533,12 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
       }
     },
-    "kw-cache_18": {
-      "inputs": {
-        "kw-core": "kw-core_56",
-        "kw-nix": [
-          "kw-docgen-amqp",
-          "kw-docgen",
-          "kw-http",
-          "kw-nix"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786463570,
-        "narHash": "sha256-9DeBNHY380jITb9h85E5a8Q38BmU31ude4SzoT/Mzzo=",
-        "ref": "refs/heads/master",
-        "rev": "846b680bd592581a6364af1ccde0e55b60e89de5",
-        "revCount": 29,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
-      }
-    },
     "kw-cache_19": {
       "inputs": {
-        "kw-core": "kw-core_59",
+        "kw-core": "kw-core_61",
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
-          "kw-http-template",
           "kw-http",
           "kw-nix"
         ]
@@ -559,9 +584,11 @@
     },
     "kw-cache_20": {
       "inputs": {
-        "kw-core": "kw-core_65",
+        "kw-core": "kw-core_64",
         "kw-nix": [
-          "kw-docgen-cron",
+          "kw-docgen-amqp",
+          "kw-docgen",
+          "kw-http-template",
           "kw-http",
           "kw-nix"
         ]
@@ -582,7 +609,30 @@
     },
     "kw-cache_21": {
       "inputs": {
-        "kw-core": "kw-core_68",
+        "kw-core": "kw-core_70",
+        "kw-nix": [
+          "kw-docgen-cron",
+          "kw-http",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786463570,
+        "narHash": "sha256-9DeBNHY380jITb9h85E5a8Q38BmU31ude4SzoT/Mzzo=",
+        "ref": "refs/heads/master",
+        "rev": "846b680bd592581a6364af1ccde0e55b60e89de5",
+        "revCount": 29,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
+      }
+    },
+    "kw-cache_22": {
+      "inputs": {
+        "kw-core": "kw-core_73",
         "kw-nix": [
           "kw-docgen-cron",
           "kw-http-template",
@@ -604,9 +654,9 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
       }
     },
-    "kw-cache_22": {
+    "kw-cache_23": {
       "inputs": {
-        "kw-core": "kw-core_72",
+        "kw-core": "kw-core_77",
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
@@ -629,9 +679,9 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
       }
     },
-    "kw-cache_23": {
+    "kw-cache_24": {
       "inputs": {
-        "kw-core": "kw-core_74",
+        "kw-core": "kw-core_79",
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
@@ -654,37 +704,12 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
       }
     },
-    "kw-cache_24": {
-      "inputs": {
-        "kw-core": "kw-core_77",
-        "kw-nix": [
-          "kw-docgen-http",
-          "kw-docgen",
-          "kw-http",
-          "kw-nix"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786463570,
-        "narHash": "sha256-9DeBNHY380jITb9h85E5a8Q38BmU31ude4SzoT/Mzzo=",
-        "ref": "refs/heads/master",
-        "rev": "846b680bd592581a6364af1ccde0e55b60e89de5",
-        "revCount": 29,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
-      }
-    },
     "kw-cache_25": {
       "inputs": {
-        "kw-core": "kw-core_80",
+        "kw-core": "kw-core_82",
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
-          "kw-http-template",
           "kw-http",
           "kw-nix"
         ]
@@ -705,9 +730,11 @@
     },
     "kw-cache_26": {
       "inputs": {
-        "kw-core": "kw-core_84",
+        "kw-core": "kw-core_85",
         "kw-nix": [
           "kw-docgen-http",
+          "kw-docgen",
+          "kw-http-template",
           "kw-http",
           "kw-nix"
         ]
@@ -728,7 +755,30 @@
     },
     "kw-cache_27": {
       "inputs": {
-        "kw-core": "kw-core_87",
+        "kw-core": "kw-core_89",
+        "kw-nix": [
+          "kw-docgen-http",
+          "kw-http",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786463570,
+        "narHash": "sha256-9DeBNHY380jITb9h85E5a8Q38BmU31ude4SzoT/Mzzo=",
+        "ref": "refs/heads/master",
+        "rev": "846b680bd592581a6364af1ccde0e55b60e89de5",
+        "revCount": 29,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
+      }
+    },
+    "kw-cache_28": {
+      "inputs": {
+        "kw-core": "kw-core_92",
         "kw-nix": [
           "kw-docgen-http",
           "kw-http-template",
@@ -750,35 +800,11 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
       }
     },
-    "kw-cache_28": {
-      "inputs": {
-        "kw-core": "kw-core_90",
-        "kw-nix": [
-          "kw-docgen-signal",
-          "kw-http",
-          "kw-nix"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786463570,
-        "narHash": "sha256-9DeBNHY380jITb9h85E5a8Q38BmU31ude4SzoT/Mzzo=",
-        "ref": "refs/heads/master",
-        "rev": "846b680bd592581a6364af1ccde0e55b60e89de5",
-        "revCount": 29,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
-      }
-    },
     "kw-cache_29": {
       "inputs": {
-        "kw-core": "kw-core_93",
+        "kw-core": "kw-core_95",
         "kw-nix": [
           "kw-docgen-signal",
-          "kw-http-template",
           "kw-http",
           "kw-nix"
         ]
@@ -824,9 +850,10 @@
     },
     "kw-cache_30": {
       "inputs": {
-        "kw-core": "kw-core_96",
+        "kw-core": "kw-core_98",
         "kw-nix": [
-          "kw-docgen-sqlite",
+          "kw-docgen-signal",
+          "kw-http-template",
           "kw-http",
           "kw-nix"
         ]
@@ -847,7 +874,30 @@
     },
     "kw-cache_31": {
       "inputs": {
-        "kw-core": "kw-core_99",
+        "kw-core": "kw-core_101",
+        "kw-nix": [
+          "kw-docgen-sqlite",
+          "kw-http",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786463570,
+        "narHash": "sha256-9DeBNHY380jITb9h85E5a8Q38BmU31ude4SzoT/Mzzo=",
+        "ref": "refs/heads/master",
+        "rev": "846b680bd592581a6364af1ccde0e55b60e89de5",
+        "revCount": 29,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
+      }
+    },
+    "kw-cache_32": {
+      "inputs": {
+        "kw-core": "kw-core_104",
         "kw-nix": [
           "kw-docgen-sqlite",
           "kw-http-template",
@@ -869,9 +919,9 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
       }
     },
-    "kw-cache_32": {
+    "kw-cache_33": {
       "inputs": {
-        "kw-core": "kw-core_102",
+        "kw-core": "kw-core_107",
         "kw-nix": [
           "kw-http",
           "kw-nix"
@@ -891,9 +941,9 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
       }
     },
-    "kw-cache_33": {
+    "kw-cache_34": {
       "inputs": {
-        "kw-core": "kw-core_104",
+        "kw-core": "kw-core_109",
         "kw-nix": [
           "kw-http-client",
           "kw-nix"
@@ -913,9 +963,9 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
       }
     },
-    "kw-cache_34": {
+    "kw-cache_35": {
       "inputs": {
-        "kw-core": "kw-core_107",
+        "kw-core": "kw-core_112",
         "kw-nix": [
           "kw-http-template",
           "kw-http",
@@ -936,9 +986,9 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
       }
     },
-    "kw-cache_35": {
+    "kw-cache_36": {
       "inputs": {
-        "kw-core": "kw-core_110",
+        "kw-core": "kw-core_115",
         "kw-nix": [
           "kw-protocol",
           "kw-amqp",
@@ -1056,7 +1106,31 @@
     },
     "kw-cache_8": {
       "inputs": {
-        "kw-core": "kw-core_25",
+        "kw-core": "kw-core_23",
+        "kw-nix": [
+          "kw-config",
+          "kw-protocol",
+          "kw-amqp",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786463570,
+        "narHash": "sha256-9DeBNHY380jITb9h85E5a8Q38BmU31ude4SzoT/Mzzo=",
+        "ref": "refs/heads/master",
+        "rev": "846b680bd592581a6364af1ccde0e55b60e89de5",
+        "revCount": 29,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
+      }
+    },
+    "kw-cache_9": {
+      "inputs": {
+        "kw-core": "kw-core_30",
         "kw-nix": [
           "kw-docgen",
           "kw-auth-oidc",
@@ -1078,28 +1152,26 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
       }
     },
-    "kw-cache_9": {
+    "kw-config": {
       "inputs": {
-        "kw-core": "kw-core_27",
+        "kw-core": "kw-core_22",
         "kw-nix": [
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
           "kw-nix"
-        ]
+        ],
+        "kw-protocol": "kw-protocol"
       },
       "locked": {
-        "lastModified": 1786463570,
-        "narHash": "sha256-9DeBNHY380jITb9h85E5a8Q38BmU31ude4SzoT/Mzzo=",
+        "lastModified": 1786497671,
+        "narHash": "sha256-P+LsA3blfBcaroFci5cOIhq2RYndxuqgr/zpjgVZqE8=",
         "ref": "refs/heads/master",
-        "rev": "846b680bd592581a6364af1ccde0e55b60e89de5",
-        "revCount": 29,
+        "rev": "7014ac435b5dfaebc6c994f599625a2da12affec",
+        "revCount": 3,
         "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-config.git"
       },
       "original": {
         "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cache.git"
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-config.git"
       }
     },
     "kw-core": {
@@ -1153,11 +1225,9 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-sqlite",
-          "kw-http-template",
-          "kw-http",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_100"
+        "kw-zettel": "kw-zettel_101"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -1177,28 +1247,6 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-sqlite",
-          "kw-sqlite",
-          "kw-nix"
-        ],
-        "kw-zettel": "kw-zettel_101"
-      },
-      "locked": {
-        "lastModified": 1786459473,
-        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
-        "ref": "refs/heads/master",
-        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
-        "revCount": 83,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
-      }
-    },
-    "kw-core_102": {
-      "inputs": {
-        "kw-nix": [
           "kw-http",
           "kw-cache",
           "kw-nix"
@@ -1219,9 +1267,10 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_103": {
+    "kw-core_102": {
       "inputs": {
         "kw-nix": [
+          "kw-docgen-sqlite",
           "kw-http",
           "kw-nix"
         ],
@@ -1241,11 +1290,11 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_104": {
+    "kw-core_103": {
       "inputs": {
         "kw-nix": [
-          "kw-http-client",
-          "kw-cache",
+          "kw-docgen-sqlite",
+          "kw-http-template",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_104"
@@ -1264,10 +1313,13 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_105": {
+    "kw-core_104": {
       "inputs": {
         "kw-nix": [
-          "kw-http-client",
+          "kw-docgen-sqlite",
+          "kw-http-template",
+          "kw-http",
+          "kw-cache",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_105"
@@ -1286,10 +1338,12 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_106": {
+    "kw-core_105": {
       "inputs": {
         "kw-nix": [
+          "kw-docgen-sqlite",
           "kw-http-template",
+          "kw-http",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_106"
@@ -1308,12 +1362,11 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_107": {
+    "kw-core_106": {
       "inputs": {
         "kw-nix": [
-          "kw-http-template",
-          "kw-http",
-          "kw-cache",
+          "kw-docgen-sqlite",
+          "kw-sqlite",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_107"
@@ -1332,11 +1385,11 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_108": {
+    "kw-core_107": {
       "inputs": {
         "kw-nix": [
-          "kw-http-template",
           "kw-http",
+          "kw-cache",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_108"
@@ -1355,13 +1408,36 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_109": {
+    "kw-core_108": {
       "inputs": {
         "kw-nix": [
-          "kw-kwev",
+          "kw-http",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_109"
+      },
+      "locked": {
+        "lastModified": 1786459473,
+        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
+        "ref": "refs/heads/master",
+        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
+        "revCount": 83,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      }
+    },
+    "kw-core_109": {
+      "inputs": {
+        "kw-nix": [
+          "kw-http-client",
+          "kw-cache",
+          "kw-nix"
+        ],
+        "kw-zettel": "kw-zettel_110"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -1404,32 +1480,7 @@
     "kw-core_110": {
       "inputs": {
         "kw-nix": [
-          "kw-protocol",
-          "kw-amqp",
-          "kw-cache",
-          "kw-nix"
-        ],
-        "kw-zettel": "kw-zettel_110"
-      },
-      "locked": {
-        "lastModified": 1786459473,
-        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
-        "ref": "refs/heads/master",
-        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
-        "revCount": 83,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
-      }
-    },
-    "kw-core_111": {
-      "inputs": {
-        "kw-nix": [
-          "kw-protocol",
-          "kw-amqp",
+          "kw-http-client",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_111"
@@ -1448,10 +1499,10 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_112": {
+    "kw-core_111": {
       "inputs": {
         "kw-nix": [
-          "kw-protocol",
+          "kw-http-template",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_112"
@@ -1470,11 +1521,12 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_113": {
+    "kw-core_112": {
       "inputs": {
         "kw-nix": [
-          "kw-protocol",
-          "kw-cron",
+          "kw-http-template",
+          "kw-http",
+          "kw-cache",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_113"
@@ -1493,10 +1545,33 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
+    "kw-core_113": {
+      "inputs": {
+        "kw-nix": [
+          "kw-http-template",
+          "kw-http",
+          "kw-nix"
+        ],
+        "kw-zettel": "kw-zettel_114"
+      },
+      "locked": {
+        "lastModified": 1786459473,
+        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
+        "ref": "refs/heads/master",
+        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
+        "revCount": 83,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      }
+    },
     "kw-core_114": {
       "inputs": {
         "kw-nix": [
-          "kw-runtime",
+          "kw-kwev",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_115"
@@ -1518,8 +1593,9 @@
     "kw-core_115": {
       "inputs": {
         "kw-nix": [
-          "kw-runtime",
-          "kw-kwev",
+          "kw-protocol",
+          "kw-amqp",
+          "kw-cache",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_116"
@@ -1541,7 +1617,8 @@
     "kw-core_116": {
       "inputs": {
         "kw-nix": [
-          "kw-signal",
+          "kw-protocol",
+          "kw-amqp",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_117"
@@ -1563,10 +1640,55 @@
     "kw-core_117": {
       "inputs": {
         "kw-nix": [
-          "kw-sqlite",
+          "kw-protocol",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_118"
+      },
+      "locked": {
+        "lastModified": 1786459473,
+        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
+        "ref": "refs/heads/master",
+        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
+        "revCount": 83,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      }
+    },
+    "kw-core_118": {
+      "inputs": {
+        "kw-nix": [
+          "kw-protocol",
+          "kw-cron",
+          "kw-nix"
+        ],
+        "kw-zettel": "kw-zettel_119"
+      },
+      "locked": {
+        "lastModified": 1786459473,
+        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
+        "ref": "refs/heads/master",
+        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
+        "revCount": 83,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      }
+    },
+    "kw-core_119": {
+      "inputs": {
+        "kw-nix": [
+          "kw-runtime",
+          "kw-nix"
+        ],
+        "kw-zettel": "kw-zettel_121"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -1591,6 +1713,73 @@
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_12"
+      },
+      "locked": {
+        "lastModified": 1786459473,
+        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
+        "ref": "refs/heads/master",
+        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
+        "revCount": 83,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      }
+    },
+    "kw-core_120": {
+      "inputs": {
+        "kw-nix": [
+          "kw-runtime",
+          "kw-kwev",
+          "kw-nix"
+        ],
+        "kw-zettel": "kw-zettel_122"
+      },
+      "locked": {
+        "lastModified": 1786459473,
+        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
+        "ref": "refs/heads/master",
+        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
+        "revCount": 83,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      }
+    },
+    "kw-core_121": {
+      "inputs": {
+        "kw-nix": [
+          "kw-signal",
+          "kw-nix"
+        ],
+        "kw-zettel": "kw-zettel_123"
+      },
+      "locked": {
+        "lastModified": 1786459473,
+        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
+        "ref": "refs/heads/master",
+        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
+        "revCount": 83,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      }
+    },
+    "kw-core_122": {
+      "inputs": {
+        "kw-nix": [
+          "kw-sqlite",
+          "kw-nix"
+        ],
+        "kw-zettel": "kw-zettel_124"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -1848,6 +2037,7 @@
     "kw-core_22": {
       "inputs": {
         "kw-nix": [
+          "kw-config",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_22"
@@ -1869,7 +2059,10 @@
     "kw-core_23": {
       "inputs": {
         "kw-nix": [
-          "kw-cron",
+          "kw-config",
+          "kw-protocol",
+          "kw-amqp",
+          "kw-cache",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_23"
@@ -1891,8 +2084,9 @@
     "kw-core_24": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen",
-          "kw-auth-oidc",
+          "kw-config",
+          "kw-protocol",
+          "kw-amqp",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_24"
@@ -1914,10 +2108,8 @@
     "kw-core_25": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http",
-          "kw-cache",
+          "kw-config",
+          "kw-protocol",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_25"
@@ -1939,9 +2131,9 @@
     "kw-core_26": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http",
+          "kw-config",
+          "kw-protocol",
+          "kw-cron",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_26"
@@ -1963,13 +2155,9 @@
     "kw-core_27": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
-          "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_27"
+        "kw-zettel": "kw-zettel_28"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -1988,12 +2176,10 @@
     "kw-core_28": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
+          "kw-cron",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_28"
+        "kw-zettel": "kw-zettel_29"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2013,9 +2199,10 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_29"
+        "kw-zettel": "kw-zettel_30"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2057,11 +2244,12 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-http",
           "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_30"
+        "kw-zettel": "kw-zettel_31"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2081,10 +2269,11 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-http",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_31"
+        "kw-zettel": "kw-zettel_32"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2104,31 +2293,8 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen",
-          "kw-http-template",
-          "kw-nix"
-        ],
-        "kw-zettel": "kw-zettel_32"
-      },
-      "locked": {
-        "lastModified": 1786459473,
-        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
-        "ref": "refs/heads/master",
-        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
-        "revCount": 83,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
-      }
-    },
-    "kw-core_33": {
-      "inputs": {
-        "kw-nix": [
-          "kw-docgen",
-          "kw-http-template",
-          "kw-http",
+          "kw-auth-oidc",
+          "kw-http-client",
           "kw-cache",
           "kw-nix"
         ],
@@ -2148,15 +2314,37 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
+    "kw-core_33": {
+      "inputs": {
+        "kw-nix": [
+          "kw-docgen",
+          "kw-auth-oidc",
+          "kw-http-client",
+          "kw-nix"
+        ],
+        "kw-zettel": "kw-zettel_34"
+      },
+      "locked": {
+        "lastModified": 1786459473,
+        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
+        "ref": "refs/heads/master",
+        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
+        "revCount": 83,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      }
+    },
     "kw-core_34": {
       "inputs": {
         "kw-nix": [
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_34"
+        "kw-zettel": "kw-zettel_35"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2176,10 +2364,11 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen",
-          "kw-runtime",
+          "kw-http",
+          "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_35"
+        "kw-zettel": "kw-zettel_36"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2199,33 +2388,7 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen",
-          "kw-runtime",
-          "kw-kwev",
-          "kw-nix"
-        ],
-        "kw-zettel": "kw-zettel_36"
-      },
-      "locked": {
-        "lastModified": 1786459473,
-        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
-        "ref": "refs/heads/master",
-        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
-        "revCount": 83,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
-      }
-    },
-    "kw-core_37": {
-      "inputs": {
-        "kw-nix": [
-          "kw-docgen-amqp",
-          "kw-asyncapi",
-          "kw-docgen",
-          "kw-auth-oidc",
+          "kw-http",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_37"
@@ -2244,15 +2407,11 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_38": {
+    "kw-core_37": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-amqp",
-          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http",
-          "kw-cache",
+          "kw-http-template",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_38"
@@ -2271,17 +2430,40 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_39": {
+    "kw-core_38": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-amqp",
-          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
+          "kw-http-template",
           "kw-http",
+          "kw-cache",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_39"
+      },
+      "locked": {
+        "lastModified": 1786459473,
+        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
+        "ref": "refs/heads/master",
+        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
+        "revCount": 83,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      }
+    },
+    "kw-core_39": {
+      "inputs": {
+        "kw-nix": [
+          "kw-docgen",
+          "kw-http-template",
+          "kw-http",
+          "kw-nix"
+        ],
+        "kw-zettel": "kw-zettel_40"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2324,15 +2506,11 @@
     "kw-core_40": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-amqp",
-          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
-          "kw-cache",
+          "kw-runtime",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_40"
+        "kw-zettel": "kw-zettel_41"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2351,14 +2529,12 @@
     "kw-core_41": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-amqp",
-          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
+          "kw-runtime",
+          "kw-kwev",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_41"
+        "kw-zettel": "kw-zettel_42"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2380,9 +2556,10 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_42"
+        "kw-zettel": "kw-zettel_43"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2404,11 +2581,12 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-http",
           "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_43"
+        "kw-zettel": "kw-zettel_44"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2430,10 +2608,11 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-http",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_44"
+        "kw-zettel": "kw-zettel_45"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2455,10 +2634,12 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
-          "kw-http-template",
+          "kw-auth-oidc",
+          "kw-http-client",
+          "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_45"
+        "kw-zettel": "kw-zettel_46"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2480,12 +2661,11 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
-          "kw-cache",
+          "kw-auth-oidc",
+          "kw-http-client",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_46"
+        "kw-zettel": "kw-zettel_47"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2507,11 +2687,9 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_47"
+        "kw-zettel": "kw-zettel_48"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2533,10 +2711,11 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
-          "kw-runtime",
+          "kw-http",
+          "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_48"
+        "kw-zettel": "kw-zettel_49"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2558,11 +2737,10 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
-          "kw-runtime",
-          "kw-kwev",
+          "kw-http",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_49"
+        "kw-zettel": "kw-zettel_50"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2608,11 +2786,12 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-amqp",
+          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
+          "kw-http-template",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_50"
+        "kw-zettel": "kw-zettel_51"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2632,13 +2811,14 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-amqp",
+          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
+          "kw-http-template",
           "kw-http",
           "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_51"
+        "kw-zettel": "kw-zettel_52"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2658,12 +2838,13 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-amqp",
+          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
+          "kw-http-template",
           "kw-http",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_52"
+        "kw-zettel": "kw-zettel_53"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2683,13 +2864,12 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-amqp",
+          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
-          "kw-cache",
+          "kw-runtime",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_53"
+        "kw-zettel": "kw-zettel_54"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2709,12 +2889,13 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-amqp",
+          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
+          "kw-runtime",
+          "kw-kwev",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_54"
+        "kw-zettel": "kw-zettel_55"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2735,9 +2916,10 @@
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_55"
+        "kw-zettel": "kw-zettel_56"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2758,11 +2940,12 @@
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-http",
           "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_56"
+        "kw-zettel": "kw-zettel_57"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2783,10 +2966,11 @@
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-http",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_57"
+        "kw-zettel": "kw-zettel_58"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2807,10 +2991,12 @@
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
-          "kw-http-template",
+          "kw-auth-oidc",
+          "kw-http-client",
+          "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_58"
+        "kw-zettel": "kw-zettel_59"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2831,12 +3017,11 @@
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
-          "kw-cache",
+          "kw-auth-oidc",
+          "kw-http-client",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_59"
+        "kw-zettel": "kw-zettel_60"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2882,11 +3067,9 @@
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_60"
+        "kw-zettel": "kw-zettel_61"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2907,10 +3090,11 @@
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
-          "kw-runtime",
+          "kw-http",
+          "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_61"
+        "kw-zettel": "kw-zettel_62"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -2931,30 +3115,7 @@
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
-          "kw-runtime",
-          "kw-kwev",
-          "kw-nix"
-        ],
-        "kw-zettel": "kw-zettel_62"
-      },
-      "locked": {
-        "lastModified": 1786459473,
-        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
-        "ref": "refs/heads/master",
-        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
-        "revCount": 83,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
-      }
-    },
-    "kw-core_63": {
-      "inputs": {
-        "kw-nix": [
-          "kw-docgen-cron",
+          "kw-http",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_63"
@@ -2973,11 +3134,12 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_64": {
+    "kw-core_63": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-cron",
-          "kw-cron",
+          "kw-docgen-amqp",
+          "kw-docgen",
+          "kw-http-template",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_64"
@@ -2996,10 +3158,12 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_65": {
+    "kw-core_64": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-cron",
+          "kw-docgen-amqp",
+          "kw-docgen",
+          "kw-http-template",
           "kw-http",
           "kw-cache",
           "kw-nix"
@@ -3020,10 +3184,12 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_66": {
+    "kw-core_65": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-cron",
+          "kw-docgen-amqp",
+          "kw-docgen",
+          "kw-http-template",
           "kw-http",
           "kw-nix"
         ],
@@ -3043,14 +3209,40 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_67": {
+    "kw-core_66": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-cron",
-          "kw-http-template",
+          "kw-docgen-amqp",
+          "kw-docgen",
+          "kw-runtime",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_67"
+      },
+      "locked": {
+        "lastModified": 1786459473,
+        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
+        "ref": "refs/heads/master",
+        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
+        "revCount": 83,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      }
+    },
+    "kw-core_67": {
+      "inputs": {
+        "kw-nix": [
+          "kw-docgen-amqp",
+          "kw-docgen",
+          "kw-runtime",
+          "kw-kwev",
+          "kw-nix"
+        ],
+        "kw-zettel": "kw-zettel_68"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3070,12 +3262,9 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-cron",
-          "kw-http-template",
-          "kw-http",
-          "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_68"
+        "kw-zettel": "kw-zettel_69"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3095,11 +3284,10 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-cron",
-          "kw-http-template",
-          "kw-http",
+          "kw-cron",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_69"
+        "kw-zettel": "kw-zettel_70"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3144,31 +3332,9 @@
     "kw-core_70": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-http",
-          "kw-nix"
-        ],
-        "kw-zettel": "kw-zettel_70"
-      },
-      "locked": {
-        "lastModified": 1786459473,
-        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
-        "ref": "refs/heads/master",
-        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
-        "revCount": 83,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
-      }
-    },
-    "kw-core_71": {
-      "inputs": {
-        "kw-nix": [
-          "kw-docgen-http",
-          "kw-docgen",
-          "kw-auth-oidc",
+          "kw-docgen-cron",
+          "kw-http",
+          "kw-cache",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_71"
@@ -3187,14 +3353,11 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_72": {
+    "kw-core_71": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-http",
-          "kw-docgen",
-          "kw-auth-oidc",
+          "kw-docgen-cron",
           "kw-http",
-          "kw-cache",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_72"
@@ -3213,13 +3376,11 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_73": {
+    "kw-core_72": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-http",
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http",
+          "kw-docgen-cron",
+          "kw-http-template",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_73"
@@ -3238,13 +3399,12 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_74": {
+    "kw-core_73": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-http",
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
+          "kw-docgen-cron",
+          "kw-http-template",
+          "kw-http",
           "kw-cache",
           "kw-nix"
         ],
@@ -3264,16 +3424,37 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
+    "kw-core_74": {
+      "inputs": {
+        "kw-nix": [
+          "kw-docgen-cron",
+          "kw-http-template",
+          "kw-http",
+          "kw-nix"
+        ],
+        "kw-zettel": "kw-zettel_75"
+      },
+      "locked": {
+        "lastModified": 1786459473,
+        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
+        "ref": "refs/heads/master",
+        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
+        "revCount": 83,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      }
+    },
     "kw-core_75": {
       "inputs": {
         "kw-nix": [
           "kw-docgen-http",
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_75"
+        "kw-zettel": "kw-zettel_76"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3294,9 +3475,10 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_76"
+        "kw-zettel": "kw-zettel_77"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3317,11 +3499,12 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-http",
           "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_77"
+        "kw-zettel": "kw-zettel_78"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3342,10 +3525,11 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-http",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_78"
+        "kw-zettel": "kw-zettel_79"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3366,10 +3550,12 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
-          "kw-http-template",
+          "kw-auth-oidc",
+          "kw-http-client",
+          "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_79"
+        "kw-zettel": "kw-zettel_80"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3415,12 +3601,11 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
-          "kw-cache",
+          "kw-auth-oidc",
+          "kw-http-client",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_80"
+        "kw-zettel": "kw-zettel_81"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3441,11 +3626,9 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_81"
+        "kw-zettel": "kw-zettel_82"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3466,10 +3649,11 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
-          "kw-runtime",
+          "kw-http",
+          "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_82"
+        "kw-zettel": "kw-zettel_83"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3490,11 +3674,10 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
-          "kw-runtime",
-          "kw-kwev",
+          "kw-http",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_83"
+        "kw-zettel": "kw-zettel_84"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3514,11 +3697,11 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-http",
-          "kw-http",
-          "kw-cache",
+          "kw-docgen",
+          "kw-http-template",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_84"
+        "kw-zettel": "kw-zettel_85"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3538,10 +3721,13 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-http",
+          "kw-docgen",
+          "kw-http-template",
           "kw-http",
+          "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_85"
+        "kw-zettel": "kw-zettel_86"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3561,10 +3747,12 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-http",
+          "kw-docgen",
           "kw-http-template",
+          "kw-http",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_86"
+        "kw-zettel": "kw-zettel_87"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3584,12 +3772,11 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-http",
-          "kw-http-template",
-          "kw-http",
-          "kw-cache",
+          "kw-docgen",
+          "kw-runtime",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_87"
+        "kw-zettel": "kw-zettel_88"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3609,11 +3796,12 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-http",
-          "kw-http-template",
-          "kw-http",
+          "kw-docgen",
+          "kw-runtime",
+          "kw-kwev",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_88"
+        "kw-zettel": "kw-zettel_89"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3632,10 +3820,12 @@
     "kw-core_89": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-signal",
+          "kw-docgen-http",
+          "kw-http",
+          "kw-cache",
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_89"
+        "kw-zettel": "kw-zettel_90"
       },
       "locked": {
         "lastModified": 1786459473,
@@ -3677,31 +3867,7 @@
     "kw-core_90": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-signal",
-          "kw-http",
-          "kw-cache",
-          "kw-nix"
-        ],
-        "kw-zettel": "kw-zettel_90"
-      },
-      "locked": {
-        "lastModified": 1786459473,
-        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
-        "ref": "refs/heads/master",
-        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
-        "revCount": 83,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
-      }
-    },
-    "kw-core_91": {
-      "inputs": {
-        "kw-nix": [
-          "kw-docgen-signal",
+          "kw-docgen-http",
           "kw-http",
           "kw-nix"
         ],
@@ -3721,10 +3887,10 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_92": {
+    "kw-core_91": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-signal",
+          "kw-docgen-http",
           "kw-http-template",
           "kw-nix"
         ],
@@ -3744,10 +3910,10 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_93": {
+    "kw-core_92": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-signal",
+          "kw-docgen-http",
           "kw-http-template",
           "kw-http",
           "kw-cache",
@@ -3769,10 +3935,10 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_94": {
+    "kw-core_93": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-signal",
+          "kw-docgen-http",
           "kw-http-template",
           "kw-http",
           "kw-nix"
@@ -3793,10 +3959,10 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_95": {
+    "kw-core_94": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-sqlite",
+          "kw-docgen-signal",
           "kw-nix"
         ],
         "kw-zettel": "kw-zettel_95"
@@ -3815,10 +3981,10 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_96": {
+    "kw-core_95": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-sqlite",
+          "kw-docgen-signal",
           "kw-http",
           "kw-cache",
           "kw-nix"
@@ -3839,10 +4005,10 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_97": {
+    "kw-core_96": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-sqlite",
+          "kw-docgen-signal",
           "kw-http",
           "kw-nix"
         ],
@@ -3862,10 +4028,10 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_98": {
+    "kw-core_97": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-sqlite",
+          "kw-docgen-signal",
           "kw-http-template",
           "kw-nix"
         ],
@@ -3885,10 +4051,10 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
-    "kw-core_99": {
+    "kw-core_98": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-sqlite",
+          "kw-docgen-signal",
           "kw-http-template",
           "kw-http",
           "kw-cache",
@@ -3910,10 +4076,36 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
       }
     },
+    "kw-core_99": {
+      "inputs": {
+        "kw-nix": [
+          "kw-docgen-signal",
+          "kw-http-template",
+          "kw-http",
+          "kw-nix"
+        ],
+        "kw-zettel": "kw-zettel_100"
+      },
+      "locked": {
+        "lastModified": 1786459473,
+        "narHash": "sha256-RBAVZPWgTZQI0JYgrlo0rV7l1AEkjyfFO9yID9YaJOo=",
+        "ref": "refs/heads/master",
+        "rev": "59814558621892a92dc89f6057389453ecbf10ec",
+        "revCount": 83,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-core.git"
+      }
+    },
     "kw-cron": {
       "inputs": {
-        "kw-core": "kw-core_23",
+        "kw-core": "kw-core_26",
         "kw-nix": [
+          "kw-config",
+          "kw-protocol",
           "kw-nix"
         ]
       },
@@ -3933,9 +4125,8 @@
     },
     "kw-cron_2": {
       "inputs": {
-        "kw-core": "kw-core_64",
+        "kw-core": "kw-core_28",
         "kw-nix": [
-          "kw-docgen-cron",
           "kw-nix"
         ]
       },
@@ -3955,7 +4146,29 @@
     },
     "kw-cron_3": {
       "inputs": {
-        "kw-core": "kw-core_113",
+        "kw-core": "kw-core_69",
+        "kw-nix": [
+          "kw-docgen-cron",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786463558,
+        "narHash": "sha256-Cj0m7er1HYzL5CZR3Js9DIsBx/h4lqauyKDCiCQXnXA=",
+        "ref": "refs/heads/master",
+        "rev": "46aa0a55708687e79f68366e1d00a8c857a3ddbf",
+        "revCount": 33,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cron.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-cron.git"
+      }
+    },
+    "kw-cron_4": {
+      "inputs": {
+        "kw-core": "kw-core_118",
         "kw-nix": [
           "kw-protocol",
           "kw-nix"
@@ -4027,8 +4240,8 @@
     },
     "kw-docgen-cron": {
       "inputs": {
-        "kw-core": "kw-core_63",
-        "kw-cron": "kw-cron_2",
+        "kw-core": "kw-core_68",
+        "kw-cron": "kw-cron_3",
         "kw-docindex": "kw-docindex_6",
         "kw-http": "kw-http_14",
         "kw-http-template": "kw-http-template_5",
@@ -4052,7 +4265,7 @@
     },
     "kw-docgen-http": {
       "inputs": {
-        "kw-core": "kw-core_70",
+        "kw-core": "kw-core_75",
         "kw-docgen": "kw-docgen_5",
         "kw-docindex": "kw-docindex_8",
         "kw-http": "kw-http_19",
@@ -4098,7 +4311,7 @@
     },
     "kw-docgen-signal": {
       "inputs": {
-        "kw-core": "kw-core_89",
+        "kw-core": "kw-core_94",
         "kw-docindex": "kw-docindex_10",
         "kw-http": "kw-http_21",
         "kw-http-template": "kw-http-template_8",
@@ -4122,7 +4335,7 @@
     },
     "kw-docgen-sqlite": {
       "inputs": {
-        "kw-core": "kw-core_95",
+        "kw-core": "kw-core_100",
         "kw-docindex": "kw-docindex_11",
         "kw-http": "kw-http_23",
         "kw-http-template": "kw-http-template_9",
@@ -4148,7 +4361,7 @@
     "kw-docgen_2": {
       "inputs": {
         "kw-auth-oidc": "kw-auth-oidc_3",
-        "kw-core": "kw-core_29",
+        "kw-core": "kw-core_34",
         "kw-docindex": "kw-docindex_2",
         "kw-http": "kw-http_6",
         "kw-http-template": "kw-http-template_2",
@@ -4174,7 +4387,7 @@
     "kw-docgen_3": {
       "inputs": {
         "kw-auth-oidc": "kw-auth-oidc_4",
-        "kw-core": "kw-core_42",
+        "kw-core": "kw-core_47",
         "kw-docindex": "kw-docindex_3",
         "kw-http": "kw-http_9",
         "kw-http-template": "kw-http-template_3",
@@ -4202,7 +4415,7 @@
     "kw-docgen_4": {
       "inputs": {
         "kw-auth-oidc": "kw-auth-oidc_5",
-        "kw-core": "kw-core_55",
+        "kw-core": "kw-core_60",
         "kw-docindex": "kw-docindex_4",
         "kw-http": "kw-http_12",
         "kw-http-template": "kw-http-template_4",
@@ -4229,7 +4442,7 @@
     "kw-docgen_5": {
       "inputs": {
         "kw-auth-oidc": "kw-auth-oidc_6",
-        "kw-core": "kw-core_76",
+        "kw-core": "kw-core_81",
         "kw-docindex": "kw-docindex_7",
         "kw-http": "kw-http_17",
         "kw-http-template": "kw-http-template_6",
@@ -4567,8 +4780,8 @@
     },
     "kw-http-client_3": {
       "inputs": {
-        "kw-cache": "kw-cache_9",
-        "kw-core": "kw-core_28",
+        "kw-cache": "kw-cache_10",
+        "kw-core": "kw-core_33",
         "kw-http-core": "kw-http-core_8",
         "kw-nix": [
           "kw-docgen",
@@ -4592,8 +4805,8 @@
     },
     "kw-http-client_4": {
       "inputs": {
-        "kw-cache": "kw-cache_13",
-        "kw-core": "kw-core_41",
+        "kw-cache": "kw-cache_14",
+        "kw-core": "kw-core_46",
         "kw-http-core": "kw-http-core_12",
         "kw-nix": [
           "kw-docgen-amqp",
@@ -4619,8 +4832,8 @@
     },
     "kw-http-client_5": {
       "inputs": {
-        "kw-cache": "kw-cache_17",
-        "kw-core": "kw-core_54",
+        "kw-cache": "kw-cache_18",
+        "kw-core": "kw-core_59",
         "kw-http-core": "kw-http-core_16",
         "kw-nix": [
           "kw-docgen-amqp",
@@ -4645,8 +4858,8 @@
     },
     "kw-http-client_6": {
       "inputs": {
-        "kw-cache": "kw-cache_23",
-        "kw-core": "kw-core_75",
+        "kw-cache": "kw-cache_24",
+        "kw-core": "kw-core_80",
         "kw-http-core": "kw-http-core_22",
         "kw-nix": [
           "kw-docgen-http",
@@ -4671,8 +4884,8 @@
     },
     "kw-http-client_7": {
       "inputs": {
-        "kw-cache": "kw-cache_33",
-        "kw-core": "kw-core_105",
+        "kw-cache": "kw-cache_34",
+        "kw-core": "kw-core_110",
         "kw-http-core": "kw-http-core_32",
         "kw-nix": [
           "kw-nix"
@@ -5481,7 +5694,7 @@
     },
     "kw-http-template_10": {
       "inputs": {
-        "kw-core": "kw-core_106",
+        "kw-core": "kw-core_111",
         "kw-http": "kw-http_26",
         "kw-nix": [
           "kw-nix"
@@ -5503,7 +5716,7 @@
     },
     "kw-http-template_2": {
       "inputs": {
-        "kw-core": "kw-core_32",
+        "kw-core": "kw-core_37",
         "kw-http": "kw-http_7",
         "kw-nix": [
           "kw-docgen",
@@ -5526,7 +5739,7 @@
     },
     "kw-http-template_3": {
       "inputs": {
-        "kw-core": "kw-core_45",
+        "kw-core": "kw-core_50",
         "kw-http": "kw-http_10",
         "kw-nix": [
           "kw-docgen-amqp",
@@ -5551,7 +5764,7 @@
     },
     "kw-http-template_4": {
       "inputs": {
-        "kw-core": "kw-core_58",
+        "kw-core": "kw-core_63",
         "kw-http": "kw-http_13",
         "kw-nix": [
           "kw-docgen-amqp",
@@ -5575,7 +5788,7 @@
     },
     "kw-http-template_5": {
       "inputs": {
-        "kw-core": "kw-core_67",
+        "kw-core": "kw-core_72",
         "kw-http": "kw-http_15",
         "kw-nix": [
           "kw-docgen-cron",
@@ -5598,7 +5811,7 @@
     },
     "kw-http-template_6": {
       "inputs": {
-        "kw-core": "kw-core_79",
+        "kw-core": "kw-core_84",
         "kw-http": "kw-http_18",
         "kw-nix": [
           "kw-docgen-http",
@@ -5622,7 +5835,7 @@
     },
     "kw-http-template_7": {
       "inputs": {
-        "kw-core": "kw-core_86",
+        "kw-core": "kw-core_91",
         "kw-http": "kw-http_20",
         "kw-nix": [
           "kw-docgen-http",
@@ -5645,7 +5858,7 @@
     },
     "kw-http-template_8": {
       "inputs": {
-        "kw-core": "kw-core_92",
+        "kw-core": "kw-core_97",
         "kw-http": "kw-http_22",
         "kw-nix": [
           "kw-docgen-signal",
@@ -5668,7 +5881,7 @@
     },
     "kw-http-template_9": {
       "inputs": {
-        "kw-core": "kw-core_98",
+        "kw-core": "kw-core_103",
         "kw-http": "kw-http_24",
         "kw-nix": [
           "kw-docgen-sqlite",
@@ -5691,8 +5904,8 @@
     },
     "kw-http_10": {
       "inputs": {
-        "kw-cache": "kw-cache_15",
-        "kw-core": "kw-core_47",
+        "kw-cache": "kw-cache_16",
+        "kw-core": "kw-core_52",
         "kw-http-core": "kw-http-core_14",
         "kw-nix": [
           "kw-docgen-amqp",
@@ -5718,8 +5931,8 @@
     },
     "kw-http_11": {
       "inputs": {
-        "kw-cache": "kw-cache_16",
-        "kw-core": "kw-core_52",
+        "kw-cache": "kw-cache_17",
+        "kw-core": "kw-core_57",
         "kw-http-core": "kw-http-core_15",
         "kw-nix": [
           "kw-docgen-amqp",
@@ -5744,8 +5957,8 @@
     },
     "kw-http_12": {
       "inputs": {
-        "kw-cache": "kw-cache_18",
-        "kw-core": "kw-core_57",
+        "kw-cache": "kw-cache_19",
+        "kw-core": "kw-core_62",
         "kw-http-core": "kw-http-core_17",
         "kw-nix": [
           "kw-docgen-amqp",
@@ -5769,8 +5982,8 @@
     },
     "kw-http_13": {
       "inputs": {
-        "kw-cache": "kw-cache_19",
-        "kw-core": "kw-core_60",
+        "kw-cache": "kw-cache_20",
+        "kw-core": "kw-core_65",
         "kw-http-core": "kw-http-core_18",
         "kw-nix": [
           "kw-docgen-amqp",
@@ -5795,8 +6008,8 @@
     },
     "kw-http_14": {
       "inputs": {
-        "kw-cache": "kw-cache_20",
-        "kw-core": "kw-core_66",
+        "kw-cache": "kw-cache_21",
+        "kw-core": "kw-core_71",
         "kw-http-core": "kw-http-core_19",
         "kw-nix": [
           "kw-docgen-cron",
@@ -5819,8 +6032,8 @@
     },
     "kw-http_15": {
       "inputs": {
-        "kw-cache": "kw-cache_21",
-        "kw-core": "kw-core_69",
+        "kw-cache": "kw-cache_22",
+        "kw-core": "kw-core_74",
         "kw-http-core": "kw-http-core_20",
         "kw-nix": [
           "kw-docgen-cron",
@@ -5844,8 +6057,8 @@
     },
     "kw-http_16": {
       "inputs": {
-        "kw-cache": "kw-cache_22",
-        "kw-core": "kw-core_73",
+        "kw-cache": "kw-cache_23",
+        "kw-core": "kw-core_78",
         "kw-http-core": "kw-http-core_21",
         "kw-nix": [
           "kw-docgen-http",
@@ -5870,8 +6083,8 @@
     },
     "kw-http_17": {
       "inputs": {
-        "kw-cache": "kw-cache_24",
-        "kw-core": "kw-core_78",
+        "kw-cache": "kw-cache_25",
+        "kw-core": "kw-core_83",
         "kw-http-core": "kw-http-core_23",
         "kw-nix": [
           "kw-docgen-http",
@@ -5895,8 +6108,8 @@
     },
     "kw-http_18": {
       "inputs": {
-        "kw-cache": "kw-cache_25",
-        "kw-core": "kw-core_81",
+        "kw-cache": "kw-cache_26",
+        "kw-core": "kw-core_86",
         "kw-http-core": "kw-http-core_24",
         "kw-nix": [
           "kw-docgen-http",
@@ -5921,8 +6134,8 @@
     },
     "kw-http_19": {
       "inputs": {
-        "kw-cache": "kw-cache_26",
-        "kw-core": "kw-core_85",
+        "kw-cache": "kw-cache_27",
+        "kw-core": "kw-core_90",
         "kw-http-core": "kw-http-core_25",
         "kw-nix": [
           "kw-docgen-http",
@@ -5970,8 +6183,8 @@
     },
     "kw-http_20": {
       "inputs": {
-        "kw-cache": "kw-cache_27",
-        "kw-core": "kw-core_88",
+        "kw-cache": "kw-cache_28",
+        "kw-core": "kw-core_93",
         "kw-http-core": "kw-http-core_26",
         "kw-nix": [
           "kw-docgen-http",
@@ -5995,8 +6208,8 @@
     },
     "kw-http_21": {
       "inputs": {
-        "kw-cache": "kw-cache_28",
-        "kw-core": "kw-core_91",
+        "kw-cache": "kw-cache_29",
+        "kw-core": "kw-core_96",
         "kw-http-core": "kw-http-core_27",
         "kw-nix": [
           "kw-docgen-signal",
@@ -6019,8 +6232,8 @@
     },
     "kw-http_22": {
       "inputs": {
-        "kw-cache": "kw-cache_29",
-        "kw-core": "kw-core_94",
+        "kw-cache": "kw-cache_30",
+        "kw-core": "kw-core_99",
         "kw-http-core": "kw-http-core_28",
         "kw-nix": [
           "kw-docgen-signal",
@@ -6044,8 +6257,8 @@
     },
     "kw-http_23": {
       "inputs": {
-        "kw-cache": "kw-cache_30",
-        "kw-core": "kw-core_97",
+        "kw-cache": "kw-cache_31",
+        "kw-core": "kw-core_102",
         "kw-http-core": "kw-http-core_29",
         "kw-nix": [
           "kw-docgen-sqlite",
@@ -6068,8 +6281,8 @@
     },
     "kw-http_24": {
       "inputs": {
-        "kw-cache": "kw-cache_31",
-        "kw-core": "kw-core_100",
+        "kw-cache": "kw-cache_32",
+        "kw-core": "kw-core_105",
         "kw-http-core": "kw-http-core_30",
         "kw-nix": [
           "kw-docgen-sqlite",
@@ -6093,8 +6306,8 @@
     },
     "kw-http_25": {
       "inputs": {
-        "kw-cache": "kw-cache_32",
-        "kw-core": "kw-core_103",
+        "kw-cache": "kw-cache_33",
+        "kw-core": "kw-core_108",
         "kw-http-core": "kw-http-core_31",
         "kw-nix": [
           "kw-nix"
@@ -6116,8 +6329,8 @@
     },
     "kw-http_26": {
       "inputs": {
-        "kw-cache": "kw-cache_34",
-        "kw-core": "kw-core_108",
+        "kw-cache": "kw-cache_35",
+        "kw-core": "kw-core_113",
         "kw-http-core": "kw-http-core_33",
         "kw-nix": [
           "kw-http-template",
@@ -6190,8 +6403,8 @@
     },
     "kw-http_5": {
       "inputs": {
-        "kw-cache": "kw-cache_8",
-        "kw-core": "kw-core_26",
+        "kw-cache": "kw-cache_9",
+        "kw-core": "kw-core_31",
         "kw-http-core": "kw-http-core_7",
         "kw-nix": [
           "kw-docgen",
@@ -6215,8 +6428,8 @@
     },
     "kw-http_6": {
       "inputs": {
-        "kw-cache": "kw-cache_10",
-        "kw-core": "kw-core_31",
+        "kw-cache": "kw-cache_11",
+        "kw-core": "kw-core_36",
         "kw-http-core": "kw-http-core_9",
         "kw-nix": [
           "kw-docgen",
@@ -6239,8 +6452,8 @@
     },
     "kw-http_7": {
       "inputs": {
-        "kw-cache": "kw-cache_11",
-        "kw-core": "kw-core_34",
+        "kw-cache": "kw-cache_12",
+        "kw-core": "kw-core_39",
         "kw-http-core": "kw-http-core_10",
         "kw-nix": [
           "kw-docgen",
@@ -6264,8 +6477,8 @@
     },
     "kw-http_8": {
       "inputs": {
-        "kw-cache": "kw-cache_12",
-        "kw-core": "kw-core_39",
+        "kw-cache": "kw-cache_13",
+        "kw-core": "kw-core_44",
         "kw-http-core": "kw-http-core_11",
         "kw-nix": [
           "kw-docgen-amqp",
@@ -6291,8 +6504,8 @@
     },
     "kw-http_9": {
       "inputs": {
-        "kw-cache": "kw-cache_14",
-        "kw-core": "kw-core_44",
+        "kw-cache": "kw-cache_15",
+        "kw-core": "kw-core_49",
         "kw-http-core": "kw-http-core_13",
         "kw-nix": [
           "kw-docgen-amqp",
@@ -6342,7 +6555,7 @@
     },
     "kw-kwev_2": {
       "inputs": {
-        "kw-core": "kw-core_36",
+        "kw-core": "kw-core_41",
         "kw-nix": [
           "kw-docgen",
           "kw-runtime",
@@ -6366,7 +6579,7 @@
     },
     "kw-kwev_3": {
       "inputs": {
-        "kw-core": "kw-core_49",
+        "kw-core": "kw-core_54",
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-asyncapi",
@@ -6392,7 +6605,7 @@
     },
     "kw-kwev_4": {
       "inputs": {
-        "kw-core": "kw-core_62",
+        "kw-core": "kw-core_67",
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
@@ -6417,7 +6630,7 @@
     },
     "kw-kwev_5": {
       "inputs": {
-        "kw-core": "kw-core_83",
+        "kw-core": "kw-core_88",
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
@@ -6442,7 +6655,7 @@
     },
     "kw-kwev_6": {
       "inputs": {
-        "kw-core": "kw-core_109",
+        "kw-core": "kw-core_114",
         "kw-nix": [
           "kw-nix"
         ],
@@ -6464,7 +6677,7 @@
     },
     "kw-kwev_7": {
       "inputs": {
-        "kw-core": "kw-core_115",
+        "kw-core": "kw-core_120",
         "kw-nix": [
           "kw-runtime",
           "kw-nix"
@@ -6551,19 +6764,44 @@
     "kw-protocol": {
       "inputs": {
         "kw-amqp": "kw-amqp_2",
-        "kw-core": "kw-core_112",
-        "kw-cron": "kw-cron_3",
+        "kw-core": "kw-core_25",
+        "kw-cron": "kw-cron",
+        "kw-nix": [
+          "kw-config",
+          "kw-nix"
+        ],
+        "kw-zettel": "kw-zettel_27"
+      },
+      "locked": {
+        "lastModified": 1786497478,
+        "narHash": "sha256-NRNDKC6woELODxUkQ8aXc0PszFV5jwo+mo50vcgmDVI=",
+        "ref": "refs/heads/master",
+        "rev": "baafa215b1815205d40a102679f29bc89512c6b1",
+        "revCount": 37,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-protocol.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-protocol.git"
+      }
+    },
+    "kw-protocol_2": {
+      "inputs": {
+        "kw-amqp": "kw-amqp_3",
+        "kw-core": "kw-core_117",
+        "kw-cron": "kw-cron_4",
         "kw-nix": [
           "kw-nix"
         ],
-        "kw-zettel": "kw-zettel_114"
+        "kw-zettel": "kw-zettel_120"
       },
       "locked": {
-        "lastModified": 1786463771,
-        "narHash": "sha256-D0Lku5pda3gfGPzMzxP1RZFNW0/bxqhN7OW+l57gSZ4=",
+        "lastModified": 1786497478,
+        "narHash": "sha256-NRNDKC6woELODxUkQ8aXc0PszFV5jwo+mo50vcgmDVI=",
         "ref": "refs/heads/master",
-        "rev": "151a1a0dc936a541469c8204e888a25df41e5f81",
-        "revCount": 36,
+        "rev": "baafa215b1815205d40a102679f29bc89512c6b1",
+        "revCount": 37,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-protocol.git"
       },
@@ -6598,7 +6836,7 @@
     },
     "kw-runtime_2": {
       "inputs": {
-        "kw-core": "kw-core_35",
+        "kw-core": "kw-core_40",
         "kw-kwev": "kw-kwev_2",
         "kw-nix": [
           "kw-docgen",
@@ -6621,7 +6859,7 @@
     },
     "kw-runtime_3": {
       "inputs": {
-        "kw-core": "kw-core_48",
+        "kw-core": "kw-core_53",
         "kw-kwev": "kw-kwev_3",
         "kw-nix": [
           "kw-docgen-amqp",
@@ -6646,7 +6884,7 @@
     },
     "kw-runtime_4": {
       "inputs": {
-        "kw-core": "kw-core_61",
+        "kw-core": "kw-core_66",
         "kw-kwev": "kw-kwev_4",
         "kw-nix": [
           "kw-docgen-amqp",
@@ -6670,7 +6908,7 @@
     },
     "kw-runtime_5": {
       "inputs": {
-        "kw-core": "kw-core_82",
+        "kw-core": "kw-core_87",
         "kw-kwev": "kw-kwev_5",
         "kw-nix": [
           "kw-docgen-http",
@@ -6694,7 +6932,7 @@
     },
     "kw-runtime_6": {
       "inputs": {
-        "kw-core": "kw-core_114",
+        "kw-core": "kw-core_119",
         "kw-kwev": "kw-kwev_7",
         "kw-nix": [
           "kw-nix"
@@ -6716,7 +6954,7 @@
     },
     "kw-signal": {
       "inputs": {
-        "kw-core": "kw-core_116",
+        "kw-core": "kw-core_121",
         "kw-nix": [
           "kw-nix"
         ]
@@ -6737,7 +6975,7 @@
     },
     "kw-sqlite": {
       "inputs": {
-        "kw-core": "kw-core_101",
+        "kw-core": "kw-core_106",
         "kw-nix": [
           "kw-docgen-sqlite",
           "kw-nix"
@@ -6760,7 +6998,7 @@
     },
     "kw-sqlite_2": {
       "inputs": {
-        "kw-core": "kw-core_117",
+        "kw-core": "kw-core_122",
         "kw-nix": [
           "kw-nix"
         ],
@@ -6830,7 +7068,7 @@
     "kw-zettel_100": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-sqlite",
+          "kw-docgen-signal",
           "kw-http-template",
           "kw-http",
           "kw-core",
@@ -6855,7 +7093,6 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-sqlite",
-          "kw-sqlite",
           "kw-core",
           "kw-nix"
         ]
@@ -6877,6 +7114,7 @@
     "kw-zettel_102": {
       "inputs": {
         "kw-nix": [
+          "kw-docgen-sqlite",
           "kw-http",
           "kw-cache",
           "kw-core",
@@ -6900,6 +7138,7 @@
     "kw-zettel_103": {
       "inputs": {
         "kw-nix": [
+          "kw-docgen-sqlite",
           "kw-http",
           "kw-core",
           "kw-nix"
@@ -6922,8 +7161,8 @@
     "kw-zettel_104": {
       "inputs": {
         "kw-nix": [
-          "kw-http-client",
-          "kw-cache",
+          "kw-docgen-sqlite",
+          "kw-http-template",
           "kw-core",
           "kw-nix"
         ]
@@ -6945,50 +7184,7 @@
     "kw-zettel_105": {
       "inputs": {
         "kw-nix": [
-          "kw-http-client",
-          "kw-core",
-          "kw-nix"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786410675,
-        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
-        "ref": "refs/heads/master",
-        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
-        "revCount": 39,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      }
-    },
-    "kw-zettel_106": {
-      "inputs": {
-        "kw-nix": [
-          "kw-http-template",
-          "kw-core",
-          "kw-nix"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786410675,
-        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
-        "ref": "refs/heads/master",
-        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
-        "revCount": 39,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      }
-    },
-    "kw-zettel_107": {
-      "inputs": {
-        "kw-nix": [
+          "kw-docgen-sqlite",
           "kw-http-template",
           "kw-http",
           "kw-cache",
@@ -7010,11 +7206,58 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
       }
     },
+    "kw-zettel_106": {
+      "inputs": {
+        "kw-nix": [
+          "kw-docgen-sqlite",
+          "kw-http-template",
+          "kw-http",
+          "kw-core",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786410675,
+        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
+        "ref": "refs/heads/master",
+        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      }
+    },
+    "kw-zettel_107": {
+      "inputs": {
+        "kw-nix": [
+          "kw-docgen-sqlite",
+          "kw-sqlite",
+          "kw-core",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786410675,
+        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
+        "ref": "refs/heads/master",
+        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      }
+    },
     "kw-zettel_108": {
       "inputs": {
         "kw-nix": [
-          "kw-http-template",
           "kw-http",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -7036,7 +7279,7 @@
     "kw-zettel_109": {
       "inputs": {
         "kw-nix": [
-          "kw-kwev",
+          "kw-http",
           "kw-core",
           "kw-nix"
         ]
@@ -7082,8 +7325,7 @@
     "kw-zettel_110": {
       "inputs": {
         "kw-nix": [
-          "kw-protocol",
-          "kw-amqp",
+          "kw-http-client",
           "kw-cache",
           "kw-core",
           "kw-nix"
@@ -7106,8 +7348,7 @@
     "kw-zettel_111": {
       "inputs": {
         "kw-nix": [
-          "kw-protocol",
-          "kw-amqp",
+          "kw-http-client",
           "kw-core",
           "kw-nix"
         ]
@@ -7129,7 +7370,7 @@
     "kw-zettel_112": {
       "inputs": {
         "kw-nix": [
-          "kw-protocol",
+          "kw-http-template",
           "kw-core",
           "kw-nix"
         ]
@@ -7151,8 +7392,9 @@
     "kw-zettel_113": {
       "inputs": {
         "kw-nix": [
-          "kw-protocol",
-          "kw-cron",
+          "kw-http-template",
+          "kw-http",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -7174,7 +7416,9 @@
     "kw-zettel_114": {
       "inputs": {
         "kw-nix": [
-          "kw-protocol",
+          "kw-http-template",
+          "kw-http",
+          "kw-core",
           "kw-nix"
         ]
       },
@@ -7195,7 +7439,7 @@
     "kw-zettel_115": {
       "inputs": {
         "kw-nix": [
-          "kw-runtime",
+          "kw-kwev",
           "kw-core",
           "kw-nix"
         ]
@@ -7217,8 +7461,9 @@
     "kw-zettel_116": {
       "inputs": {
         "kw-nix": [
-          "kw-runtime",
-          "kw-kwev",
+          "kw-protocol",
+          "kw-amqp",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -7240,7 +7485,8 @@
     "kw-zettel_117": {
       "inputs": {
         "kw-nix": [
-          "kw-signal",
+          "kw-protocol",
+          "kw-amqp",
           "kw-core",
           "kw-nix"
         ]
@@ -7262,7 +7508,30 @@
     "kw-zettel_118": {
       "inputs": {
         "kw-nix": [
-          "kw-sqlite",
+          "kw-protocol",
+          "kw-core",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786410675,
+        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
+        "ref": "refs/heads/master",
+        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      }
+    },
+    "kw-zettel_119": {
+      "inputs": {
+        "kw-nix": [
+          "kw-protocol",
+          "kw-cron",
           "kw-core",
           "kw-nix"
         ]
@@ -7287,6 +7556,116 @@
           "kw-asyncapi",
           "kw-docgen",
           "kw-http-template",
+          "kw-core",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786410675,
+        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
+        "ref": "refs/heads/master",
+        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      }
+    },
+    "kw-zettel_120": {
+      "inputs": {
+        "kw-nix": [
+          "kw-protocol",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786410675,
+        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
+        "ref": "refs/heads/master",
+        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      }
+    },
+    "kw-zettel_121": {
+      "inputs": {
+        "kw-nix": [
+          "kw-runtime",
+          "kw-core",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786410675,
+        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
+        "ref": "refs/heads/master",
+        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      }
+    },
+    "kw-zettel_122": {
+      "inputs": {
+        "kw-nix": [
+          "kw-runtime",
+          "kw-kwev",
+          "kw-core",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786410675,
+        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
+        "ref": "refs/heads/master",
+        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      }
+    },
+    "kw-zettel_123": {
+      "inputs": {
+        "kw-nix": [
+          "kw-signal",
+          "kw-core",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786410675,
+        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
+        "ref": "refs/heads/master",
+        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      }
+    },
+    "kw-zettel_124": {
+      "inputs": {
+        "kw-nix": [
+          "kw-sqlite",
           "kw-core",
           "kw-nix"
         ]
@@ -7547,6 +7926,7 @@
     "kw-zettel_22": {
       "inputs": {
         "kw-nix": [
+          "kw-config",
           "kw-core",
           "kw-nix"
         ]
@@ -7568,7 +7948,10 @@
     "kw-zettel_23": {
       "inputs": {
         "kw-nix": [
-          "kw-cron",
+          "kw-config",
+          "kw-protocol",
+          "kw-amqp",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -7590,8 +7973,9 @@
     "kw-zettel_24": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen",
-          "kw-auth-oidc",
+          "kw-config",
+          "kw-protocol",
+          "kw-amqp",
           "kw-core",
           "kw-nix"
         ]
@@ -7613,10 +7997,8 @@
     "kw-zettel_25": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http",
-          "kw-cache",
+          "kw-config",
+          "kw-protocol",
           "kw-core",
           "kw-nix"
         ]
@@ -7638,9 +8020,9 @@
     "kw-zettel_26": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http",
+          "kw-config",
+          "kw-protocol",
+          "kw-cron",
           "kw-core",
           "kw-nix"
         ]
@@ -7662,11 +8044,8 @@
     "kw-zettel_27": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
-          "kw-cache",
-          "kw-core",
+          "kw-config",
+          "kw-protocol",
           "kw-nix"
         ]
       },
@@ -7687,9 +8066,6 @@
     "kw-zettel_28": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
           "kw-core",
           "kw-nix"
         ]
@@ -7711,7 +8087,7 @@
     "kw-zettel_29": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen",
+          "kw-cron",
           "kw-core",
           "kw-nix"
         ]
@@ -7756,8 +8132,7 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen",
-          "kw-http",
-          "kw-cache",
+          "kw-auth-oidc",
           "kw-core",
           "kw-nix"
         ]
@@ -7780,7 +8155,9 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-http",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -7803,7 +8180,8 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen",
-          "kw-http-template",
+          "kw-auth-oidc",
+          "kw-http",
           "kw-core",
           "kw-nix"
         ]
@@ -7826,8 +8204,8 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
+          "kw-auth-oidc",
+          "kw-http-client",
           "kw-cache",
           "kw-core",
           "kw-nix"
@@ -7851,8 +8229,8 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
+          "kw-auth-oidc",
+          "kw-http-client",
           "kw-core",
           "kw-nix"
         ]
@@ -7875,7 +8253,6 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen",
-          "kw-runtime",
           "kw-core",
           "kw-nix"
         ]
@@ -7898,8 +8275,8 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen",
-          "kw-runtime",
-          "kw-kwev",
+          "kw-http",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -7921,10 +8298,8 @@
     "kw-zettel_37": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-amqp",
-          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
+          "kw-http",
           "kw-core",
           "kw-nix"
         ]
@@ -7946,12 +8321,8 @@
     "kw-zettel_38": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-amqp",
-          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http",
-          "kw-cache",
+          "kw-http-template",
           "kw-core",
           "kw-nix"
         ]
@@ -7973,11 +8344,10 @@
     "kw-zettel_39": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-amqp",
-          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
+          "kw-http-template",
           "kw-http",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -8023,12 +8393,9 @@
     "kw-zettel_40": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-amqp",
-          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
-          "kw-cache",
+          "kw-http-template",
+          "kw-http",
           "kw-core",
           "kw-nix"
         ]
@@ -8050,11 +8417,8 @@
     "kw-zettel_41": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-amqp",
-          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
+          "kw-runtime",
           "kw-core",
           "kw-nix"
         ]
@@ -8076,9 +8440,9 @@
     "kw-zettel_42": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-amqp",
-          "kw-asyncapi",
           "kw-docgen",
+          "kw-runtime",
+          "kw-kwev",
           "kw-core",
           "kw-nix"
         ]
@@ -8103,8 +8467,7 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
-          "kw-http",
-          "kw-cache",
+          "kw-auth-oidc",
           "kw-core",
           "kw-nix"
         ]
@@ -8129,7 +8492,9 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-http",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -8154,7 +8519,8 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
-          "kw-http-template",
+          "kw-auth-oidc",
+          "kw-http",
           "kw-core",
           "kw-nix"
         ]
@@ -8179,8 +8545,8 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
+          "kw-auth-oidc",
+          "kw-http-client",
           "kw-cache",
           "kw-core",
           "kw-nix"
@@ -8206,8 +8572,8 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
+          "kw-auth-oidc",
+          "kw-http-client",
           "kw-core",
           "kw-nix"
         ]
@@ -8232,7 +8598,6 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
-          "kw-runtime",
           "kw-core",
           "kw-nix"
         ]
@@ -8257,8 +8622,8 @@
           "kw-docgen-amqp",
           "kw-asyncapi",
           "kw-docgen",
-          "kw-runtime",
-          "kw-kwev",
+          "kw-http",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -8307,8 +8672,9 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-amqp",
+          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
+          "kw-http",
           "kw-core",
           "kw-nix"
         ]
@@ -8331,10 +8697,9 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-amqp",
+          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http",
-          "kw-cache",
+          "kw-http-template",
           "kw-core",
           "kw-nix"
         ]
@@ -8357,9 +8722,11 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-amqp",
+          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
+          "kw-http-template",
           "kw-http",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -8382,10 +8749,10 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-amqp",
+          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
-          "kw-cache",
+          "kw-http-template",
+          "kw-http",
           "kw-core",
           "kw-nix"
         ]
@@ -8408,9 +8775,9 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-amqp",
+          "kw-asyncapi",
           "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
+          "kw-runtime",
           "kw-core",
           "kw-nix"
         ]
@@ -8433,7 +8800,10 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-amqp",
+          "kw-asyncapi",
           "kw-docgen",
+          "kw-runtime",
+          "kw-kwev",
           "kw-core",
           "kw-nix"
         ]
@@ -8457,8 +8827,7 @@
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
-          "kw-http",
-          "kw-cache",
+          "kw-auth-oidc",
           "kw-core",
           "kw-nix"
         ]
@@ -8482,7 +8851,9 @@
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-http",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -8506,7 +8877,8 @@
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
-          "kw-http-template",
+          "kw-auth-oidc",
+          "kw-http",
           "kw-core",
           "kw-nix"
         ]
@@ -8530,8 +8902,8 @@
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
+          "kw-auth-oidc",
+          "kw-http-client",
           "kw-cache",
           "kw-core",
           "kw-nix"
@@ -8581,8 +8953,8 @@
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
+          "kw-auth-oidc",
+          "kw-http-client",
           "kw-core",
           "kw-nix"
         ]
@@ -8606,7 +8978,6 @@
         "kw-nix": [
           "kw-docgen-amqp",
           "kw-docgen",
-          "kw-runtime",
           "kw-core",
           "kw-nix"
         ]
@@ -8626,6 +8997,154 @@
       }
     },
     "kw-zettel_62": {
+      "inputs": {
+        "kw-nix": [
+          "kw-docgen-amqp",
+          "kw-docgen",
+          "kw-http",
+          "kw-cache",
+          "kw-core",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786410675,
+        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
+        "ref": "refs/heads/master",
+        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      }
+    },
+    "kw-zettel_63": {
+      "inputs": {
+        "kw-nix": [
+          "kw-docgen-amqp",
+          "kw-docgen",
+          "kw-http",
+          "kw-core",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786410675,
+        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
+        "ref": "refs/heads/master",
+        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      }
+    },
+    "kw-zettel_64": {
+      "inputs": {
+        "kw-nix": [
+          "kw-docgen-amqp",
+          "kw-docgen",
+          "kw-http-template",
+          "kw-core",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786410675,
+        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
+        "ref": "refs/heads/master",
+        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      }
+    },
+    "kw-zettel_65": {
+      "inputs": {
+        "kw-nix": [
+          "kw-docgen-amqp",
+          "kw-docgen",
+          "kw-http-template",
+          "kw-http",
+          "kw-cache",
+          "kw-core",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786410675,
+        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
+        "ref": "refs/heads/master",
+        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      }
+    },
+    "kw-zettel_66": {
+      "inputs": {
+        "kw-nix": [
+          "kw-docgen-amqp",
+          "kw-docgen",
+          "kw-http-template",
+          "kw-http",
+          "kw-core",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786410675,
+        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
+        "ref": "refs/heads/master",
+        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      }
+    },
+    "kw-zettel_67": {
+      "inputs": {
+        "kw-nix": [
+          "kw-docgen-amqp",
+          "kw-docgen",
+          "kw-runtime",
+          "kw-core",
+          "kw-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786410675,
+        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
+        "ref": "refs/heads/master",
+        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
+        "revCount": 39,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
+      }
+    },
+    "kw-zettel_68": {
       "inputs": {
         "kw-nix": [
           "kw-docgen-amqp",
@@ -8650,152 +9169,10 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
       }
     },
-    "kw-zettel_63": {
-      "inputs": {
-        "kw-nix": [
-          "kw-docgen-cron",
-          "kw-core",
-          "kw-nix"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786410675,
-        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
-        "ref": "refs/heads/master",
-        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
-        "revCount": 39,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      }
-    },
-    "kw-zettel_64": {
-      "inputs": {
-        "kw-nix": [
-          "kw-docgen-cron",
-          "kw-cron",
-          "kw-core",
-          "kw-nix"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786410675,
-        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
-        "ref": "refs/heads/master",
-        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
-        "revCount": 39,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      }
-    },
-    "kw-zettel_65": {
-      "inputs": {
-        "kw-nix": [
-          "kw-docgen-cron",
-          "kw-http",
-          "kw-cache",
-          "kw-core",
-          "kw-nix"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786410675,
-        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
-        "ref": "refs/heads/master",
-        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
-        "revCount": 39,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      }
-    },
-    "kw-zettel_66": {
-      "inputs": {
-        "kw-nix": [
-          "kw-docgen-cron",
-          "kw-http",
-          "kw-core",
-          "kw-nix"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786410675,
-        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
-        "ref": "refs/heads/master",
-        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
-        "revCount": 39,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      }
-    },
-    "kw-zettel_67": {
-      "inputs": {
-        "kw-nix": [
-          "kw-docgen-cron",
-          "kw-http-template",
-          "kw-core",
-          "kw-nix"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786410675,
-        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
-        "ref": "refs/heads/master",
-        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
-        "revCount": 39,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      }
-    },
-    "kw-zettel_68": {
-      "inputs": {
-        "kw-nix": [
-          "kw-docgen-cron",
-          "kw-http-template",
-          "kw-http",
-          "kw-cache",
-          "kw-core",
-          "kw-nix"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786410675,
-        "narHash": "sha256-YZzE9VlPKzSsQlmtEJEmG2kq5V8Kegy6gRE9KuckpT4=",
-        "ref": "refs/heads/master",
-        "rev": "6b80c8deb13333a0498cb07a52fb01494b067f42",
-        "revCount": 39,
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@git.kalelzar.xyz/kalelzar/zettel.git"
-      }
-    },
     "kw-zettel_69": {
       "inputs": {
         "kw-nix": [
           "kw-docgen-cron",
-          "kw-http-template",
-          "kw-http",
           "kw-core",
           "kw-nix"
         ]
@@ -8843,7 +9220,8 @@
     "kw-zettel_70": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-http",
+          "kw-docgen-cron",
+          "kw-cron",
           "kw-core",
           "kw-nix"
         ]
@@ -8865,9 +9243,9 @@
     "kw-zettel_71": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-http",
-          "kw-docgen",
-          "kw-auth-oidc",
+          "kw-docgen-cron",
+          "kw-http",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -8889,11 +9267,8 @@
     "kw-zettel_72": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-http",
-          "kw-docgen",
-          "kw-auth-oidc",
+          "kw-docgen-cron",
           "kw-http",
-          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -8915,10 +9290,8 @@
     "kw-zettel_73": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-http",
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http",
+          "kw-docgen-cron",
+          "kw-http-template",
           "kw-core",
           "kw-nix"
         ]
@@ -8940,10 +9313,9 @@
     "kw-zettel_74": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-http",
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
+          "kw-docgen-cron",
+          "kw-http-template",
+          "kw-http",
           "kw-cache",
           "kw-core",
           "kw-nix"
@@ -8966,10 +9338,9 @@
     "kw-zettel_75": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-http",
-          "kw-docgen",
-          "kw-auth-oidc",
-          "kw-http-client",
+          "kw-docgen-cron",
+          "kw-http-template",
+          "kw-http",
           "kw-core",
           "kw-nix"
         ]
@@ -8992,7 +9363,6 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-http",
-          "kw-docgen",
           "kw-core",
           "kw-nix"
         ]
@@ -9016,8 +9386,7 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
-          "kw-http",
-          "kw-cache",
+          "kw-auth-oidc",
           "kw-core",
           "kw-nix"
         ]
@@ -9041,7 +9410,9 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
+          "kw-auth-oidc",
           "kw-http",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -9065,7 +9436,8 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
-          "kw-http-template",
+          "kw-auth-oidc",
+          "kw-http",
           "kw-core",
           "kw-nix"
         ]
@@ -9114,8 +9486,8 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
+          "kw-auth-oidc",
+          "kw-http-client",
           "kw-cache",
           "kw-core",
           "kw-nix"
@@ -9140,8 +9512,8 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
-          "kw-http-template",
-          "kw-http",
+          "kw-auth-oidc",
+          "kw-http-client",
           "kw-core",
           "kw-nix"
         ]
@@ -9165,7 +9537,6 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
-          "kw-runtime",
           "kw-core",
           "kw-nix"
         ]
@@ -9189,8 +9560,8 @@
         "kw-nix": [
           "kw-docgen-http",
           "kw-docgen",
-          "kw-runtime",
-          "kw-kwev",
+          "kw-http",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -9213,8 +9584,8 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-http",
+          "kw-docgen",
           "kw-http",
-          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -9237,7 +9608,8 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-http",
-          "kw-http",
+          "kw-docgen",
+          "kw-http-template",
           "kw-core",
           "kw-nix"
         ]
@@ -9260,7 +9632,10 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-http",
+          "kw-docgen",
           "kw-http-template",
+          "kw-http",
+          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -9283,9 +9658,9 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-http",
+          "kw-docgen",
           "kw-http-template",
           "kw-http",
-          "kw-cache",
           "kw-core",
           "kw-nix"
         ]
@@ -9308,8 +9683,8 @@
       "inputs": {
         "kw-nix": [
           "kw-docgen-http",
-          "kw-http-template",
-          "kw-http",
+          "kw-docgen",
+          "kw-runtime",
           "kw-core",
           "kw-nix"
         ]
@@ -9331,7 +9706,10 @@
     "kw-zettel_89": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-signal",
+          "kw-docgen-http",
+          "kw-docgen",
+          "kw-runtime",
+          "kw-kwev",
           "kw-core",
           "kw-nix"
         ]
@@ -9376,7 +9754,7 @@
     "kw-zettel_90": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-signal",
+          "kw-docgen-http",
           "kw-http",
           "kw-cache",
           "kw-core",
@@ -9400,7 +9778,7 @@
     "kw-zettel_91": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-signal",
+          "kw-docgen-http",
           "kw-http",
           "kw-core",
           "kw-nix"
@@ -9423,7 +9801,7 @@
     "kw-zettel_92": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-signal",
+          "kw-docgen-http",
           "kw-http-template",
           "kw-core",
           "kw-nix"
@@ -9446,7 +9824,7 @@
     "kw-zettel_93": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-signal",
+          "kw-docgen-http",
           "kw-http-template",
           "kw-http",
           "kw-cache",
@@ -9471,7 +9849,7 @@
     "kw-zettel_94": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-signal",
+          "kw-docgen-http",
           "kw-http-template",
           "kw-http",
           "kw-core",
@@ -9495,7 +9873,7 @@
     "kw-zettel_95": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-sqlite",
+          "kw-docgen-signal",
           "kw-core",
           "kw-nix"
         ]
@@ -9517,7 +9895,7 @@
     "kw-zettel_96": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-sqlite",
+          "kw-docgen-signal",
           "kw-http",
           "kw-cache",
           "kw-core",
@@ -9541,7 +9919,7 @@
     "kw-zettel_97": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-sqlite",
+          "kw-docgen-signal",
           "kw-http",
           "kw-core",
           "kw-nix"
@@ -9564,7 +9942,7 @@
     "kw-zettel_98": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-sqlite",
+          "kw-docgen-signal",
           "kw-http-template",
           "kw-core",
           "kw-nix"
@@ -9587,7 +9965,7 @@
     "kw-zettel_99": {
       "inputs": {
         "kw-nix": [
-          "kw-docgen-sqlite",
+          "kw-docgen-signal",
           "kw-http-template",
           "kw-http",
           "kw-cache",
@@ -9659,14 +10037,32 @@
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/rabbitmq-c.git"
       }
     },
+    "rabbitmq-c_3": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776807746,
+        "narHash": "sha256-S5oqe0DxOlv3q+JXFwF6uHpK/tgrJnL6Z4Crkm0lZm0=",
+        "ref": "zig-build",
+        "rev": "b9be59c63b3c4ba1076757e96f922efad001d3aa",
+        "revCount": 1075,
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/rabbitmq-c.git"
+      },
+      "original": {
+        "ref": "zig-build",
+        "type": "git",
+        "url": "ssh://git@git.kalelzar.xyz/kalelzar/rabbitmq-c.git"
+      }
+    },
     "root": {
       "inputs": {
         "kw-action": "kw-action",
         "kw-amqp": "kw-amqp",
         "kw-asyncapi": "kw-asyncapi",
         "kw-auth-oidc": "kw-auth-oidc_2",
-        "kw-core": "kw-core_22",
-        "kw-cron": "kw-cron",
+        "kw-config": "kw-config",
+        "kw-core": "kw-core_27",
+        "kw-cron": "kw-cron_2",
         "kw-docgen": "kw-docgen_2",
         "kw-docgen-amqp": "kw-docgen-amqp",
         "kw-docgen-cron": "kw-docgen-cron",
@@ -9679,7 +10075,7 @@
         "kw-http-template": "kw-http-template_10",
         "kw-kwev": "kw-kwev_6",
         "kw-nix": "kw-nix",
-        "kw-protocol": "kw-protocol",
+        "kw-protocol": "kw-protocol_2",
         "kw-runtime": "kw-runtime_6",
         "kw-signal": "kw-signal",
         "kw-sqlite": "kw-sqlite_2"
@@ -9734,6 +10130,22 @@
       }
     },
     "zamqp_2": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776807918,
+        "narHash": "sha256-hpygkmF/Gj9xygIL4OvQ40CYxT/nPrFmMfI79k+bn9Q=",
+        "ref": "refs/heads/main",
+        "rev": "a958ce6b82ae0ab52cabade5923975f623573d23",
+        "revCount": 23,
+        "type": "git",
+        "url": "https://github.com/Kalelzar/zamqp"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://github.com/Kalelzar/zamqp"
+      }
+    },
+    "zamqp_3": {
       "flake": false,
       "locked": {
         "lastModified": 1776807918,

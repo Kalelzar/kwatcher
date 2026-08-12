@@ -47,11 +47,13 @@
     kw-http-client.inputs.kw-nix.follows = "kw-nix";
     kw-auth-oidc.url = "git+ssh://git@git.kalelzar.xyz/kalelzar/kw-auth-oidc.git";
     kw-auth-oidc.inputs.kw-nix.follows = "kw-nix";
+    kw-config.url = "git+ssh://git@git.kalelzar.xyz/kalelzar/kw-config.git";
+    kw-config.inputs.kw-nix.follows = "kw-nix";
   };
 
   outputs = inputs: inputs.kw-nix.lib.mkKwUmbrella {
     inherit (inputs) self;
-    deps = [ inputs.kw-core inputs.kw-runtime inputs.kw-amqp inputs.kw-protocol inputs.kw-http inputs.kw-cron inputs.kw-action inputs.kw-signal inputs.kw-kwev inputs.kw-docgen inputs.kw-docgen-http inputs.kw-docgen-amqp inputs.kw-docgen-cron inputs.kw-docgen-signal inputs.kw-docgen-http-client inputs.kw-docgen-sqlite inputs.kw-asyncapi inputs.kw-http-template inputs.kw-sqlite inputs.kw-http-client inputs.kw-auth-oidc ];
+    deps = [ inputs.kw-core inputs.kw-runtime inputs.kw-amqp inputs.kw-protocol inputs.kw-http inputs.kw-cron inputs.kw-action inputs.kw-signal inputs.kw-kwev inputs.kw-docgen inputs.kw-docgen-http inputs.kw-docgen-amqp inputs.kw-docgen-cron inputs.kw-docgen-signal inputs.kw-docgen-http-client inputs.kw-docgen-sqlite inputs.kw-asyncapi inputs.kw-http-template inputs.kw-sqlite inputs.kw-http-client inputs.kw-auth-oidc inputs.kw-config ];
     depsHash = "sha256-adGt9cDvhgw6nhebiHlsl04w0oqzJq0230L1NtgXci8=";
   };
 }
