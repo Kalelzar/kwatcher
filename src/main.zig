@@ -278,19 +278,6 @@ const CronRoutes = struct {
         try sq.call(.{ .logVisitCount = .{} }, .{ .inj = inj });
     }
 
-    /// Keep the OIDC discovery + key material warm: every IdP fetch goes
-    /// through the queue (recorded, correlation-stamped). The 30s cadence
-    /// bounds the startup cold window and key-rotation recovery; identical
-    /// payloads are change-detected by the store, so steady-state cost is
-    /// two keep-alive GETs. On the first tick the JWKS request may cancel
-    /// silently (its URL comes from the discovery document); the next tick
-    /// lands it.
-    pub fn @"oidc_refresh */30 * * * * *"(inj: *core.deps.DepCtx) !void {
-        const sched = try inj.require(Scheduler(.oidc));
-        try sched.request(.{ .oidcDiscovery = .{} }, .{ .inj = inj });
-        try sched.request(.{ .oidcJwks = .{} }, .{ .inj = inj });
-    }
-
     /// Keep the loopback PROVIDE cache warm and demo the async egress path.
     pub fn @"loopback_refresh */30 * * * * *"(inj: *core.deps.DepCtx) !void {
         const sched = try inj.require(Scheduler(.loopback));
@@ -304,6 +291,34 @@ const CronRoutes = struct {
         } else |_| {
             log.info("[loopback] health not fetched yet", .{});
         }
+    }
+};
+
+/// Lifecycle route handlers on the internal driver.
+/// Function names follow the pattern: "PHASE @identifier".
+/// START fans out once, after every driver is initialized (first event on
+/// the queue — listeners come up concurrently, it is not a barrier).
+/// END fans out once when shutdown is observed, before any driver stops.
+const LifecycleRoutes = struct {
+    /// Runs once at startup.
+    pub fn @"START @hello"() !void {
+        log.info("[lifecycle] hello — all drivers are initialized", .{});
+    }
+
+    /// Warm the loopback PROVIDE cache immediately (the kw-http-client
+    /// provide docs literally say "warm it at startup"); the 30s cron keeps
+    /// it fresh. START is first-in-queue but not a barrier, so on a slow
+    /// boot the ingress listener may not be up yet — the fetch then fails
+    /// with a logged transport warning and the cron retry lands it.
+    pub fn @"START @loopback-warm"(inj: *core.deps.DepCtx) !void {
+        const sched = try inj.require(Scheduler(.loopback));
+        try sched.request(.{ .freshHealth = .{} }, .{ .inj = inj });
+    }
+
+    /// Runs once at shutdown, while every driver is still live.
+    pub fn @"END @bye"(inj: *core.deps.DepCtx) !void {
+        _ = inj;
+        log.info("[lifecycle] bye — shutting down after this", .{});
     }
 };
 
@@ -745,7 +760,7 @@ const cron_driver = cron.Driver
     .new(.cron)
     .listen(true)
     .jobs(1)
-    .routes(cron.From(CronRoutes) ++ cron.From(amqp.Replay) ++ cron.From(SecretConfig.Timers) ++ protocol.use(struct {
+    .routes(cron.From(CronRoutes) ++ cron.From(amqp.Replay) ++ cron.From(SecretConfig.Timers) ++ cron.From(auth_oidc.Timers) ++ protocol.use(struct {
         pub const kind = .cron;
     }, protocols, RouteContext))
     .build();
@@ -848,6 +863,13 @@ pub const drivers = struct {
     pub const drivers = reg: {
         const base = core.DriverRegistry
             .new()
+            .lifecycle(core.lifecycle.From(LifecycleRoutes) ++
+                core.lifecycle.From(SecretConfig.Lifecycle) ++
+                core.lifecycle.From(auth_oidc.Lifecycle) ++
+                core.lifecycle.From(amqp.ReplayLifecycle) ++
+                protocol.use(struct {
+                    pub const kind = .internal;
+                }, protocols, RouteContext))
             .registerHandler(cron_driver)
             .registerHandler(amqp_driver)
             .registerHandler(http_driver)
@@ -1002,6 +1024,9 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         // Register the OIDC egress driver's config + transport, and the
         // process-wide discovery store it feeds
         .with(.oidc, client.defaultFor(drivers.drivers, RouteContext), allocator)
+        // Register the type-erased egress scheduler shim bridge the packaged
+        // oidc refresh timer resolves (auth_oidc.Timers, on the cron driver)
+        .with(.oidc, auth_oidc.egress.deps(drivers.drivers), allocator)
         .static(.all, &oidc_store)
         // Register our custom counter as a static dependency
         .static(.all, &ctx)
