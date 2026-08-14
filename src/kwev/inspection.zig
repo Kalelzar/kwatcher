@@ -331,50 +331,33 @@ pub fn recordCid(
     props: []const u8,
 ) !?core.correlation.CorrelationID {
     const cid = parseCidFast(props) orelse blk: {
-        // Non-canonical properties (foreign writer, older format): pay for a
-        // real zon parse.
+        // Non-canonical properties (foreign writer, extra whitespace): pay
+        // for a real zon parse into the wire shape. The correlation id is a
+        // hex-64 string on the wire, so the packed struct cannot be the
+        // parse target.
+        const Wire = struct {
+            attempts: u8 = 0,
+            correlation_id: []const u8 = "",
+        };
         const source = try scratch.dupeZ(u8, props);
-        const parsed = std.zon.parse.fromSlice(core.event.Properties, scratch, source, null, .{
+        const parsed = std.zon.parse.fromSlice(Wire, scratch, source, null, .{
             .ignore_unknown_fields = true,
         }) catch |e| switch (e) {
             error.ParseZon => return null,
             else => return e,
         };
-        break :blk parsed.correlation_id;
+        break :blk core.correlation.CorrelationID.parse(parsed.correlation_id) orelse return null;
     };
     return if (cid.isUnset()) null else cid;
 }
 
 /// Fast path for pulling the correlation id out of the canonical zon the
-/// recorder writes (`.{.attempts=N,.correlation_id=.{.timestamp=...,...}}`):
-/// a full zon parse per record dominates graph's runtime on large archives.
-/// Anything unexpected returns null and `recordCid` falls back to std.zon.
+/// recorder writes (`.{.attempts=N,.correlation_id="<hex-64>"}`): a full zon
+/// parse per record dominates graph's runtime on large archives. Anything
+/// unexpected returns null and `recordCid` falls back to std.zon.
 fn parseCidFast(props: []const u8) ?core.correlation.CorrelationID {
-    const marker = ".correlation_id=.{";
+    const marker = ".correlation_id=\"";
     const start = (std.mem.indexOf(u8, props, marker) orelse return null) + marker.len;
-    var cid: core.correlation.CorrelationID = .unset;
-    var i = start;
-    while (i < props.len) {
-        if (props[i] != '.') return null;
-        i += 1;
-        const name_end = std.mem.indexOfScalarPos(u8, props, i, '=') orelse return null;
-        const name = props[i..name_end];
-        i = name_end + 1;
-        var value_end = i;
-        while (value_end < props.len and props[value_end] != ',' and props[value_end] != '}') {
-            value_end += 1;
-        }
-        if (value_end == props.len) return null;
-        const value = props[i..value_end];
-
-        inline for (@typeInfo(core.correlation.CorrelationID).@"struct".fields) |f| {
-            if (std.mem.eql(u8, name, f.name)) {
-                @field(cid, f.name) = std.fmt.parseInt(f.type, value, 10) catch return null;
-            }
-        }
-
-        if (props[value_end] == '}') return cid;
-        i = value_end + 1;
-    }
-    return null;
+    if (props.len < start + 65 or props[start + 64] != '"') return null;
+    return core.correlation.CorrelationID.parse(props[start .. start + 64]);
 }

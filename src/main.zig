@@ -858,11 +858,19 @@ const signal_driver = signal.Driver
     .routes(signal_routes)
     .build();
 
+/// The application's client identity: hashed into every operation id and
+/// registered as the default ClientInfo, so declare it once.
+pub const client_info: core.schema.Client.V1 = .{
+    .name = "example",
+    .version = "1.0.l0",
+};
+
 /// Combined driver registry
 pub const drivers = struct {
     pub const drivers = reg: {
         const base = core.DriverRegistry
             .new()
+            .client(client_info)
             .lifecycle(core.lifecycle.From(LifecycleRoutes) ++
                 core.lifecycle.From(SecretConfig.Lifecycle) ++
                 core.lifecycle.From(auth_oidc.Lifecycle) ++
@@ -987,10 +995,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     const base_deps = core.deps.DependencyContainer(Config)
         .new(drivers.drivers, allocator)
         // Register default dependencies (allocator pools, user info, client info)
-        .with(.all, kwatcher.default.withDefault(&config_slot, .{
-            .name = "example",
-            .version = "1.0.l0",
-        }), allocator)
+        .with(.all, kwatcher.default.withDefault(&config_slot, client_info), allocator)
         // Register app-specific config resolver
         .with(.all, kwatcher.default.config(AppConfig, "app"), allocator)
         // Register the kw-config snapshot factories: handlers inject
