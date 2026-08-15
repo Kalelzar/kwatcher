@@ -184,19 +184,6 @@ pub fn build(b: *std.Build) !void {
     // The installed application, built for the requested target.
     const kwatcher_example = wireApp(b, target, optimize, openapi_version, build_ui, app_opts_mod);
 
-    const kwatcher_kwev = b.createModule(.{
-        .root_source_file = b.path("src/kwev/main.zig"),
-        .target = target,
-        // The kwev tool crunches multi-GB archives (CRC32 over everything,
-        // millions of record parses); a Debug build of it pins a core for
-        // ages. Debug builds of the repo still get an optimized tool.
-        .optimize = if (optimize == .Debug) .ReleaseSafe else optimize,
-        // ELF-only; see the app module above.
-        .dwarf_format = if (target.result.ofmt == .elf) .@"64" else null,
-        .link_libc = false,
-        .omit_frame_pointer = false,
-    });
-
     // Artifacts:
     const example = b.addExecutable(.{
         .name = "kwatcher-example",
@@ -213,13 +200,9 @@ pub fn build(b: *std.Build) !void {
         b.installArtifact(example);
     }
 
-    const kwev = b.addExecutable(.{
-        .name = "kwev",
-        .root_module = kwatcher_kwev,
-        // Always ReleaseSafe (see the module above) — LLVM for the optimizer,
-        // not for the old #24181 atomics pin (dead since the queue went u64).
-        .use_llvm = true,
-    });
+    // Built and shaped (ReleaseSafe-when-Debug) by the kw-kwev package
+    // itself; the umbrella only re-exposes the artifact.
+    const kwev = b.dependency("kw_kwev", .{ .target = target, .optimize = optimize }).artifact("kwev");
     if (build_kwev) {
         b.installArtifact(kwev);
     }
@@ -356,9 +339,4 @@ pub fn build(b: *std.Build) !void {
     run_commit.addArg(migration_name);
     const commit_step = b.step("commit-migration", "Promote the candidate sqlite migration to a committed migration");
     commit_step.dependOn(&run_commit.step);
-
-    // kwev tooling:
-    const kw_kwev = b.dependency("kw_kwev", .{ .target = target, .optimize = optimize }).module("kw-kwev");
-    kwatcher_kwev.addImport("kw-kwev", kw_kwev);
-    kwatcher_kwev.addImport("kw-core", b.dependency("kw_core", .{ .target = target, .optimize = optimize }).module("kw-core"));
 }
