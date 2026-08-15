@@ -104,11 +104,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786750263,
-        "narHash": "sha256-fwTtO9QN4ls5OhBw6DOivOKHXQ6gcDuudU+/yJSFwH4=",
+        "lastModified": 1786826939,
+        "narHash": "sha256-z7mOD4OUctjWFdn+G3KOhDrnw1wXu5o72USnfm6MJes=",
         "ref": "refs/heads/master",
-        "rev": "78fe80f380eca11fcc57ec710134d110f8b7a150",
-        "revCount": 25,
+        "rev": "fb8b268a7aa160a27526648baa6a6af72c9ea28d",
+        "revCount": 27,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-asyncapi.git"
       },
@@ -126,11 +126,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786750263,
-        "narHash": "sha256-fwTtO9QN4ls5OhBw6DOivOKHXQ6gcDuudU+/yJSFwH4=",
+        "lastModified": 1786826939,
+        "narHash": "sha256-z7mOD4OUctjWFdn+G3KOhDrnw1wXu5o72USnfm6MJes=",
         "ref": "refs/heads/master",
-        "rev": "78fe80f380eca11fcc57ec710134d110f8b7a150",
-        "revCount": 25,
+        "rev": "fb8b268a7aa160a27526648baa6a6af72c9ea28d",
+        "revCount": 27,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-asyncapi.git"
       },
@@ -4202,11 +4202,11 @@
         "kw-runtime": "kw-runtime"
       },
       "locked": {
-        "lastModified": 1786750248,
-        "narHash": "sha256-WZIpIr8WuEDgrzkAPpKXYboKW59MofrqDXSTjNUD+p8=",
+        "lastModified": 1786826927,
+        "narHash": "sha256-gyyTJyS2o4WpCd6SCh4DvO6JhcxEeGQfBFNxZ6QbESg=",
         "ref": "refs/heads/master",
-        "rev": "9a9e0271b8797127b489ba7f9ea5f8fddb4920a9",
-        "revCount": 49,
+        "rev": "43e00f9ea0a7af2b02b723492c42e84427a83c48",
+        "revCount": 51,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-docgen.git"
       },
@@ -4225,11 +4225,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786750271,
-        "narHash": "sha256-4FEgXqz/uJ9C6bsFckmJ3y8G2qo680JIdultWHpwivc=",
+        "lastModified": 1786826946,
+        "narHash": "sha256-V5ia7jBz/I//lHHrYndmiuL3Norj10MK3hXRXkvWTjU=",
         "ref": "refs/heads/master",
-        "rev": "2a4377be5ad5ba16774f60f74baf928b1229dc4b",
-        "revCount": 26,
+        "rev": "4f2d210f034a89161a6be71ed0b5cba644cd5452",
+        "revCount": 28,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-docgen-amqp.git"
       },
@@ -4275,11 +4275,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786750258,
-        "narHash": "sha256-z5t0csLYvaxCQjvHQzDWbwPtd8SQhlQUlTjc9vO06xs=",
+        "lastModified": 1786826935,
+        "narHash": "sha256-/upX+mwoMPnvuAX1bcBvdpB+3Y3nPNBfuXkv351+Yp0=",
         "ref": "refs/heads/master",
-        "rev": "adfa975eecb21080c08fd1ee90d890a38c6993b9",
-        "revCount": 38,
+        "rev": "7469eb0473f1b823e6173a3f538322a8f9820be2",
+        "revCount": 40,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-docgen-http.git"
       },
@@ -4371,11 +4371,11 @@
         "kw-runtime": "kw-runtime_2"
       },
       "locked": {
-        "lastModified": 1786750248,
-        "narHash": "sha256-WZIpIr8WuEDgrzkAPpKXYboKW59MofrqDXSTjNUD+p8=",
+        "lastModified": 1786826927,
+        "narHash": "sha256-gyyTJyS2o4WpCd6SCh4DvO6JhcxEeGQfBFNxZ6QbESg=",
         "ref": "refs/heads/master",
-        "rev": "9a9e0271b8797127b489ba7f9ea5f8fddb4920a9",
-        "revCount": 49,
+        "rev": "43e00f9ea0a7af2b02b723492c42e84427a83c48",
+        "revCount": 51,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-docgen.git"
       },
@@ -4399,11 +4399,11 @@
         "kw-runtime": "kw-runtime_3"
       },
       "locked": {
-        "lastModified": 1786750248,
-        "narHash": "sha256-WZIpIr8WuEDgrzkAPpKXYboKW59MofrqDXSTjNUD+p8=",
+        "lastModified": 1786826927,
+        "narHash": "sha256-gyyTJyS2o4WpCd6SCh4DvO6JhcxEeGQfBFNxZ6QbESg=",
         "ref": "refs/heads/master",
-        "rev": "9a9e0271b8797127b489ba7f9ea5f8fddb4920a9",
-        "revCount": 49,
+        "rev": "43e00f9ea0a7af2b02b723492c42e84427a83c48",
+        "revCount": 51,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-docgen.git"
       },
@@ -4426,11 +4426,11 @@
         "kw-runtime": "kw-runtime_4"
       },
       "locked": {
-        "lastModified": 1786750248,
-        "narHash": "sha256-WZIpIr8WuEDgrzkAPpKXYboKW59MofrqDXSTjNUD+p8=",
+        "lastModified": 1786826927,
+        "narHash": "sha256-gyyTJyS2o4WpCd6SCh4DvO6JhcxEeGQfBFNxZ6QbESg=",
         "ref": "refs/heads/master",
-        "rev": "9a9e0271b8797127b489ba7f9ea5f8fddb4920a9",
-        "revCount": 49,
+        "rev": "43e00f9ea0a7af2b02b723492c42e84427a83c48",
+        "revCount": 51,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-docgen.git"
       },
@@ -4453,11 +4453,11 @@
         "kw-runtime": "kw-runtime_5"
       },
       "locked": {
-        "lastModified": 1786750248,
-        "narHash": "sha256-WZIpIr8WuEDgrzkAPpKXYboKW59MofrqDXSTjNUD+p8=",
+        "lastModified": 1786826927,
+        "narHash": "sha256-gyyTJyS2o4WpCd6SCh4DvO6JhcxEeGQfBFNxZ6QbESg=",
         "ref": "refs/heads/master",
-        "rev": "9a9e0271b8797127b489ba7f9ea5f8fddb4920a9",
-        "revCount": 49,
+        "rev": "43e00f9ea0a7af2b02b723492c42e84427a83c48",
+        "revCount": 51,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-docgen.git"
       },
@@ -6540,11 +6540,11 @@
         "zstd-wrapper": "zstd-wrapper"
       },
       "locked": {
-        "lastModified": 1786750103,
-        "narHash": "sha256-VXdzeJ1E90NaoHx+sBVQbFQp3ZtAfcIkK6pthk/Hl/o=",
+        "lastModified": 1786826684,
+        "narHash": "sha256-N6Cnl8VyExHICsc8fY3+XUXepWlsho0tNgZs19M0Yw0=",
         "ref": "refs/heads/master",
-        "rev": "c195812c7883b03b504bc58c46fcf12dad79ed9b",
-        "revCount": 42,
+        "rev": "cf2778e72016db55ed7e0180fc70d215827cbec6",
+        "revCount": 43,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-kwev.git"
       },
@@ -6564,11 +6564,11 @@
         "zstd-wrapper": "zstd-wrapper_2"
       },
       "locked": {
-        "lastModified": 1786750103,
-        "narHash": "sha256-VXdzeJ1E90NaoHx+sBVQbFQp3ZtAfcIkK6pthk/Hl/o=",
+        "lastModified": 1786826684,
+        "narHash": "sha256-N6Cnl8VyExHICsc8fY3+XUXepWlsho0tNgZs19M0Yw0=",
         "ref": "refs/heads/master",
-        "rev": "c195812c7883b03b504bc58c46fcf12dad79ed9b",
-        "revCount": 42,
+        "rev": "cf2778e72016db55ed7e0180fc70d215827cbec6",
+        "revCount": 43,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-kwev.git"
       },
@@ -6590,11 +6590,11 @@
         "zstd-wrapper": "zstd-wrapper_3"
       },
       "locked": {
-        "lastModified": 1786750103,
-        "narHash": "sha256-VXdzeJ1E90NaoHx+sBVQbFQp3ZtAfcIkK6pthk/Hl/o=",
+        "lastModified": 1786826684,
+        "narHash": "sha256-N6Cnl8VyExHICsc8fY3+XUXepWlsho0tNgZs19M0Yw0=",
         "ref": "refs/heads/master",
-        "rev": "c195812c7883b03b504bc58c46fcf12dad79ed9b",
-        "revCount": 42,
+        "rev": "cf2778e72016db55ed7e0180fc70d215827cbec6",
+        "revCount": 43,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-kwev.git"
       },
@@ -6615,11 +6615,11 @@
         "zstd-wrapper": "zstd-wrapper_4"
       },
       "locked": {
-        "lastModified": 1786750103,
-        "narHash": "sha256-VXdzeJ1E90NaoHx+sBVQbFQp3ZtAfcIkK6pthk/Hl/o=",
+        "lastModified": 1786826684,
+        "narHash": "sha256-N6Cnl8VyExHICsc8fY3+XUXepWlsho0tNgZs19M0Yw0=",
         "ref": "refs/heads/master",
-        "rev": "c195812c7883b03b504bc58c46fcf12dad79ed9b",
-        "revCount": 42,
+        "rev": "cf2778e72016db55ed7e0180fc70d215827cbec6",
+        "revCount": 43,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-kwev.git"
       },
@@ -6640,11 +6640,11 @@
         "zstd-wrapper": "zstd-wrapper_5"
       },
       "locked": {
-        "lastModified": 1786750103,
-        "narHash": "sha256-VXdzeJ1E90NaoHx+sBVQbFQp3ZtAfcIkK6pthk/Hl/o=",
+        "lastModified": 1786826684,
+        "narHash": "sha256-N6Cnl8VyExHICsc8fY3+XUXepWlsho0tNgZs19M0Yw0=",
         "ref": "refs/heads/master",
-        "rev": "c195812c7883b03b504bc58c46fcf12dad79ed9b",
-        "revCount": 42,
+        "rev": "cf2778e72016db55ed7e0180fc70d215827cbec6",
+        "revCount": 43,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-kwev.git"
       },
@@ -6662,11 +6662,11 @@
         "zstd-wrapper": "zstd-wrapper_6"
       },
       "locked": {
-        "lastModified": 1786750103,
-        "narHash": "sha256-VXdzeJ1E90NaoHx+sBVQbFQp3ZtAfcIkK6pthk/Hl/o=",
+        "lastModified": 1786826684,
+        "narHash": "sha256-N6Cnl8VyExHICsc8fY3+XUXepWlsho0tNgZs19M0Yw0=",
         "ref": "refs/heads/master",
-        "rev": "c195812c7883b03b504bc58c46fcf12dad79ed9b",
-        "revCount": 42,
+        "rev": "cf2778e72016db55ed7e0180fc70d215827cbec6",
+        "revCount": 43,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-kwev.git"
       },
@@ -6685,11 +6685,11 @@
         "zstd-wrapper": "zstd-wrapper_7"
       },
       "locked": {
-        "lastModified": 1786750103,
-        "narHash": "sha256-VXdzeJ1E90NaoHx+sBVQbFQp3ZtAfcIkK6pthk/Hl/o=",
+        "lastModified": 1786826684,
+        "narHash": "sha256-N6Cnl8VyExHICsc8fY3+XUXepWlsho0tNgZs19M0Yw0=",
         "ref": "refs/heads/master",
-        "rev": "c195812c7883b03b504bc58c46fcf12dad79ed9b",
-        "revCount": 42,
+        "rev": "cf2778e72016db55ed7e0180fc70d215827cbec6",
+        "revCount": 43,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-kwev.git"
       },
@@ -6821,11 +6821,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786750114,
-        "narHash": "sha256-RWD45Ok+zzV263PgQTncgUtn463s4BeAipvZplQOfiE=",
+        "lastModified": 1786826872,
+        "narHash": "sha256-x8iLbPU6dwXcKxgComcXvrMe7UDRMOW8T/vr7GEm4VU=",
         "ref": "refs/heads/master",
-        "rev": "23f1db3f51c4d09949f3808e74df16ff9e82acfe",
-        "revCount": 104,
+        "rev": "6d59eec5d98dfc7adee0b809fbbeefb75bc2d2ad",
+        "revCount": 106,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-runtime.git"
       },
@@ -6844,11 +6844,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786750114,
-        "narHash": "sha256-RWD45Ok+zzV263PgQTncgUtn463s4BeAipvZplQOfiE=",
+        "lastModified": 1786826872,
+        "narHash": "sha256-x8iLbPU6dwXcKxgComcXvrMe7UDRMOW8T/vr7GEm4VU=",
         "ref": "refs/heads/master",
-        "rev": "23f1db3f51c4d09949f3808e74df16ff9e82acfe",
-        "revCount": 104,
+        "rev": "6d59eec5d98dfc7adee0b809fbbeefb75bc2d2ad",
+        "revCount": 106,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-runtime.git"
       },
@@ -6869,11 +6869,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786750114,
-        "narHash": "sha256-RWD45Ok+zzV263PgQTncgUtn463s4BeAipvZplQOfiE=",
+        "lastModified": 1786826872,
+        "narHash": "sha256-x8iLbPU6dwXcKxgComcXvrMe7UDRMOW8T/vr7GEm4VU=",
         "ref": "refs/heads/master",
-        "rev": "23f1db3f51c4d09949f3808e74df16ff9e82acfe",
-        "revCount": 104,
+        "rev": "6d59eec5d98dfc7adee0b809fbbeefb75bc2d2ad",
+        "revCount": 106,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-runtime.git"
       },
@@ -6893,11 +6893,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786750114,
-        "narHash": "sha256-RWD45Ok+zzV263PgQTncgUtn463s4BeAipvZplQOfiE=",
+        "lastModified": 1786826872,
+        "narHash": "sha256-x8iLbPU6dwXcKxgComcXvrMe7UDRMOW8T/vr7GEm4VU=",
         "ref": "refs/heads/master",
-        "rev": "23f1db3f51c4d09949f3808e74df16ff9e82acfe",
-        "revCount": 104,
+        "rev": "6d59eec5d98dfc7adee0b809fbbeefb75bc2d2ad",
+        "revCount": 106,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-runtime.git"
       },
@@ -6917,11 +6917,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786750114,
-        "narHash": "sha256-RWD45Ok+zzV263PgQTncgUtn463s4BeAipvZplQOfiE=",
+        "lastModified": 1786826872,
+        "narHash": "sha256-x8iLbPU6dwXcKxgComcXvrMe7UDRMOW8T/vr7GEm4VU=",
         "ref": "refs/heads/master",
-        "rev": "23f1db3f51c4d09949f3808e74df16ff9e82acfe",
-        "revCount": 104,
+        "rev": "6d59eec5d98dfc7adee0b809fbbeefb75bc2d2ad",
+        "revCount": 106,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-runtime.git"
       },
@@ -6939,11 +6939,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786750114,
-        "narHash": "sha256-RWD45Ok+zzV263PgQTncgUtn463s4BeAipvZplQOfiE=",
+        "lastModified": 1786826872,
+        "narHash": "sha256-x8iLbPU6dwXcKxgComcXvrMe7UDRMOW8T/vr7GEm4VU=",
         "ref": "refs/heads/master",
-        "rev": "23f1db3f51c4d09949f3808e74df16ff9e82acfe",
-        "revCount": 104,
+        "rev": "6d59eec5d98dfc7adee0b809fbbeefb75bc2d2ad",
+        "revCount": 106,
         "type": "git",
         "url": "ssh://git@git.kalelzar.xyz/kalelzar/kw-runtime.git"
       },
