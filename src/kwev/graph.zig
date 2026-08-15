@@ -17,7 +17,8 @@
 //! `kwev graph` — aggregated operation trees: correlation ids parsed back out
 //! of the zon-encoded properties, records grouped by trace identity, parent
 //! spans matched WITHIN a trace (24-bit spans collide across traces), one dot
-//! subgraph per observed root_op_id.
+//! subgraph per observed root_op_id, partitioned inside by the recording
+//! client (HDRA client name) so merged multi-client traces stay legible.
 
 const std = @import("std");
 
@@ -57,8 +58,33 @@ pub fn run(
         }
         for (insp.batches.items) |b| {
             if (b.records.len == 0) continue;
-            try tasks.append(allocator, .{ .records = b.records, .insp = insp, .gpa = gpa, .out = undefined });
+            // validateRefs guarantees the header exists.
+            try tasks.append(allocator, .{
+                .records = b.records,
+                .insp = insp,
+                .client_name = insp.header.?.client_name,
+                .gpa = gpa,
+                .out = undefined,
+            });
             total_records += b.records.len;
+        }
+    }
+
+    // Intern the per-file client names (sorted + deduped) so records carry a
+    // small id; sorted assignment keeps the output independent of input order.
+    var client_names = std.ArrayList([]const u8){};
+    for (tasks.items) |t| {
+        for (client_names.items) |n| {
+            if (std.mem.eql(u8, n, t.client_name)) break;
+        } else try client_names.append(allocator, t.client_name);
+    }
+    std.mem.sort([]const u8, client_names.items, {}, stringLessThan);
+    for (tasks.items) |*t| {
+        for (client_names.items, 0..) |n, i| {
+            if (std.mem.eql(u8, n, t.client_name)) {
+                t.client = @intCast(i);
+                break;
+            }
         }
     }
 
@@ -146,16 +172,17 @@ pub fn run(
         st.agg.deinit();
     }
 
-    const rendered = try renderDot(allocator, &op_names, &agg);
+    const rendered = try renderDot(allocator, &op_names, client_names.items, &agg);
     try archive.writeAtomic(allocator, output, rendered.dot);
 
     if (uncorrelated != 0) {
         try stderr.print("warning: {d} record(s) without a usable correlation id were skipped\n", .{uncorrelated});
     }
-    try stdout.print("graphed {d} file(s): {d} record(s), {d} trace(s), {d} operation tree(s)", .{
+    try stdout.print("graphed {d} file(s): {d} record(s), {d} trace(s), {d} client(s), {d} operation tree(s)", .{
         files.len,
         total_records,
         agg.trace_count,
+        client_names.items.len,
         rendered.root_count,
     });
     if (agg.orphaned != 0) try stdout.print(" ({d} orphaned record(s) hang off \"?\")", .{agg.orphaned});
@@ -199,9 +226,17 @@ fn forEachParallel(
     pool.waitAndWork(&wg);
 }
 
+fn stringLessThan(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.lessThan(u8, a, b);
+}
+
 const ExtractTask = struct {
     records: []const kwev.structures.Event.EventData,
     insp: *const Inspection,
+    /// HDRA client name of the batch's file; `client` is its interned id,
+    /// assigned once every input is loaded.
+    client_name: []const u8,
+    client: u16 = 0,
     /// Thread-safe allocator backing this worker's zon-fallback scratch.
     gpa: std.mem.Allocator,
     /// This task's disjoint range of the shared slot array; extracted items
@@ -235,6 +270,7 @@ fn extractTask(t: *ExtractTask) void {
         const drv = t.insp.findDriver(res.driver_id).?;
         t.out[t.len] = .{
             .cid = cid,
+            .client = t.client,
             .kind = drv.type,
             .key = drv.name,
             .event_name = res.identifier,
@@ -277,6 +313,8 @@ fn shardTask(t: *ShardTask) void {
 
 const GraphItem = struct {
     cid: core.correlation.CorrelationID,
+    /// Interned id of the recording client (HDRA client name).
+    client: u16,
     kind: []const u8,
     key: []const u8,
     event_name: []const u8,
@@ -301,6 +339,9 @@ fn sameTraceKey(a: GraphItem, b: GraphItem) bool {
 
 const NodeKey = struct {
     root_op: u32,
+    /// Interned client id — the same operation observed by two clients is
+    /// two nodes, so each root cluster partitions into per-client boxes.
+    client: u16,
     op: u32,
 };
 
@@ -313,22 +354,29 @@ const NodeInfo = struct {
 
 const EdgeKey = struct {
     root_op: u32,
+    parent_client: u16,
     parent_op: u32,
+    child_client: u16,
     child_op: u32,
     /// The parent span was not found in the inputs (recorded by another
-    /// service, lost, etc.) — the edge hangs off the dashed "?" node.
+    /// service, lost, etc.) — the edge hangs off the dashed "?" node parked
+    /// in the root's "unknown client" partition. `parent_client`/`parent_op`
+    /// are 0 and meaningless.
     from_unknown: bool,
 };
 
 fn nodeKeyLessThan(_: void, a: NodeKey, b: NodeKey) bool {
     if (a.root_op != b.root_op) return a.root_op < b.root_op;
+    if (a.client != b.client) return a.client < b.client;
     return a.op < b.op;
 }
 
 fn edgeKeyLessThan(_: void, a: EdgeKey, b: EdgeKey) bool {
     if (a.root_op != b.root_op) return a.root_op < b.root_op;
     if (a.from_unknown != b.from_unknown) return !a.from_unknown;
+    if (a.parent_client != b.parent_client) return a.parent_client < b.parent_client;
     if (a.parent_op != b.parent_op) return a.parent_op < b.parent_op;
+    if (a.child_client != b.child_client) return a.child_client < b.child_client;
     return a.child_op < b.child_op;
 }
 
@@ -367,6 +415,7 @@ fn aggregateTraces(gpa: std.mem.Allocator, items: []GraphItem) !TraceAggregation
         for (trace) |item| {
             const ngop = try agg.nodes.getOrPut(.{
                 .root_op = item.cid.root_op_id,
+                .client = item.client,
                 .op = item.cid.current_op_id,
             });
             if (!ngop.found_existing) {
@@ -381,22 +430,26 @@ fn aggregateTraces(gpa: std.mem.Allocator, items: []GraphItem) !TraceAggregation
             // A root invocation has no incoming edge.
             if (item.cid.parent_span_id == 0) continue;
 
-            const parent_op: ?u32 = blk: {
+            const parent: ?GraphItem = blk: {
                 for (trace) |p| {
-                    if (p.cid.span_id == item.cid.parent_span_id) break :blk p.cid.current_op_id;
+                    if (p.cid.span_id == item.cid.parent_span_id) break :blk p;
                 }
                 break :blk null;
             };
-            const ek: EdgeKey = if (parent_op) |op| .{
+            const ek: EdgeKey = if (parent) |p| .{
                 .root_op = item.cid.root_op_id,
-                .parent_op = op,
+                .parent_client = p.client,
+                .parent_op = p.cid.current_op_id,
+                .child_client = item.client,
                 .child_op = item.cid.current_op_id,
                 .from_unknown = false,
             } else blk: {
                 agg.orphaned += 1;
                 break :blk .{
                     .root_op = item.cid.root_op_id,
+                    .parent_client = 0,
                     .parent_op = 0,
+                    .child_client = item.client,
                     .child_op = item.cid.current_op_id,
                     .from_unknown = true,
                 };
@@ -414,10 +467,14 @@ const RenderedDot = struct {
     root_count: usize,
 };
 
-/// Deterministic output: sorted roots, nodes, edges.
+/// Deterministic output: sorted roots, clients, nodes, edges. Each root
+/// cluster nests one cluster per recording client (plus a dashed "unknown
+/// client" cluster holding the "?" node for orphaned parents), so a trace
+/// merged from several clients' archives partitions cleanly by service.
 fn renderDot(
     allocator: std.mem.Allocator,
     op_names: *const std.AutoHashMap(u32, []const u8),
+    client_names: []const []const u8,
     agg: *const TraceAggregation,
 ) !RenderedDot {
     var node_keys = std.ArrayList(NodeKey){};
@@ -453,37 +510,55 @@ fn renderDot(
             if (ek.root_op == root and ek.from_unknown) has_unknown = true;
         }
         if (has_unknown) {
-            try w.print("        \"{x:0>8}/unknown\" [label=\"?\", style=dashed];\n", .{root});
+            try w.print("        subgraph \"cluster_{x:0>8}_unknown\" {{\n", .{root});
+            try w.writeAll("            label=\"unknown client\";\n            style=dashed;\n");
+            try w.print("            \"{x:0>8}/unknown\" [label=\"?\", style=dashed];\n", .{root});
+            try w.writeAll("        }\n");
         }
 
-        for (node_keys.items) |nk| {
-            if (nk.root_op != root) continue;
-            const info = agg.nodes.get(nk).?;
-            try w.print("        \"{x:0>8}/{x:0>8}\" [label=\"{s}.{s}.{s}.", .{
-                root,
-                nk.op,
-                info.kind,
-                info.key,
-                info.event_name,
-            });
-            if (op_names.get(nk.op)) |name| {
-                try w.print("{s}", .{name});
-            } else {
-                try w.print("{x:0>8}", .{nk.op});
+        // node_keys sort by (root, client, op): walk this root's per-client
+        // runs, one nested cluster each.
+        var ni: usize = 0;
+        while (ni < node_keys.items.len) : (ni += 1) {
+            if (node_keys.items[ni].root_op != root) continue;
+            const client = node_keys.items[ni].client;
+            try w.print("        subgraph \"cluster_{x:0>8}_{d}\" {{\n", .{ root, client });
+            try w.print("            label=\"client {s}\";\n", .{client_names[client]});
+            while (ni < node_keys.items.len and
+                node_keys.items[ni].root_op == root and
+                node_keys.items[ni].client == client) : (ni += 1)
+            {
+                const nk = node_keys.items[ni];
+                const info = agg.nodes.get(nk).?;
+                try w.print("            \"{x:0>8}/{d}/{x:0>8}\" [label=\"{s}.{s}.{s}.", .{
+                    root,
+                    client,
+                    nk.op,
+                    info.kind,
+                    info.key,
+                    info.event_name,
+                });
+                if (op_names.get(nk.op)) |name| {
+                    try w.print("{s}", .{name});
+                } else {
+                    try w.print("{x:0>8}", .{nk.op});
+                }
+                try w.print("\\n{d}x\"];\n", .{info.count});
             }
-            try w.print("\\n{d}x\"];\n", .{info.count});
+            ni -= 1;
+            try w.writeAll("        }\n");
         }
 
         for (edge_keys.items) |ek| {
             if (ek.root_op != root) continue;
             const count = agg.edges.get(ek).?;
             if (ek.from_unknown) {
-                try w.print("        \"{x:0>8}/unknown\" -> \"{x:0>8}/{x:0>8}\" [label=\"{d}x\"];\n", .{
-                    root, root, ek.child_op, count,
+                try w.print("        \"{x:0>8}/unknown\" -> \"{x:0>8}/{d}/{x:0>8}\" [label=\"{d}x\"];\n", .{
+                    root, root, ek.child_client, ek.child_op, count,
                 });
             } else {
-                try w.print("        \"{x:0>8}/{x:0>8}\" -> \"{x:0>8}/{x:0>8}\" [label=\"{d}x\"];\n", .{
-                    root, ek.parent_op, root, ek.child_op, count,
+                try w.print("        \"{x:0>8}/{d}/{x:0>8}\" -> \"{x:0>8}/{d}/{x:0>8}\" [label=\"{d}x\"];\n", .{
+                    root, ek.parent_client, ek.parent_op, root, ek.child_client, ek.child_op, count,
                 });
             }
         }
