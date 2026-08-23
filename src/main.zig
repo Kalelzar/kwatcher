@@ -994,7 +994,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     // - .scoped(): Created fresh for each request
     const base_deps = core.deps.DependencyContainer(Config)
         .new(drivers.drivers, allocator)
-        // Register default dependencies (allocator pools, user info, client info)
+        // Register default dependencies (allocator pools, user info)
         .with(.all, kwatcher.default.withDefault(&config_slot, client_info), allocator)
         // Register app-specific config resolver
         .with(.all, kwatcher.default.config(AppConfig, "app"), allocator)
@@ -1008,7 +1008,10 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
         // Register AMQP client pool and connection handling
         .with(.amqp, amqp.defaultFor(drivers.drivers, RouteContext), allocator)
         // Register the client-registration + secret protocol deps (config
-        // resolvers, registries off RouteContext, scheduler shim bridges)
+        // resolvers, registries off RouteContext, scheduler shim bridges).
+        // client_registration also provides the registry-aware ClientInfo
+        // factory on .all; apps not wiring the protocol register a fallback
+        // instead: .with(.all, kwatcher.default.clientInfo(client_info), allocator)
         .with(.amqp, protocol.deps(drivers.drivers, RouteContext, protocols), allocator)
         // Register the type-erased cron scheduler shim (drives the introspection Timers tab)
         .with(.cron, cron.defaultFor(drivers.drivers), allocator)
