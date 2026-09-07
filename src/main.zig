@@ -213,9 +213,10 @@ const AmqpRoutes = struct {
     /// local and off the broker.
     pub fn @"publish!:secret-demo amq.direct/secret.demo"(
         reg: *protocol.secret.registry,
-        persistent: std.mem.Allocator,
+        persistent_owner: *core.mem.PersistentAllocator,
         inj: *core.deps.DepCtx,
     ) !?core.schema.Message(HeartbeatMessage) {
+        const persistent = try persistent_owner.allocatorFor("amqp:amqp:secret-demo");
         const amqp_sched = try inj.require(Scheduler(.amqp));
 
         const callback = try amqp_sched.publishLater(.{ .@"secret-demo" = .{} }, .{ .inj = inj });
@@ -405,7 +406,7 @@ const ActionRoutes = struct {
     pub fn cancel(
         ctx: struct { cron.ShimId },
         inj: *core.deps.DepCtx,
-        persistent: std.mem.Allocator,
+        persistent: core.mem.TaggedAllocator,
     ) !void {
         const target = ctx.@"0";
         defer if (target == .anonymous) persistent.free(target.anonymous);
@@ -466,7 +467,8 @@ const SqliteRoutes = struct {
         try db.conn.exec("INSERT INTO visit (event, at) VALUES (?1, ?2)", .{ ctx.@"1", ctx.@"0" });
     }
 
-    pub fn logVisitCount(db: *sqlite.Db, allocator: std.mem.Allocator) !void {
+    pub fn logVisitCount(db: *sqlite.Db, persistent: core.mem.TaggedAllocator) !void {
+        const allocator = persistent.allocator();
         var q = sqlite.orm.Query
             .from(.v, Visit)
             .select(.{ .v = .{ .id = .id } });
@@ -508,7 +510,7 @@ const HTTPRoutes = struct {
     pub fn @"GET /api/v1/ok @okExample"(
         _: http.data.Request(null),
         inj: *core.deps.DepCtx,
-        persistent: std.mem.Allocator,
+        persistent: core.mem.TaggedAllocator,
     ) !http.data.Json(
         HeartbeatMessage,
         .{.ok},
@@ -911,7 +913,12 @@ const Scheduler = drivers.drivers.SchedulerMap();
 
 var config_slot: Config = undefined;
 
-pub fn juicyMain(allocator: std.mem.Allocator) !void {
+pub fn juicyMain(backing: std.mem.Allocator) !void {
+    var persistent = core.mem.PersistentAllocator.init(backing);
+    defer persistent.deinit();
+    const root = try persistent.suballocator("kwatcher");
+    const allocator = try root.suballocator("di");
+    var allocator_context = struct { persistent: *core.mem.PersistentAllocator }{ .persistent = &persistent };
     // Block the signals owned by the signal driver process-wide BEFORE any thread
     // spawns, so every runtime thread inherits the block and the driver's dedicated
     // sigtimedwait thread is their sole consumer. The mask is derived from the
@@ -919,11 +926,11 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     // the introspection UI's Send button (kill(getpid())) reliable.
     signal.blockRouted(signal_routes);
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena = std.heap.ArenaAllocator.init(try root.allocatorFor("config"));
     defer arena.deinit();
 
     // Initialize metrics (optional)
-    try core.metrics.initialize(allocator, "example", "1.0.0", "example-client", .{});
+    try core.metrics.initialize(try root.allocatorFor("metrics"), "example", "1.0.0", "example-client", .{});
     defer core.metrics.deinitialize();
 
     // Load configuration from file
@@ -965,7 +972,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     // The OIDC discovery/JWKS store: written only by the egress driver,
     // read by the verification middleware in every enforced scope.
     var oidc_store = auth_oidc.DiscoveryStoreCtx{};
-    oidc_store.store.alloc = allocator;
+    oidc_store.store.alloc = try root.allocatorFor("oidc:store");
 
     // The private mount's registries — the app owns all three, and the split
     // is deliberate: AuthSchemes/LoginClients describe the *application's*
@@ -994,6 +1001,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
     // - .scoped(): Created fresh for each request
     const base_deps = core.deps.DependencyContainer(Config)
         .new(drivers.drivers, allocator)
+        .static(.all, &allocator_context)
         // Register default dependencies (allocator pools, user info)
         .with(.all, kwatcher.default.withDefault(&config_slot, client_info), allocator)
         // Register app-specific config resolver
@@ -1060,7 +1068,7 @@ pub fn juicyMain(allocator: std.mem.Allocator) !void {
 
     // Create and start the server
     var server = try kwatcher.server.Server(@TypeOf(deps), drivers.drivers)
-        .init(allocator, deps, config_slot.app.workers); // 4 consumer threads
+        .init(root, deps, config_slot.app.workers); // 4 consumer threads
     defer server.deinit();
 
     log.info("Starting example server...", .{});

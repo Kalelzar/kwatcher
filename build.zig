@@ -30,6 +30,7 @@ fn wireApp(
     optimize: std.builtin.OptimizeMode,
     openapi_version: []const u8,
     ui: bool,
+    include_metrics: bool,
     build_opts_mod: *std.Build.Module,
 ) *std.Build.Module {
     const app = b.createModule(.{
@@ -53,18 +54,18 @@ fn wireApp(
     sqlite_migrations.wire(b, app, "migrations");
 
     // 1st Party:
-    const kw_core = b.dependency("kw_core", .{ .target = target, .optimize = optimize }).module("kw-core");
-    const kwatcher = b.dependency("kwatcher", .{ .target = target, .optimize = optimize }).module("kwatcher");
-    const kw_amqp = b.dependency("kw_amqp", .{ .target = target, .optimize = optimize }).module("kw-amqp");
-    const kw_protocol = b.dependency("kw_protocol", .{ .target = target, .optimize = optimize }).module("kw-protocol");
-    const kw_config = b.dependency("kw_config", .{ .target = target, .optimize = optimize }).module("kw-config");
-    const kw_http = b.dependency("kw_http", .{ .target = target, .optimize = optimize }).module("kw-http");
-    const kw_cron = b.dependency("kw_cron", .{ .target = target, .optimize = optimize }).module("kw-cron");
-    const kw_action = b.dependency("kw_action", .{ .target = target, .optimize = optimize }).module("kw-action");
-    const kw_signal = b.dependency("kw_signal", .{ .target = target, .optimize = optimize }).module("kw-signal");
-    const kw_sqlite = b.dependency("kw_sqlite", .{ .target = target, .optimize = optimize }).module("kw-sqlite");
-    const kw_auth_oidc = b.dependency("kw_auth_oidc", .{ .target = target, .optimize = optimize }).module("kw-auth-oidc");
-    const kw_http_client = b.dependency("kw_http_client", .{ .target = target, .optimize = optimize }).module("kw-http-client");
+    const kw_core = b.dependency("kw_core", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).module("kw-core");
+    const kwatcher = b.dependency("kwatcher", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).module("kwatcher");
+    const kw_amqp = b.dependency("kw_amqp", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).module("kw-amqp");
+    const kw_protocol = b.dependency("kw_protocol", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).module("kw-protocol");
+    const kw_config = b.dependency("kw_config", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).module("kw-config");
+    const kw_http = b.dependency("kw_http", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).module("kw-http");
+    const kw_cron = b.dependency("kw_cron", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).module("kw-cron");
+    const kw_action = b.dependency("kw_action", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).module("kw-action");
+    const kw_signal = b.dependency("kw_signal", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).module("kw-signal");
+    const kw_sqlite = b.dependency("kw_sqlite", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).module("kw-sqlite");
+    const kw_auth_oidc = b.dependency("kw_auth_oidc", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).module("kw-auth-oidc");
+    const kw_http_client = b.dependency("kw_http_client", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).module("kw-http-client");
 
     // 3rd Party:
     const httpz = b.dependency("httpz", .{ .target = target, .optimize = optimize }).module("httpz");
@@ -78,21 +79,25 @@ fn wireApp(
     // driver. UI builds only — UI-less builds leave these modules (and the whole zmpl
     // template machinery) out of the graph; main.zig's uses are gated on `build_options.ui`.
     if (ui) {
-        const kw_docgen_dep = b.dependency("kw_docgen", .{ .target = target, .optimize = optimize });
+        const kw_docgen_dep = b.dependency("kw_docgen", .{ .metrics = include_metrics, .target = target, .optimize = optimize });
         const kw_docgen_http_dep = b.dependency("kw_docgen_http", .{
+            .metrics = include_metrics,
             .target = target,
             .optimize = optimize,
             .openapi_version = openapi_version,
         });
         const kw_docgen_cron_dep = b.dependency("kw_docgen_cron", .{
+            .metrics = include_metrics,
             .target = target,
             .optimize = optimize,
         });
         const kw_docgen_signal_dep = b.dependency("kw_docgen_signal", .{
+            .metrics = include_metrics,
             .target = target,
             .optimize = optimize,
         });
         const kw_docgen_sqlite_dep = b.dependency("kw_docgen_sqlite", .{
+            .metrics = include_metrics,
             .target = target,
             .optimize = optimize,
         });
@@ -108,6 +113,7 @@ fn wireApp(
         // files inside their packages; `packageSource` resolves those dirs to absolute paths. One
         // shared module so every generator's `WithTemplates` lookups (core + http prefixes) resolve.
         const kw_http_template = http_template.wire(b, .{
+            .metrics = include_metrics,
             .target = target,
             .optimize = optimize,
             .sources = &.{
@@ -154,6 +160,7 @@ fn wireApp(
 }
 
 pub fn build(b: *std.Build) !void {
+    const include_metrics = b.option(bool, "metrics", "Include metrics generation in code.") orelse false;
     // Options
     const build_all = b.option(bool, "all", "Build all components. You can still disable individual components") orelse false;
     const build_example = b.option(bool, "example", "Build the example application") orelse build_all;
@@ -182,7 +189,7 @@ pub fn build(b: *std.Build) !void {
     const app_opts_mod = app_opts.createModule();
 
     // The installed application, built for the requested target.
-    const kwatcher_example = wireApp(b, target, optimize, openapi_version, build_ui, app_opts_mod);
+    const kwatcher_example = wireApp(b, target, optimize, openapi_version, build_ui, include_metrics, app_opts_mod);
 
     // Artifacts:
     const example = b.addExecutable(.{
@@ -202,7 +209,7 @@ pub fn build(b: *std.Build) !void {
 
     // Built and shaped (ReleaseSafe-when-Debug) by the kw-kwev package
     // itself; the umbrella only re-exposes the artifact.
-    const kwev = b.dependency("kw_kwev", .{ .target = target, .optimize = optimize }).artifact("kwev");
+    const kwev = b.dependency("kw_kwev", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).artifact("kwev");
     if (build_kwev) {
         b.installArtifact(kwev);
     }
@@ -240,28 +247,33 @@ pub fn build(b: *std.Build) !void {
     const gen_target = b.resolveTargetQuery(.{ .abi = .musl });
 
     const kw_docgen_http = b.dependency("kw_docgen_http", .{
+        .metrics = include_metrics,
         .target = gen_target,
         .optimize = optimize,
         .openapi_version = openapi_version,
     }).module("kw-docgen--http");
 
     const kw_docgen_amqp = b.dependency("kw_docgen_amqp", .{
+        .metrics = include_metrics,
         .target = gen_target,
         .optimize = optimize,
         .asyncapi_version = asyncapi_version,
     }).module("kw-docgen--amqp");
 
     const kw_docgen_cron = b.dependency("kw_docgen_cron", .{
+        .metrics = include_metrics,
         .target = gen_target,
         .optimize = optimize,
     }).module("kw-docgen--cron");
 
     const kw_docgen_signal = b.dependency("kw_docgen_signal", .{
+        .metrics = include_metrics,
         .target = gen_target,
         .optimize = optimize,
     }).module("kw-docgen--signal");
 
     const kw_docgen_sqlite = b.dependency("kw_docgen_sqlite", .{
+        .metrics = include_metrics,
         .target = gen_target,
         .optimize = optimize,
     }).module("kw-docgen--sqlite");
@@ -277,7 +289,7 @@ pub fn build(b: *std.Build) !void {
     // "derive from the consumer" cheap path for native builds no longer
     // applies.
     const entrypoint: ?*std.Build.Module =
-        wireApp(b, gen_target, optimize, openapi_version, build_ui, app_opts_mod);
+        wireApp(b, gen_target, optimize, openapi_version, build_ui, include_metrics, app_opts_mod);
 
     // Docgen: wired after the example's imports are in place so the helper can mirror
     // them onto the host-target entrypoint it derives internally. This also adds the
@@ -298,6 +310,7 @@ pub fn build(b: *std.Build) !void {
     };
 
     const docs = docgen.wire(b, .{
+        .metrics = include_metrics,
         .target = gen_target,
         .optimize = optimize,
         .consumer = kwatcher_example,
@@ -329,6 +342,7 @@ pub fn build(b: *std.Build) !void {
     // `zig build commit-migration -Dmigration-name=<name>`.
     const migration_name = b.option([]const u8, "migration-name", "Name for the migration committed by `zig build commit-migration`") orelse "migration";
     const commit_tool = b.dependency("kw_docgen_sqlite", .{
+        .metrics = include_metrics,
         .target = gen_target,
         .optimize = optimize,
     }).artifact("kw-sqlite-commit");
