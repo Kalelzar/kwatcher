@@ -967,6 +967,12 @@ pub fn juicyMain(backing: std.mem.Allocator) !void {
     // Create singleton dependencies
     var counter = CounterDependency{};
     var ctx: RouteContext = .{};
+    // The secret registry's pending bookkeeping (identifier keys, lists) is
+    // heap-owned; hand it back once the server has stopped. Events still
+    // pending at shutdown stay with their creators per the registry's
+    // ownership rule.
+    const secrets_allocator = try root.allocatorFor("secrets");
+    defer ctx.secrets.deinit(secrets_allocator);
     ctx.oidc.well_known_path = auth_oidc.egress.pathOf(config_slot.auth.well_known);
 
     // The OIDC discovery/JWKS store: written only by the egress driver,
