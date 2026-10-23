@@ -27,7 +27,7 @@ const sqlite_migrations = @import("kw_sqlite").build_migrations;
 fn wireApp(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     openapi_version: []const u8,
     ui: bool,
     include_metrics: bool,
@@ -184,8 +184,14 @@ pub fn build(b: *std.Build) !void {
     // the non-sqlite docgen backends). Compiling it out roughly halves the
     // example's compile; sqlite docgen always stays — it generates migrations.
     const build_ui = b.option(bool, "ui", "Build the private introspection UI into the example") orelse true;
+    // Which std.Io implementation the example's `main` hands to the framework.
+    // `threaded` is the default `std.process.Init` instance; `evented` builds an
+    // app-owned `std.Io.Evented` (io_uring + fibers on Linux) for comparison.
+    const IoBackend = enum { threaded, evented };
+    const io_backend = b.option(IoBackend, "io", "std.Io backend for the example: threaded (default) or evented") orelse .threaded;
     const app_opts = b.addOptions();
     app_opts.addOption(bool, "ui", build_ui);
+    app_opts.addOption(IoBackend, "io", io_backend);
     const app_opts_mod = app_opts.createModule();
 
     // The installed application, built for the requested target.
@@ -200,7 +206,7 @@ pub fn build(b: *std.Build) !void {
         // works for Debug-at-musl (`-Dmusl`); everything else keeps LLVM
         // (glibc CRT .sframe blocks the self-hosted linker, and release
         // builds want LLVM's optimizer).
-        .use_llvm = !(target.result.cpu.arch == .x86_64 and target.result.abi == .musl and optimize == .Debug),
+        .use_llvm = !(target.result.cpu.arch == .x86_64 and target.result.abi == .musl and optimize == .debug),
     });
 
     if (build_example) {
@@ -215,11 +221,11 @@ pub fn build(b: *std.Build) !void {
     }
 
     const fmt = b.addFmt(.{
-        .paths = &.{
+        .paths = b.pathList(&.{
             "src/",
             "build.zig",
             "build.zig.zon",
-        },
+        }),
         .check = true,
     });
 
@@ -331,7 +337,7 @@ pub fn build(b: *std.Build) !void {
     const example_tests = b.addTest(.{
         .root_module = kwatcher_example,
         // Same self-hosted gate as the example exe: x86_64-only.
-        .use_llvm = !(target.result.cpu.arch == .x86_64 and target.result.abi == .musl and optimize == .Debug),
+        .use_llvm = !(target.result.cpu.arch == .x86_64 and target.result.abi == .musl and optimize == .debug),
     });
     const run_example_tests = b.addRunArtifact(example_tests);
     const test_step = b.step("test", "Run the test suites over the example app graph.");
@@ -349,7 +355,7 @@ pub fn build(b: *std.Build) !void {
     const run_commit = b.addRunArtifact(commit_tool);
     run_commit.has_side_effects = true;
     run_commit.addDirectoryArg(docs.docgen_path);
-    run_commit.addArg(b.pathFromRoot("migrations"));
+    run_commit.addArg(b.root.joinString(b.allocator, "migrations") catch @panic("OOM"));
     run_commit.addArg(migration_name);
     const commit_step = b.step("commit-migration", "Promote the candidate sqlite migration to a committed migration");
     commit_step.dependOn(&run_commit.step);

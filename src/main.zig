@@ -15,6 +15,7 @@
 // with this program. If not, see <https://www.gnu.org/licenses/>.
 
 const std = @import("std");
+const metac = @import("kw-core").meta;
 const builtin = @import("builtin");
 
 const core = @import("kw-core");
@@ -224,7 +225,7 @@ const AmqpRoutes = struct {
         errdefer persistent.destroy(ev);
         ev.* = callback;
 
-        if (try reg.getOrRequest(persistent, "secret", @ptrCast(ev), amqp_sched, .{ .inj = inj })) |secret| {
+        if (try reg.getOrRequest(try inj.require(std.Io), persistent, "secret", @ptrCast(ev), amqp_sched, .{ .inj = inj })) |secret| {
             persistent.destroy(ev); // cache hit: the callback event is still ours
             log.info("[secret-demo] secret 'secret' = '{s}' ({d} bytes)", .{ secret, secret.len });
             return null;
@@ -263,7 +264,7 @@ const CronRoutes = struct {
     /// Triggers every 5 seconds.
     pub fn @"heartbeat_tick */5 * * * * *"(inj: *core.deps.DepCtx) !void {
         const scheduler = try inj.require(Scheduler(.amqp));
-        const timestamp = std.time.microTimestamp();
+        const timestamp: i64 = @intCast(@divTrunc(std.Io.Clock.real.now(try inj.require(std.Io)).toNanoseconds(), std.time.ns_per_us));
 
         // Publish a heartbeat event with no greeting override
         try scheduler.publish(
@@ -362,7 +363,7 @@ const LoopbackRoutes = struct {
         }
 
         pub fn client_error(rctx: struct { status: std.http.Status }) void {
-            log.warn("[loopback] createUser rejected: {d}", .{@intFromEnum(rctx.status)});
+            log.warn("[loopback] createUser rejected: {d}", .{@backingInt(rctx.status)});
         }
 
         pub fn failed(rctx: struct { err: anyerror, attempts: u32 }) void {
@@ -383,7 +384,7 @@ const LoopbackRoutes = struct {
         }
 
         pub fn @"error"(rctx: struct { status: std.http.Status }) void {
-            log.warn("[loopback] getUser failed upstream: {d}", .{@intFromEnum(rctx.status)});
+            log.warn("[loopback] getUser failed upstream: {d}", .{@backingInt(rctx.status)});
         }
 
         pub fn failed(rctx: struct { err: anyerror }) void {
@@ -416,7 +417,7 @@ const ActionRoutes = struct {
         log.info("Cancelling job: {s}", .{name});
 
         const scheduler = try inj.require(Scheduler(.cron));
-        const Id = @typeInfo(@TypeOf(Scheduler(.cron).cancel)).@"fn".params[1].type.?;
+        const Id = metac.params(@TypeOf(Scheduler(.cron).cancel))[1].type.?;
         const id: Id = switch (target) {
             .route => |route| .{
                 .route = std.meta.stringToEnum(@FieldType(Id, "route"), route) orelse {
@@ -444,7 +445,7 @@ const ActionRoutes = struct {
         inj: *core.deps.DepCtx,
         reg: *protocol.secret.registry,
     ) !void {
-        if (reg.get(ctx.@"0") != null) return;
+        if (reg.get(try inj.require(std.Io), ctx.@"0") != null) return;
         const sched = try inj.require(Scheduler(.amqp));
         try sched.publish(.{ .@"secret-get" = .{ctx.@"0"} }, .{ .inj = inj });
     }
@@ -913,8 +914,8 @@ const Scheduler = drivers.drivers.SchedulerMap();
 
 var config_slot: Config = undefined;
 
-pub fn juicyMain(backing: std.mem.Allocator) !void {
-    var persistent = core.mem.PersistentAllocator.init(backing);
+pub fn juicyMain(backing: std.mem.Allocator, io: std.Io, environ: *const std.process.Environ.Map) !void {
+    var persistent = core.mem.PersistentAllocator.init(io, backing);
     defer persistent.deinit();
     const root = try persistent.suballocator("kwatcher");
     const allocator = try root.suballocator("di");
@@ -930,14 +931,14 @@ pub fn juicyMain(backing: std.mem.Allocator) !void {
     defer arena.deinit();
 
     // Initialize metrics (optional)
-    try core.metrics.initialize(try root.allocatorFor("metrics"), "example", "1.0.0", "example-client", .{});
+    try core.metrics.initialize(try root.allocatorFor("metrics"), io, "example", "1.0.0", "example-client", .{});
     defer core.metrics.deinitialize();
 
     // Load configuration from file
     // UI-less builds load their own config file (no `introspect` /
     // `driver.private` sections) — the parser rejects unknown fields.
     const config_name = if (build_options.ui) "example" else "example.noui";
-    config_slot = try core.config.findConfigFile(Config, arena.allocator(), config_name) orelse {
+    config_slot = try core.config.findConfigFile(Config, arena.allocator(), io, environ, config_name) orelse {
         std.log.err("Could not load config! Create '" ++ config_name ++ ".json' with the required fields.", .{});
         std.log.err("Example config:", .{});
         std.log.err(
@@ -1006,7 +1007,7 @@ pub fn juicyMain(backing: std.mem.Allocator) !void {
     // - .static(): Lives for the entire application lifetime
     // - .scoped(): Created fresh for each request
     const base_deps = core.deps.DependencyContainer(Config)
-        .new(drivers.drivers, allocator)
+        .new(io, drivers.drivers, allocator)
         .static(.all, &allocator_context)
         // Register default dependencies (allocator pools, user info)
         .with(.all, kwatcher.default.withDefault(&config_slot, client_info), allocator)
@@ -1074,7 +1075,7 @@ pub fn juicyMain(backing: std.mem.Allocator) !void {
 
     // Create and start the server
     var server = try kwatcher.server.Server(@TypeOf(deps), drivers.drivers)
-        .init(root, deps, config_slot.app.workers); // 4 consumer threads
+        .init(io, environ, root, deps, config_slot.app.workers); // 4 consumer threads
     defer server.deinit();
 
     log.info("Starting example server...", .{});
@@ -1083,19 +1084,31 @@ pub fn juicyMain(backing: std.mem.Allocator) !void {
     try server.start();
 }
 
-pub fn main() !void {
-    if (comptime builtin.mode == .Debug) {
-        var gpa = std.heap.GeneralPurposeAllocator(.{
-            .stack_trace_frames = 10,
-        }).init;
-        const allocator = gpa.allocator();
-        juicyMain(allocator) catch |e| {
+pub fn main(init: std.process.Init) !void {
+    // Zig 0.17 "juicy main": `init.gpa` is a leak-checked allocator in Debug
+    // and the default general-purpose one otherwise; the environment is no
+    // longer process-global and is threaded down from here. The Io instance
+    // every blocking operation goes through is either the default
+    // `Io.Threaded` from `init.io` or, with `-Dio=evented`, an app-owned
+    // `Io.Evented` (io_uring + fibers) built here for comparison.
+    switch (build_options.io) {
+        .threaded => juicyMain(init.gpa, init.io, init.environ_map) catch |e| {
             std.log.err("Application error: {}", .{e});
-        };
-        _ = gpa.detectLeaks();
-    } else {
-        const alloc = std.heap.smp_allocator;
-        try juicyMain(alloc);
+            return e;
+        },
+        .evented => {
+            var evented: std.Io.Evented = undefined;
+            try evented.init(init.gpa, .{
+                .argv0 = .init(init.minimal.args),
+                .environ = init.minimal.environ,
+            });
+            defer evented.deinit();
+            std.log.info("Io backend: evented (io_uring)", .{});
+            juicyMain(init.gpa, evented.io(), init.environ_map) catch |e| {
+                std.log.err("Application error: {}", .{e});
+                return e;
+            };
+        },
     }
 }
 

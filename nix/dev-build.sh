@@ -17,24 +17,26 @@ shift || true
 
 mkdir -p "$FLEET/_grafts" "$FLEET/umbrella"
 
-# Clean copies of every package worktree (junk excluded; vendor/ kept — the
-# initialized vendors also serve as local sources for the non-flake grafts).
+# Clean copies of every package worktree. Junk excluded — zig-pkg/ among it:
+# that is zig 0.17's fetched-package store and must not pre-seed the nix
+# fetch derivation. vendor/ kept — the initialized vendors also serve as
+# local sources for the non-flake grafts.
 for d in "$ROOT"/packages/*/; do
   n="$(basename "$d")"
   rsync -a --delete \
-    --exclude .git --exclude .zig-cache --exclude zig-out --exclude result \
+    --exclude .git --exclude .zig-cache --exclude zig-out --exclude zig-pkg --exclude result \
     "$d" "$FLEET/$n/"
 done
 
 # Local sources for the non-flake graft inputs, taken from the initialized
 # umbrella vendors (zamqp includes its rabbitmq-c submodule checkout).
-rsync -a --delete --exclude .git --exclude .zig-cache --exclude zig-out \
+rsync -a --delete --exclude .git --exclude .zig-cache --exclude zig-out --exclude zig-pkg \
   "$ROOT/packages/amqp/vendor/zamqp/" "$FLEET/_grafts/zamqp/"
-rsync -a --delete --exclude .git --exclude .zig-cache --exclude zig-out \
+rsync -a --delete --exclude .git --exclude .zig-cache --exclude zig-out --exclude zig-pkg \
   "$ROOT/packages/amqp/vendor/zamqp/vendor/rabbitmq-c/" "$FLEET/_grafts/rabbitmq-c/"
-rsync -a --delete --exclude .git --exclude .zig-cache --exclude zig-out \
+rsync -a --delete --exclude .git --exclude .zig-cache --exclude zig-out --exclude zig-pkg \
   "$ROOT/packages/kwev/vendor/zstd/" "$FLEET/_grafts/zstd-wrapper/"
-rsync -a --delete --exclude .git --exclude .zig-cache --exclude zig-out \
+rsync -a --delete --exclude .git --exclude .zig-cache --exclude zig-out --exclude zig-pkg \
   "$ROOT/packages/orm-sqlite/vendor/sqlite3/" "$FLEET/_grafts/sqlite3/"
 
 # Umbrella root: exactly the zon-declared paths, minus packages/.
