@@ -28,6 +28,13 @@ this file only covers what this framework now expects from you.
 - Every fetched package's `build.zig` is compiled into one configurer process:
   a single 0.15-era dependency anywhere in the graph breaks configuration.
 
+- Dependents that vendor the kw-* packages as git submodules: move every
+  `vendor/<pkg>` to that package's `master`, and keep nested `vendor/*/vendor/**`
+  trees either uninitialised (as each package's `bootstrap.sh` does) or advanced
+  with their parents. A populated nested tree left at 0.15 commits is compiled
+  into the configurer (old zmpl/zmd/zul build scripts) and breaks configuration
+  even though nothing imports it.
+
 ## 1. The application entry point
 
 ```zig
@@ -96,6 +103,25 @@ truncating). Current directory: `std.process.currentPath(io, &buf)` (never
   (hot paths) and `core.sync.RecursiveMutex` (re-entrant C-client code).
 - Teardown relies on static declaration order matching registration order; add
   new server statics at the end of both.
+- Cancellation spelling: a route that returns `null` from an optional result
+  (cancelling its own publish/response) surfaces as `error.Canceled`, the same
+  error std's blocking calls raise when a task is canceled. The runtime handles
+  it in one place (`server.zig`, dispatch): a debug line naming the event type,
+  the event is recorded, nothing is logged as a failure. Drivers must not log
+  or special-case it themselves.
+- kw-cache storage contexts are constructed as `init(io, allocator, name)`
+  (file contexts: `init(io, environ, allocator, name)`); the context factories
+  obtain `io`/`environ` through DI, so app code that builds caches through
+  `Container(...)` is unchanged. `.expiration(...)` works again (the TTL store
+  reads `Io.Clock.awake`).
+- Pass `.metrics = include_metrics` to EVERY kw-* `b.dependency` call that
+  declares the option (all but kw-docgen-http-client). Mixing values
+  instantiates the framework modules twice ("file exists in modules kw-core and
+  kw-core0").
+- Apps that provide their own allocator context must register it:
+  `.static(.all, &allocator_context)` on the DI hub, as the example app does;
+  without it `PersistentAllocator`, `userInfoFac` and `routeAllocator` resolve
+  to nothing.
 - The MPMC queue is `core.queue.StaticStrictWith(T, StrictOptions)`; `StaticStrict(T)`
   is the default knobs and `StaticStrictHeader(T, Header)` only remains as a
   compatibility spelling (the header word is gone, `Occupancy` is always `u32`).
@@ -117,6 +143,7 @@ truncating). Current directory: `std.process.currentPath(io, &buf)` (never
 | `"x" ** n`, `[_]T{v} ** n` | `@splat` / typed arrays |
 | `std.mem.indexOf*`, `trimLeft/Right`, `std.fmt.allocPrint(gpa, ...)` | `find*`, `trimStart/End`, `gpa.print(...)` |
 | `std.builtin` | `std.lang` (`std.builtin` is an alias, but the sweep used `std.lang`) |
+| `error.Cancelled` (route self-cancel) | `error.Canceled` |
 | `std.zon.parse.fromSlice(T, gpa, src, null, .{})` | `fromSlice(T, .{ .gpa, .arena, .source, .diagnostics = &diag })` |
 | http formatters `write(self, writer, res)` | `write(self, io, writer, res)`; `ErrorHandler.preQueue/postQueue(io, e, req, res)` |
 | `kw_config.env.expand(T, alloc, value)` | `expand(T, alloc, environ, value)` |
