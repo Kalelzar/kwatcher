@@ -75,8 +75,8 @@
             .hash = "httpz-0.0.0-PNVzrNAXCQDHb-rRH2jq07A3Ekv3GS6XOTkiqZJtKeqv",
         },
         .zmpl = .{
-            .url = "git+https://github.com/Kalelzar/zmpl#143dab1ea6b137428aeadc3ffebecd82b8b549b6",
-            .hash = "zmpl-0.0.1-SYFGBik4DABJrfEpLzXFH7Sw84UlBsEshkuRhCSvwMrT",
+            .url = "git+https://github.com/Kalelzar/zmpl#fa6d646a6871f08e487a1a1657ab772c7d3a1c5a",
+            .hash = "zmpl-0.0.1-SYFGBg05DAAuCesq90tOMkDBbBM1MJT_6HxW_DgmmkGH",
         },
     },
     .paths = .{
