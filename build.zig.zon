@@ -1,7 +1,7 @@
 .{
     .name = .kwatcher_example,
     .version = "0.1.2",
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.17.0",
     .fingerprint = 0x5a2508fd019a6580,
     .dependencies = .{
         .kw_core = .{
@@ -71,12 +71,12 @@
             .path = "packages/auth-oidc",
         },
         .httpz = .{
-            .url = "git+https://github.com/karlseguin/http.zig?ref=master#1a4d53b95bc4ac6c84cbc081727428de40c8c635",
-            .hash = "httpz-0.0.0-PNVzrNVOBwDlxyffzwONpI9j9dYqKWXxopU1ZCLt4C09",
+            .url = "git+https://github.com/karlseguin/http.zig?ref=master#e8272bfd5727aade0dcee3e2aba6c50f57c374b6",
+            .hash = "httpz-0.0.0-PNVzrNAXCQDHb-rRH2jq07A3Ekv3GS6XOTkiqZJtKeqv",
         },
         .zmpl = .{
-            .url = "git+https://github.com/Kalelzar/zmpl#6680cd0b64d88483929cc7426bb382ab8a834532",
-            .hash = "zmpl-0.0.1-SYFGBvCpAwBMy-Jq3m0JmYDjSUao_nxygGiePASA-SJj",
+            .url = "git+https://github.com/Kalelzar/zmpl#143dab1ea6b137428aeadc3ffebecd82b8b549b6",
+            .hash = "zmpl-0.0.1-SYFGBik4DABJrfEpLzXFH7Sw84UlBsEshkuRhCSvwMrT",
         },
     },
     .paths = .{
