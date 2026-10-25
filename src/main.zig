@@ -30,7 +30,6 @@ const sqlite = @import("kw-sqlite");
 const auth_oidc = @import("kw-auth-oidc");
 const client = @import("kw-http-client");
 const kw_config = @import("kw-config");
-const httpz = @import("httpz");
 
 const build_options = @import("build_options");
 

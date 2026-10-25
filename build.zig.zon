@@ -70,10 +70,6 @@
         .kw_auth_oidc = .{
             .path = "packages/auth-oidc",
         },
-        .httpz = .{
-            .url = "git+https://github.com/karlseguin/http.zig?ref=master#e8272bfd5727aade0dcee3e2aba6c50f57c374b6",
-            .hash = "httpz-0.0.0-PNVzrNAXCQDHb-rRH2jq07A3Ekv3GS6XOTkiqZJtKeqv",
-        },
         .zmpl = .{
             .url = "git+https://github.com/Kalelzar/zmpl#fa6d646a6871f08e487a1a1657ab772c7d3a1c5a",
             .hash = "zmpl-0.0.1-SYFGBg05DAAuCesq90tOMkDBbBM1MJT_6HxW_DgmmkGH",

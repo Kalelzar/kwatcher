@@ -67,9 +67,6 @@ fn wireApp(
     const kw_auth_oidc = b.dependency("kw_auth_oidc", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).module("kw-auth-oidc");
     const kw_http_client = b.dependency("kw_http_client", .{ .metrics = include_metrics, .target = target, .optimize = optimize }).module("kw-http-client");
 
-    // 3rd Party:
-    const httpz = b.dependency("httpz", .{ .target = target, .optimize = optimize }).module("httpz");
-
     // The `build_options` module (currently just the `ui` flag) — main.zig gates
     // all introspection wiring on it.
     app.addImport("build_options", build_opts_mod);
@@ -154,7 +151,6 @@ fn wireApp(
     app.addImport("kw-sqlite", kw_sqlite);
     app.addImport("kw-auth-oidc", kw_auth_oidc);
     app.addImport("kw-http-client", kw_http_client);
-    app.addImport("httpz", httpz);
 
     return app;
 }
